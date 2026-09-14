@@ -45,6 +45,7 @@ namespace AlwaysFaithful.Prototype
         private LineRenderer occupiedHexRing;
         private bool unitMoving;
         private bool automatedCapture;
+        private bool automatedMovementRegression;
 
         private const int PlatoonMovementPoints = 4;
 
@@ -59,6 +60,7 @@ namespace AlwaysFaithful.Prototype
         {
             Application.runInBackground = true;
             automatedCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-path=", StringComparison.Ordinal));
+            automatedMovementRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--movement-regression") >= 0;
             LoadGeography();
             BuildLightingAndCamera();
             BuildCommandTable();
@@ -67,12 +69,13 @@ namespace AlwaysFaithful.Prototype
             SelectUnit();
             if (automatedCapture) DisplayCapturePath();
             CompleteSmokeTestWhenRequested();
+            if (automatedMovementRegression) StartCoroutine(RunMovementRegression());
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
         private void Update()
         {
-            if (automatedCapture) return;
+            if (automatedCapture || automatedMovementRegression) return;
             UpdateCamera();
             UpdatePointer();
         }
@@ -274,28 +277,45 @@ namespace AlwaysFaithful.Prototype
 
         private void UpdatePointer()
         {
-            if (mapCamera == null) return;
+            // Do not let hover bookkeeping clear the committed route while its
+            // movement coroutine is animating the counter.
+            if (mapCamera == null || unitMoving) return;
+            bool rightClick = Input.GetMouseButtonDown(1);
             Ray ray = mapCamera.ScreenPointToRay(Input.mousePosition);
             HexCellView nextHover = null;
             if (Physics.Raycast(ray, out RaycastHit hit, 100f))
             {
                 UnitCounterView pointedUnit = hit.collider.GetComponentInParent<UnitCounterView>();
                 nextHover = hit.collider.GetComponentInParent<HexCellView>();
-                if (!unitMoving && Input.GetMouseButtonDown(0))
+                if (Input.GetMouseButtonDown(0))
                 {
                     if (pointedUnit != null) SelectUnit();
                     else if (nextHover != null) SelectCell(nextHover);
                 }
-                if (!unitMoving && Input.GetMouseButtonDown(1) && pointedUnit == null && nextHover != null &&
-                    unit.IsSelected && reachable.ContainsKey(nextHover.Coord))
-                    StartCoroutine(MoveUnit(nextHover.Coord));
+                if (rightClick)
+                {
+                    string target = pointedUnit != null ? unit.UnitName : nextHover != null ? nextHover.Coord.ToString() : hit.collider.name;
+                    Debug.Log($"ALWAYS_FAITHFUL_RMB target={target} selected={unit.IsSelected}");
+                    if (pointedUnit == null && nextHover != null && TryIssueMove(nextHover.Coord)) return;
+                }
             }
+            else if (rightClick) Debug.Log($"ALWAYS_FAITHFUL_RMB target=miss pointer={Input.mousePosition}");
 
             if (nextHover == hoveredCell) return;
             if (hoveredCell != null) hoveredCell.SetHighlighted(false);
             hoveredCell = nextHover;
             if (hoveredCell != null) hoveredCell.SetHighlighted(true);
             PreviewMovementPath(hoveredCell);
+        }
+
+        private bool TryIssueMove(HexCoord destination)
+        {
+            if (unitMoving || !unit.IsSelected || !reachable.ContainsKey(destination)) return false;
+            List<HexCoord> path = MovementPlanner.FindPath(board, unit.Position, destination, PlatoonMovementPoints);
+            if (path.Count < 2) return false;
+            Debug.Log($"ALWAYS_FAITHFUL_MOVE_ACCEPTED from={unit.Position} to={destination} steps={path.Count - 1}");
+            StartCoroutine(MoveUnit(destination, path));
+            return true;
         }
 
         private void SelectUnit()
@@ -375,10 +395,8 @@ namespace AlwaysFaithful.Prototype
             if (pathLine != null) pathLine.enabled = false;
         }
 
-        private IEnumerator MoveUnit(HexCoord destination)
+        private IEnumerator MoveUnit(HexCoord destination, List<HexCoord> path)
         {
-            List<HexCoord> path = MovementPlanner.FindPath(board, unit.Position, destination, PlatoonMovementPoints);
-            if (path.Count < 2) yield break;
             unitMoving = true;
             ClearReachable();
             DisplayMovementPath(path);
@@ -400,6 +418,47 @@ namespace AlwaysFaithful.Prototype
             ClearPreviewPath();
             unitMoving = false;
             RefreshReachable();
+            Debug.Log($"ALWAYS_FAITHFUL_MOVE_COMPLETED hex={unit.Position} world={unit.transform.position}");
+        }
+
+        private IEnumerator RunMovementRegression()
+        {
+            // Exercise the same order-acceptance and animation path used by RMB,
+            // then prove both model and rendered counter actually changed.
+            yield return null;
+            SelectUnit();
+            HexCoord origin = unit.Position;
+            Vector3 originWorld = unit.transform.position;
+            HexCoord destination = origin;
+            int greatestCost = -1;
+            foreach (KeyValuePair<HexCoord, int> pair in reachable)
+            {
+                if (pair.Key.Equals(origin) || pair.Value <= greatestCost) continue;
+                destination = pair.Key;
+                greatestCost = pair.Value;
+            }
+            if (destination.Equals(origin) || !TryIssueMove(destination))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_MOVEMENT_REGRESSION_FAILED order origin={origin} destination={destination}");
+                Application.Quit(1);
+                yield break;
+            }
+            float deadline = Time.realtimeSinceStartup + 10f;
+            bool routePreserved = pathLine.enabled && previewPath.Count > 1 && pathMarkers.Count > 0;
+            while (unitMoving && Time.realtimeSinceStartup < deadline)
+            {
+                routePreserved &= pathLine.enabled && previewPath.Count > 1 && pathMarkers.Count > 0;
+                yield return null;
+            }
+            float travelled = Vector3.Distance(originWorld, unit.transform.position);
+            if (unitMoving || !routePreserved || !unit.Position.Equals(destination) || travelled < .5f)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_MOVEMENT_REGRESSION_FAILED completion moving={unitMoving} routePreserved={routePreserved} origin={origin} actual={unit.Position} expected={destination} travelled={travelled:0.000}");
+                Application.Quit(1);
+                yield break;
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_MOVEMENT_REGRESSION_OK from={origin} to={destination} travelled={travelled:0.000}");
+            Application.Quit(0);
         }
 
         private void DisplayCapturePath()
