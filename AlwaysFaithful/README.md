@@ -4,7 +4,7 @@ Standalone 2030 near-future USMC tactical game and tactical-resolution module fo
 
 ## Current prototype
 
-The first Unity spike contains a compact 250 m flat-top hex board and one selectable USMC rifle-platoon counter. The platoon begins unselected. Opening its order menu and choosing Move reveals its legal four-AP movement area; hovering a legal destination previews the deterministic least-cost path, and left-clicking confirms the move.
+The prototype now presents the complete island of Taiwan as a 64×104 whole-island operational board (6,656 hexes at roughly 4 km spacing), using the same Natural Earth coastline and NOAA ETOPO 2022 pipeline as Sea of Uncertainty. One selectable USMC rifle-platoon counter exercises the order workflow. The platoon begins unselected. Opening its order menu and choosing Move reveals its legal four-AP movement area; hovering a legal destination previews the deterministic least-cost path, and left-clicking confirms the move.
 
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
@@ -21,8 +21,10 @@ Controls:
 
 ## Geography strategy
 
-The prototype carries the same cropped Natural Earth coastline and NOAA ETOPO 2022 source assets used by Sea of Uncertainty so the games can share geographic provenance and a related command-map palette.
+The prototype carries a full-Taiwan crop from the same Natural Earth coastline and NOAA ETOPO 2022 source pipeline used by Sea of Uncertainty so the games share geographic provenance and a related command-map palette.
 
-The current ETOPO bake is two arc-minutes (roughly 3–4 km sample spacing) and the coastline is simplified for an operational map. These resources are visual-reference data only at Always Faithful's initial 250 m tactical scale. They must not determine authoritative tactical cover, movement, or LOS. A later importer will use higher-resolution DEM and vector data behind the same geography interface.
+The current ETOPO bake is two arc-minutes (roughly 3–4 km sample spacing) and the coastline is simplified for an operational map. These resources drive presentation and broad terrain classes on the whole-island layer; they are not authoritative sources for tactical cover or LOS. Sea of Uncertainty engagements will later open localized 250 m tactical boards backed by higher-resolution DEM and vector data.
+
+Regenerate the checked-in Taiwan resources with `tools/build-taiwan-coastline.cjs` and `tools/build-taiwan-elevation.ps1`.
 
 See `Assets/Resources/Geography/NOTICE.md` for attribution.

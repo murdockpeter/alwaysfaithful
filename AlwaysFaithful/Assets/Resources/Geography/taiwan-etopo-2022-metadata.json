@@ -1,0 +1,18 @@
+{
+    "title":  "Taiwan ETOPO 2022 two-arc-minute elevation subset",
+    "source":  "NOAA National Centers for Environmental Information, ETOPO 2022 15 Arc-Second Global Relief Model",
+    "doi":  "10.25921/fd45-gt74",
+    "sourceUrl":  "https://coastwatch.pfeg.noaa.gov/erddap/griddap/ETOPO_2022_v1_15s.csv0?z[(21.7):8:(25.4)][(119.75):8:(122.2)]",
+    "accessedUtc":  "2026-09-14",
+    "stride":  8,
+    "sourceResolutionArcSeconds":  15,
+    "bakedResolutionArcSeconds":  120,
+    "width":  74,
+    "height":  112,
+    "west":  119.75208333333333,
+    "east":  122.18541666666667,
+    "south":  21.697916666666668,
+    "north":  25.397916666666667,
+    "sampleCount":  8288,
+    "license":  "United States government work; source attribution retained. Not for navigation."
+}

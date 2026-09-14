@@ -254,6 +254,7 @@ Explicitly outside the vertical slice:
 
 - [ ] Complete the decisions in Section 4.
 - [x] Start a Unity 6000.2.12f1 project with a 250 m hex-map and single USMC unit-counter interaction spike.
+- [x] Add a 64×104 full-Taiwan operational overview using the shared Sea of Uncertainty Natural Earth/NOAA ETOPO pipeline as the strategic-to-tactical staging layer.
 - [ ] Extend the prototype through LOS, pathfinding, counter readability testing, stacking, and reaction interruption.
 - [ ] Replace the inherited operational-resolution geography preview with a tactical-resolution DEM/vector import while retaining the shared Sea of Uncertainty visual language and attribution pipeline.
 - [ ] Approve the input/output contract draft with the Sea of Uncertainty side.

@@ -5,7 +5,8 @@ namespace AlwaysFaithful.Prototype
 {
     public sealed class HexCellView : MonoBehaviour
     {
-        private Material material;
+        private MeshRenderer meshRenderer;
+        private MaterialPropertyBlock properties;
         private Color baseColor;
         private bool hovered;
         private bool selected;
@@ -17,15 +18,16 @@ namespace AlwaysFaithful.Prototype
         public float ElevationMetres { get; private set; }
         public TacticalTerrain Terrain { get; private set; }
 
-        public void Initialize(HexCoord coord, TacticalTerrain terrain, float elevationMetres, Material cellMaterial, Color color)
+        public void Initialize(HexCoord coord, TacticalTerrain terrain, float elevationMetres, MeshRenderer renderer, Color color)
         {
             Coord = coord;
             Terrain = terrain;
             IsLand = terrain != TacticalTerrain.Water;
             ElevationMetres = elevationMetres;
-            material = cellMaterial;
+            meshRenderer = renderer;
+            properties = new MaterialPropertyBlock();
             baseColor = color;
-            material.color = color;
+            RefreshColor();
         }
 
         public void SetHighlighted(bool highlighted)
@@ -54,13 +56,14 @@ namespace AlwaysFaithful.Prototype
 
         private void RefreshColor()
         {
-            if (material == null) return;
+            if (meshRenderer == null) return;
             Color color = baseColor;
             if (reachable) color = Color.Lerp(color, new Color(.20f, .64f, .55f), .38f);
             if (path) color = Color.Lerp(color, new Color(1f, .69f, .16f), .78f);
             if (hovered) color = Color.Lerp(color, Color.white, .28f);
             if (selected) color = Color.Lerp(color, new Color(1f, .78f, .25f), .48f);
-            material.color = color;
+            properties.SetColor("_Color", color);
+            meshRenderer.SetPropertyBlock(properties);
         }
     }
 }

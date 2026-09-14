@@ -10,20 +10,20 @@ namespace AlwaysFaithful.Prototype
 {
     public sealed class AlwaysFaithfulPrototype : MonoBehaviour
     {
-        private const int Width = 14;
-        private const int Height = 10;
+        private const int Width = 64;
+        private const int Height = 104;
         private const float HexRadius = 1f;
-        private const float TacticalHexMetres = 250f;
+        private const float MapHexKilometres = 4f;
         private const float CellSurfaceOffset = .10f;
         private const float CounterClearance = .04f;
         private const float PathClearance = .18f;
 
-        // A visual-reference crop on the northeast Luzon coastline. The inherited
-        // operational datasets are intentionally not authoritative tactical terrain.
-        private const double DemoWest = 122.05;
-        private const double DemoEast = 122.31;
-        private const double DemoSouth = 18.32;
-        private const double DemoNorth = 18.55;
+        // Whole-island operational layer shared with Sea of Uncertainty. Tactical
+        // engagements will resolve into separate 250 m local maps in a later pass.
+        private const double DemoWest = 119.75;
+        private const double DemoEast = 122.20;
+        private const double DemoSouth = 21.70;
+        private const double DemoNorth = 25.40;
 
         private readonly Dictionary<HexCoord, HexCellView> cells = new Dictionary<HexCoord, HexCellView>();
         private readonly Dictionary<HexCoord, TacticalCell> board = new Dictionary<HexCoord, TacticalCell>();
@@ -35,7 +35,7 @@ namespace AlwaysFaithful.Prototype
         private HexCellView selectedCell;
         private HexCellView hoveredCell;
         private Vector3 cameraFocus;
-        private float cameraDistance = 18f;
+        private float cameraDistance = 190f;
         private GeographicElevationGrid elevation;
         private CoastlineData coastline;
         private GUIStyle titleStyle;
@@ -49,6 +49,9 @@ namespace AlwaysFaithful.Prototype
         private bool counterMenuOpen;
         private bool movePlanning;
         private Rect counterMenuRect;
+        private int landCellCount;
+        private int waterCellCount;
+        private float maximumLandElevation;
 
         private const int PlatoonMovementPoints = 4;
 
@@ -69,6 +72,7 @@ namespace AlwaysFaithful.Prototype
             BuildCommandTable();
             BuildBoard();
             BuildUnit();
+            ApplyCamera();
             if (automatedCapture)
             {
                 BeginMovePlanning();
@@ -88,9 +92,9 @@ namespace AlwaysFaithful.Prototype
 
         private void LoadGeography()
         {
-            TextAsset elevationAsset = Resources.Load<TextAsset>("Geography/luzon-strait-etopo-2022");
+            TextAsset elevationAsset = Resources.Load<TextAsset>("Geography/taiwan-etopo-2022");
             if (!GeographicElevationGrid.TryLoad(elevationAsset, out elevation, out string error)) Debug.LogWarning(error);
-            coastline = CoastlineData.Load(Resources.Load<TextAsset>("Geography/luzon-strait-coastline"));
+            coastline = CoastlineData.Load(Resources.Load<TextAsset>("Geography/taiwan-coastline"));
         }
 
         private void BuildLightingAndCamera()
@@ -99,8 +103,8 @@ namespace AlwaysFaithful.Prototype
             RenderSettings.fog = true;
             RenderSettings.fogColor = new Color(.15f, .22f, .23f);
             RenderSettings.fogMode = FogMode.Linear;
-            RenderSettings.fogStartDistance = 22f;
-            RenderSettings.fogEndDistance = 45f;
+            RenderSettings.fogStartDistance = 210f;
+            RenderSettings.fogEndDistance = 520f;
 
             GameObject lightObject = new GameObject("Command Table Sun");
             Light sun = lightObject.AddComponent<Light>();
@@ -121,7 +125,7 @@ namespace AlwaysFaithful.Prototype
             mapCamera.clearFlags = CameraClearFlags.SolidColor;
             mapCamera.backgroundColor = new Color(.055f, .09f, .10f);
             mapCamera.nearClipPlane = .1f;
-            mapCamera.farClipPlane = 100f;
+            mapCamera.farClipPlane = 700f;
             mapCamera.fieldOfView = 38f;
             cameraFocus = HexToWorld(new HexCoord(Width / 2, Height / 2));
             ApplyCamera();
@@ -142,6 +146,8 @@ namespace AlwaysFaithful.Prototype
 
         private void BuildBoard()
         {
+            Mesh sharedHexMesh = CreateHexMesh(HexRadius * .99f, .10f);
+            Material sharedHexMaterial = NewMaterial(Color.white);
             for (int q = 0; q < Width; q++)
             {
                 for (int r = 0; r < Height; r++)
@@ -153,19 +159,23 @@ namespace AlwaysFaithful.Prototype
                     float measuredElevation = elevation != null ? elevation.SampleMetres(longitude, latitude) : 0f;
                     bool isLand = coastline == null || coastline.ContainsLand(longitude, latitude);
                     TacticalTerrain terrain = ClassifyTerrain(isLand, measuredElevation);
-                    center.y = isLand ? Mathf.Clamp(measuredElevation, 0f, 1800f) * .00032f : 0f;
+                    if (isLand)
+                    {
+                        landCellCount++;
+                        maximumLandElevation = Mathf.Max(maximumLandElevation, measuredElevation);
+                    }
+                    else waterCellCount++;
+                    center.y = isLand ? Mathf.Clamp(measuredElevation, 0f, 4000f) * .00072f : 0f;
 
                     GameObject cellObject = new GameObject("Hex " + coord);
                     cellObject.transform.SetParent(transform, false);
                     cellObject.transform.position = center;
-                    Mesh mesh = CreateHexMesh(HexRadius * .965f, .10f);
-                    cellObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                    cellObject.AddComponent<MeshFilter>().sharedMesh = sharedHexMesh;
                     var renderer = cellObject.AddComponent<MeshRenderer>();
-                    Material material = NewMaterial(isLand ? LandColor(measuredElevation) : WaterColor(measuredElevation));
-                    renderer.sharedMaterial = material;
-                    cellObject.AddComponent<MeshCollider>().sharedMesh = mesh;
+                    renderer.sharedMaterial = sharedHexMaterial;
+                    Color color = isLand ? LandColor(measuredElevation) : WaterColor(measuredElevation);
                     HexCellView view = cellObject.AddComponent<HexCellView>();
-                    view.Initialize(coord, terrain, measuredElevation, material, material.color);
+                    view.Initialize(coord, terrain, measuredElevation, renderer, color);
                     cells.Add(coord, view);
                     board.Add(coord, new TacticalCell(coord, terrain));
                 }
@@ -173,11 +183,12 @@ namespace AlwaysFaithful.Prototype
             BuildCoastAccents();
             BuildPathLine();
             BuildOccupiedHexRing();
+            Debug.Log($"Built Taiwan whole-island board: {cells.Count} hexes, {landCellCount} land, {waterCellCount} water, maximum sampled land elevation {maximumLandElevation:0} m.");
         }
 
         private void BuildUnit()
         {
-            HexCoord start = FindDeploymentHex(new HexCoord(Width / 2, Height / 3));
+            HexCoord start = FindDeploymentHex(new HexCoord(Width / 3, Height / 4));
             Vector3 position = HexToWorld(start);
             if (cells.TryGetValue(start, out HexCellView cell)) position.y = cell.transform.position.y;
 
@@ -231,9 +242,10 @@ namespace AlwaysFaithful.Prototype
         private void CompleteSmokeTestWhenRequested()
         {
             if (Array.IndexOf(Environment.GetCommandLineArgs(), "--smoke-test") < 0) return;
-            if (cells.Count != Width * Height || board.Count != Width * Height || unit == null || elevation == null || coastline == null)
+            if (cells.Count != Width * Height || board.Count != Width * Height || unit == null || elevation == null || coastline == null ||
+                landCellCount < 1000 || waterCellCount < 1000 || maximumLandElevation < 3000f)
             {
-                Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED cells={cells.Count}, board={board.Count}, unit={unit != null}, elevation={elevation != null}, coastline={coastline != null}");
+                Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED cells={cells.Count}, board={board.Count}, land={landCellCount}, water={waterCellCount}, maximumElevation={maximumLandElevation:0}, unit={unit != null}, elevation={elevation != null}, coastline={coastline != null}");
                 Application.Quit(1);
                 return;
             }
@@ -272,7 +284,7 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 return;
             }
-            Debug.Log($"ALWAYS_FAITHFUL_SMOKE_OK cells={cells.Count}, reachable={reachable.Count}, pathMarkers={pathMarkers.Count}, unit={unit.UnitName}, hex={unit.Position}, scale={TacticalHexMetres:0}m");
+            Debug.Log($"ALWAYS_FAITHFUL_SMOKE_OK cells={cells.Count}, land={landCellCount}, water={waterCellCount}, maximumElevation={maximumLandElevation:0}m, reachable={reachable.Count}, pathMarkers={pathMarkers.Count}, unit={unit.UnitName}, hex={unit.Position}, scale={MapHexKilometres:0.#}km");
             Application.Quit(0);
         }
 
@@ -307,9 +319,10 @@ namespace AlwaysFaithful.Prototype
             if (mapCamera == null || unitMoving) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
             if (counterMenuOpen && counterMenuRect.Contains(guiPointer)) return;
+            bool leftClick = Input.GetMouseButtonDown(0);
             bool rightClick = Input.GetMouseButtonDown(1);
             Ray ray = mapCamera.ScreenPointToRay(Input.mousePosition);
-            HexCellView nextHover = PickHexAtScreenPoint(Input.mousePosition);
+            HexCellView nextHover = movePlanning || leftClick ? PickHexAtScreenPoint(Input.mousePosition) : null;
             UnitCounterView pointedUnit = null;
             float closestUnitHit = float.MaxValue;
             foreach (RaycastHit hit in Physics.RaycastAll(ray, 100f))
@@ -322,7 +335,7 @@ namespace AlwaysFaithful.Prototype
 
             if (pointedUnit != null || nextHover != null)
             {
-                if (Input.GetMouseButtonDown(0))
+                if (leftClick)
                 {
                     if (movePlanning && pointedUnit == null && nextHover != null && TryIssueMove(nextHover.Coord)) return;
                     if (pointedUnit == null && nextHover != null) SelectCell(nextHover);
@@ -359,8 +372,10 @@ namespace AlwaysFaithful.Prototype
             // a single physics ray oscillate between a hex and empty space over relief.
             HexCellView best = null;
             float bestDistance = float.MaxValue;
-            foreach (HexCellView cell in cells.Values)
+            IEnumerable<HexCoord> candidates = movePlanning && reachable.Count > 0 ? reachable.Keys : cells.Keys;
+            foreach (HexCoord coord in candidates)
             {
+                HexCellView cell = cells[coord];
                 Vector3 surface = cell.transform.position + Vector3.up * CellSurfaceOffset;
                 Vector3 center = mapCamera.WorldToScreenPoint(surface);
                 if (center.z <= 0f) continue;
@@ -637,7 +652,7 @@ namespace AlwaysFaithful.Prototype
 
         private void UpdateCamera()
         {
-            cameraDistance = Mathf.Clamp(cameraDistance - Input.mouseScrollDelta.y * 1.5f, 8f, 28f);
+            cameraDistance = Mathf.Clamp(cameraDistance - Input.mouseScrollDelta.y * Mathf.Max(1.5f, cameraDistance * .08f), 10f, 240f);
             float horizontal = (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow) ? 1f : 0f);
             float vertical = (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow) ? 1f : 0f);
             Vector3 pan = new Vector3(horizontal, 0f, vertical);
@@ -646,7 +661,7 @@ namespace AlwaysFaithful.Prototype
             if (Input.GetKeyDown(KeyCode.R))
             {
                 cameraFocus = HexToWorld(new HexCoord(Width / 2, Height / 2));
-                cameraDistance = 18f;
+                cameraDistance = 190f;
             }
             ApplyCamera();
         }
@@ -654,8 +669,12 @@ namespace AlwaysFaithful.Prototype
         private void ApplyCamera()
         {
             if (mapCamera == null) return;
-            mapCamera.transform.position = cameraFocus + new Vector3(0f, cameraDistance * 1.08f, -cameraDistance * .92f);
+            float overview = Mathf.InverseLerp(42f, 190f, cameraDistance);
+            float height = Mathf.Lerp(1.08f, 1.48f, overview);
+            float setback = Mathf.Lerp(.92f, .34f, overview);
+            mapCamera.transform.position = cameraFocus + new Vector3(0f, cameraDistance * height, -cameraDistance * setback);
             mapCamera.transform.LookAt(cameraFocus);
+            if (unit != null) unit.transform.localScale = Vector3.one * Mathf.Clamp(cameraDistance / 52f, 1f, 3.2f);
         }
 
         private void OnGUI()
@@ -663,11 +682,11 @@ namespace AlwaysFaithful.Prototype
             EnsureStyles();
             GUI.Box(new Rect(22f, 20f, 330f, 150f), GUIContent.none);
             GUI.Label(new Rect(40f, 34f, 290f, 32f), "ALWAYS FAITHFUL", titleStyle);
-            GUI.Label(new Rect(40f, 66f, 290f, 24f), "2030 TACTICAL INTERACTION SPIKE", badgeStyle);
+            GUI.Label(new Rect(40f, 66f, 290f, 24f), "TAIWAN 2030  •  WHOLE-ISLAND MAP", badgeStyle);
             string selection = counterMenuOpen
                 ? "UNIT ORDERS  •  USMC Rifle Platoon\nChoose an order from the counter menu."
                 : movePlanning
-                ? "MOVE ORDER  •  USMC Rifle Platoon\nHex: " + unit.Position + "  •  4 AP  •  " + TacticalHexMetres + " m/hex" +
+                ? "MOVE ORDER  •  USMC Rifle Platoon\nHex: " + unit.Position + "  •  4 AP  •  " + MapHexKilometres + " km/hex" +
                   (hoveredCell != null && reachable.TryGetValue(hoveredCell.Coord, out int moveCost) && !hoveredCell.Coord.Equals(unit.Position)
                       ? "\nLMB CONFIRM  •  Cost " + moveCost + " AP"
                       : "\nHover a highlighted hex; LMB confirms")
@@ -749,8 +768,12 @@ namespace AlwaysFaithful.Prototype
 
         private static Color LandColor(float metres)
         {
-            float height = Mathf.InverseLerp(0f, 1600f, Mathf.Max(0f, metres));
-            return Color.Lerp(new Color(.26f, .34f, .22f), new Color(.43f, .42f, .31f), height);
+            float height = Mathf.InverseLerp(0f, 3900f, Mathf.Max(0f, metres));
+            if (height < .28f)
+                return Color.Lerp(new Color(.20f, .34f, .21f), new Color(.35f, .43f, .24f), height / .28f);
+            if (height < .68f)
+                return Color.Lerp(new Color(.35f, .43f, .24f), new Color(.46f, .39f, .29f), (height - .28f) / .40f);
+            return Color.Lerp(new Color(.46f, .39f, .29f), new Color(.70f, .67f, .57f), (height - .68f) / .32f);
         }
 
         private static Color WaterColor(float metres)

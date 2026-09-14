@@ -6,14 +6,14 @@
 
 The initial prototype provides:
 
-- a 14×10 flat-top tactical hex board at 250 metres per hex;
+- a 64×104 full-Taiwan operational board with 6,656 flat-top hexes at roughly 4 km spacing;
 - one selectable USMC rifle-platoon counter;
 - deterministic terrain movement costs and least-cost pathfinding;
 - legal-movement and hover-path previews;
 - click-to-move animation;
-- a visual-reference integration with the same Natural Earth and NOAA ETOPO source family used by Sea of Uncertainty.
+- a full-island terrain integration using the same Natural Earth and NOAA ETOPO source pipeline as Sea of Uncertainty.
 
-The inherited operational geography is presentation-only at this tactical scale. Authoritative movement and future line-of-sight rules remain hex data and will use higher-resolution tactical terrain sources.
+The whole-island geography supports operational presentation and broad terrain classes. Authoritative tactical movement and future line-of-sight rules will use higher-resolution local terrain sources when Sea of Uncertainty opens a 250 m engagement map.
 
 ## Open the project
 
