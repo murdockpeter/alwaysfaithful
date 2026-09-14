@@ -4,15 +4,16 @@ Standalone 2030 near-future USMC tactical game and tactical-resolution module fo
 
 ## Current prototype
 
-The first Unity spike contains a compact 250 m flat-top hex board and one selectable USMC rifle-platoon counter. Selecting the platoon reveals its legal four-AP movement area; hovering a legal destination previews the deterministic least-cost path, and clicking moves the counter.
+The first Unity spike contains a compact 250 m flat-top hex board and one selectable USMC rifle-platoon counter. The platoon begins unselected. Opening its order menu and choosing Move reveals its legal four-AP movement area; hovering a legal destination previews the deterministic least-cost path, and left-clicking confirms the move.
 
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
 
-- Left click the counter to show legal movement destinations.
+- Right click the counter to open its unit-order menu.
+- Choose **Move** to show legal movement destinations.
 - Hover a highlighted destination to preview its least-cost path.
-- Right click a highlighted destination to move.
+- Left click a highlighted destination to confirm the move.
 - Left click another hex to inspect its terrain and movement cost.
 - Mouse wheel zooms.
 - Middle-mouse drag or WASD pans.
