@@ -257,6 +257,12 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 return;
             }
+            if (!ValidateMovementPicking(out string pickFailure))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED screen picking {pickFailure}");
+                Application.Quit(1);
+                return;
+            }
             DisplayCapturePath();
             bool overlaysIgnorePointer = pathMarkers.Count > 0;
             foreach (GameObject marker in pathMarkers) overlaysIgnorePointer &= marker.layer == LayerMask.NameToLayer("Ignore Raycast");
@@ -303,11 +309,19 @@ namespace AlwaysFaithful.Prototype
             if (counterMenuOpen && counterMenuRect.Contains(guiPointer)) return;
             bool rightClick = Input.GetMouseButtonDown(1);
             Ray ray = mapCamera.ScreenPointToRay(Input.mousePosition);
-            HexCellView nextHover = null;
-            if (Physics.Raycast(ray, out RaycastHit hit, 100f))
+            HexCellView nextHover = PickHexAtScreenPoint(Input.mousePosition);
+            UnitCounterView pointedUnit = null;
+            float closestUnitHit = float.MaxValue;
+            foreach (RaycastHit hit in Physics.RaycastAll(ray, 100f))
             {
-                UnitCounterView pointedUnit = hit.collider.GetComponentInParent<UnitCounterView>();
-                nextHover = hit.collider.GetComponentInParent<HexCellView>();
+                UnitCounterView candidate = hit.collider.GetComponentInParent<UnitCounterView>();
+                if (candidate == null || hit.distance >= closestUnitHit) continue;
+                pointedUnit = candidate;
+                closestUnitHit = hit.distance;
+            }
+
+            if (pointedUnit != null || nextHover != null)
+            {
                 if (Input.GetMouseButtonDown(0))
                 {
                     if (movePlanning && pointedUnit == null && nextHover != null && TryIssueMove(nextHover.Coord)) return;
@@ -315,7 +329,7 @@ namespace AlwaysFaithful.Prototype
                 }
                 if (rightClick)
                 {
-                    string target = pointedUnit != null ? unit.UnitName : nextHover != null ? nextHover.Coord.ToString() : hit.collider.name;
+                    string target = pointedUnit != null ? unit.UnitName : nextHover.Coord.ToString();
                     Debug.Log($"ALWAYS_FAITHFUL_RMB target={target} selected={unit.IsSelected}");
                     if (pointedUnit != null)
                     {
@@ -336,6 +350,58 @@ namespace AlwaysFaithful.Prototype
             hoveredCell = nextHover;
             if (hoveredCell != null) hoveredCell.SetHighlighted(true);
             PreviewMovementPath(hoveredCell);
+        }
+
+        private HexCellView PickHexAtScreenPoint(Vector2 screenPoint)
+        {
+            // Visual picking is deliberately independent of the raised mesh colliders.
+            // Those colliders have small presentation gaps and exposed sides, which made
+            // a single physics ray oscillate between a hex and empty space over relief.
+            HexCellView best = null;
+            float bestDistance = float.MaxValue;
+            foreach (HexCellView cell in cells.Values)
+            {
+                Vector3 surface = cell.transform.position + Vector3.up * CellSurfaceOffset;
+                Vector3 center = mapCamera.WorldToScreenPoint(surface);
+                if (center.z <= 0f) continue;
+                Vector3 edgeX = mapCamera.WorldToScreenPoint(surface + Vector3.right * HexRadius);
+                Vector3 edgeZ = mapCamera.WorldToScreenPoint(surface + Vector3.forward * HexRadius);
+                float pickRadius = Mathf.Max(
+                    Vector2.Distance(center, edgeX),
+                    Vector2.Distance(center, edgeZ)) * 1.04f;
+                float distance = Vector2.SqrMagnitude(screenPoint - new Vector2(center.x, center.y));
+                if (distance > pickRadius * pickRadius || distance >= bestDistance) continue;
+                best = cell;
+                bestDistance = distance;
+            }
+            return best;
+        }
+
+        private bool ValidateMovementPicking(out string failure)
+        {
+            Vector3[] samples =
+            {
+                Vector3.zero,
+                Vector3.right * .28f,
+                Vector3.left * .28f,
+                Vector3.forward * .28f,
+                Vector3.back * .28f
+            };
+            foreach (HexCoord coord in reachable.Keys)
+            {
+                HexCellView expected = cells[coord];
+                Vector3 surface = expected.transform.position + Vector3.up * CellSurfaceOffset;
+                foreach (Vector3 offset in samples)
+                {
+                    Vector3 screen = mapCamera.WorldToScreenPoint(surface + offset);
+                    HexCellView actual = PickHexAtScreenPoint(new Vector2(screen.x, screen.y));
+                    if (actual == expected) continue;
+                    failure = $"expected={expected.Coord} actual={(actual == null ? "none" : actual.Coord.ToString())} offset={offset}";
+                    return false;
+                }
+            }
+            failure = null;
+            return true;
         }
 
         private bool TryIssueMove(HexCoord destination)
@@ -494,6 +560,12 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
             BeginMovePlanning();
+            if (!ValidateMovementPicking(out string pickFailure))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_MOVEMENT_REGRESSION_FAILED screen picking {pickFailure}");
+                Application.Quit(1);
+                yield break;
+            }
             HexCoord origin = unit.Position;
             Vector3 originWorld = unit.transform.position;
             HexCoord destination = origin;
