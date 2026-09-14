@@ -1,0 +1,545 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using AlwaysFaithful.Core;
+using AlwaysFaithful.Geography;
+using UnityEngine;
+
+namespace AlwaysFaithful.Prototype
+{
+    public sealed class AlwaysFaithfulPrototype : MonoBehaviour
+    {
+        private const int Width = 14;
+        private const int Height = 10;
+        private const float HexRadius = 1f;
+        private const float TacticalHexMetres = 250f;
+
+        // A visual-reference crop on the northeast Luzon coastline. The inherited
+        // operational datasets are intentionally not authoritative tactical terrain.
+        private const double DemoWest = 122.05;
+        private const double DemoEast = 122.31;
+        private const double DemoSouth = 18.32;
+        private const double DemoNorth = 18.55;
+
+        private readonly Dictionary<HexCoord, HexCellView> cells = new Dictionary<HexCoord, HexCellView>();
+        private readonly Dictionary<HexCoord, TacticalCell> board = new Dictionary<HexCoord, TacticalCell>();
+        private readonly Dictionary<HexCoord, int> reachable = new Dictionary<HexCoord, int>();
+        private readonly List<HexCoord> previewPath = new List<HexCoord>();
+        private Camera mapCamera;
+        private UnitCounterView unit;
+        private HexCellView selectedCell;
+        private HexCellView hoveredCell;
+        private Vector3 cameraFocus;
+        private float cameraDistance = 18f;
+        private GeographicElevationGrid elevation;
+        private CoastlineData coastline;
+        private GUIStyle titleStyle;
+        private GUIStyle bodyStyle;
+        private GUIStyle badgeStyle;
+        private LineRenderer pathLine;
+        private bool unitMoving;
+        private bool automatedCapture;
+
+        private const int PlatoonMovementPoints = 4;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void EnsurePrototype()
+        {
+            if (FindFirstObjectByType<AlwaysFaithfulPrototype>() != null) return;
+            new GameObject("Always Faithful Prototype").AddComponent<AlwaysFaithfulPrototype>();
+        }
+
+        private void Awake()
+        {
+            automatedCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-path=", StringComparison.Ordinal));
+            LoadGeography();
+            BuildLightingAndCamera();
+            BuildCommandTable();
+            BuildBoard();
+            BuildUnit();
+            SelectUnit();
+            CompleteSmokeTestWhenRequested();
+            StartCoroutine(CaptureScreenshotWhenRequested());
+        }
+
+        private void Update()
+        {
+            if (automatedCapture) return;
+            UpdateCamera();
+            UpdatePointer();
+        }
+
+        private void LoadGeography()
+        {
+            TextAsset elevationAsset = Resources.Load<TextAsset>("Geography/luzon-strait-etopo-2022");
+            if (!GeographicElevationGrid.TryLoad(elevationAsset, out elevation, out string error)) Debug.LogWarning(error);
+            coastline = CoastlineData.Load(Resources.Load<TextAsset>("Geography/luzon-strait-coastline"));
+        }
+
+        private void BuildLightingAndCamera()
+        {
+            RenderSettings.ambientLight = new Color(.42f, .46f, .40f);
+            RenderSettings.fog = true;
+            RenderSettings.fogColor = new Color(.15f, .22f, .23f);
+            RenderSettings.fogMode = FogMode.Linear;
+            RenderSettings.fogStartDistance = 22f;
+            RenderSettings.fogEndDistance = 45f;
+
+            GameObject lightObject = new GameObject("Command Table Sun");
+            Light sun = lightObject.AddComponent<Light>();
+            sun.type = LightType.Directional;
+            sun.color = new Color(1f, .93f, .78f);
+            sun.intensity = 1.15f;
+            lightObject.transform.rotation = Quaternion.Euler(48f, -35f, 0f);
+
+            GameObject fillObject = new GameObject("Cool Fill Light");
+            Light fill = fillObject.AddComponent<Light>();
+            fill.type = LightType.Directional;
+            fill.color = new Color(.35f, .56f, .62f);
+            fill.intensity = .38f;
+            fillObject.transform.rotation = Quaternion.Euler(62f, 145f, 0f);
+
+            GameObject cameraObject = new GameObject("Map Camera");
+            mapCamera = cameraObject.AddComponent<Camera>();
+            mapCamera.clearFlags = CameraClearFlags.SolidColor;
+            mapCamera.backgroundColor = new Color(.055f, .09f, .10f);
+            mapCamera.nearClipPlane = .1f;
+            mapCamera.farClipPlane = 100f;
+            mapCamera.fieldOfView = 38f;
+            cameraFocus = HexToWorld(new HexCoord(Width / 2, Height / 2));
+            ApplyCamera();
+        }
+
+        private void BuildCommandTable()
+        {
+            Vector3 first = HexToWorld(new HexCoord(0, 0));
+            Vector3 last = HexToWorld(new HexCoord(Width - 1, Height - 1));
+            GameObject table = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            table.name = "Recessed Command Table";
+            table.transform.SetParent(transform, false);
+            table.transform.position = (first + last) * .5f + Vector3.down * .27f;
+            table.transform.localScale = new Vector3(last.x - first.x + 4f, .42f, last.z - first.z + 4f);
+            table.GetComponent<MeshRenderer>().sharedMaterial = NewMaterial(new Color(.045f, .065f, .062f));
+            Destroy(table.GetComponent<Collider>());
+        }
+
+        private void BuildBoard()
+        {
+            for (int q = 0; q < Width; q++)
+            {
+                for (int r = 0; r < Height; r++)
+                {
+                    var coord = new HexCoord(q, r);
+                    Vector3 center = HexToWorld(coord);
+                    double longitude = Mathf.Lerp((float)DemoWest, (float)DemoEast, q / (float)(Width - 1));
+                    double latitude = Mathf.Lerp((float)DemoSouth, (float)DemoNorth, r / (float)(Height - 1));
+                    float measuredElevation = elevation != null ? elevation.SampleMetres(longitude, latitude) : 0f;
+                    bool isLand = coastline == null || coastline.ContainsLand(longitude, latitude);
+                    TacticalTerrain terrain = ClassifyTerrain(isLand, measuredElevation);
+                    center.y = isLand ? Mathf.Clamp(measuredElevation, 0f, 1800f) * .00032f : 0f;
+
+                    GameObject cellObject = new GameObject("Hex " + coord);
+                    cellObject.transform.SetParent(transform, false);
+                    cellObject.transform.position = center;
+                    Mesh mesh = CreateHexMesh(HexRadius * .965f, .10f);
+                    cellObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                    var renderer = cellObject.AddComponent<MeshRenderer>();
+                    Material material = NewMaterial(isLand ? LandColor(measuredElevation) : WaterColor(measuredElevation));
+                    renderer.sharedMaterial = material;
+                    cellObject.AddComponent<MeshCollider>().sharedMesh = mesh;
+                    HexCellView view = cellObject.AddComponent<HexCellView>();
+                    view.Initialize(coord, terrain, measuredElevation, material, material.color);
+                    cells.Add(coord, view);
+                    board.Add(coord, new TacticalCell(coord, terrain));
+                }
+            }
+            BuildCoastAccents();
+            BuildPathLine();
+        }
+
+        private void BuildUnit()
+        {
+            HexCoord start = new HexCoord(7, 5);
+            Vector3 position = HexToWorld(start);
+            if (cells.TryGetValue(start, out HexCellView cell)) position.y = cell.transform.position.y;
+
+            GameObject counterRoot = new GameObject("USMC Rifle Platoon");
+            counterRoot.transform.SetParent(transform, false);
+            // Counters deliberately float above relief so terrain never hides critical game state.
+            counterRoot.transform.position = position + Vector3.up * .95f;
+            SphereCollider counterCollider = counterRoot.AddComponent<SphereCollider>();
+            counterCollider.radius = .65f;
+            counterCollider.center = Vector3.up * .12f;
+            unit = counterRoot.AddComponent<UnitCounterView>();
+            unit.Initialize("USMC Rifle Platoon", start);
+
+            GameObject baseObject = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            baseObject.name = "Counter Base";
+            baseObject.transform.SetParent(counterRoot.transform, false);
+            baseObject.transform.localPosition = Vector3.up * .10f;
+            baseObject.transform.localScale = new Vector3(.66f, .10f, .66f);
+            baseObject.GetComponent<MeshRenderer>().sharedMaterial = NewMaterial(new Color(.13f, .25f, .20f));
+            Destroy(baseObject.GetComponent<Collider>());
+
+            GameObject face = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            face.name = "Counter Face";
+            face.transform.SetParent(counterRoot.transform, false);
+            face.transform.localPosition = Vector3.up * .23f;
+            face.transform.localScale = new Vector3(.94f, .08f, .68f);
+            face.GetComponent<MeshRenderer>().sharedMaterial = NewMaterial(new Color(.76f, .72f, .55f));
+            Destroy(face.GetComponent<Collider>());
+
+            GameObject symbolObject = new GameObject("Unit Label");
+            symbolObject.transform.SetParent(counterRoot.transform, false);
+            symbolObject.transform.localPosition = Vector3.up * .276f;
+            symbolObject.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            symbolObject.transform.localScale = Vector3.one * .22f;
+            TextMesh label = symbolObject.AddComponent<TextMesh>();
+            label.text = "USMC\nRIFLE PLT";
+            label.alignment = TextAlignment.Center;
+            label.anchor = TextAnchor.MiddleCenter;
+            label.fontSize = 42;
+            label.characterSize = .10f;
+            label.color = new Color(.08f, .12f, .10f);
+            BuildInfantrySymbol(counterRoot.transform);
+        }
+
+        private void CompleteSmokeTestWhenRequested()
+        {
+            if (Array.IndexOf(Environment.GetCommandLineArgs(), "--smoke-test") < 0) return;
+            if (cells.Count != Width * Height || board.Count != Width * Height || unit == null || elevation == null || coastline == null)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED cells={cells.Count}, board={board.Count}, unit={unit != null}, elevation={elevation != null}, coastline={coastline != null}");
+                Application.Quit(1);
+                return;
+            }
+            SelectUnit();
+            if (reachable.Count < 2 || MovementPlanner.FindPath(board, unit.Position, unit.Position, PlatoonMovementPoints).Count != 1)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED movement reachable={reachable.Count}");
+                Application.Quit(1);
+                return;
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_SMOKE_OK cells={cells.Count}, reachable={reachable.Count}, unit={unit.UnitName}, hex={unit.Position}, scale={TacticalHexMetres:0}m");
+            Application.Quit(0);
+        }
+
+        private IEnumerator CaptureScreenshotWhenRequested()
+        {
+            string argument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-path=", StringComparison.Ordinal));
+            if (argument == null) yield break;
+            string path = argument.Substring("--capture-path=".Length);
+            yield return new WaitForSecondsRealtime(1f);
+            yield return new WaitForEndOfFrame();
+            var target = new RenderTexture(1280, 720, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            RenderTexture cameraTarget = mapCamera.targetTexture;
+            mapCamera.targetTexture = target;
+            mapCamera.Render();
+            RenderTexture.active = target;
+            image.ReadPixels(new Rect(0f, 0f, target.width, target.height), 0, 0);
+            image.Apply();
+            File.WriteAllBytes(path, image.EncodeToPNG());
+            mapCamera.targetTexture = cameraTarget;
+            RenderTexture.active = previous;
+            Destroy(target);
+            Destroy(image);
+            Debug.Log($"ALWAYS_FAITHFUL_CAPTURED {path} camera={mapCamera.transform.position} focus={cameraFocus} unit={unit.transform.position} screen={mapCamera.WorldToScreenPoint(unit.transform.position)} renderers={unit.GetComponentsInChildren<Renderer>().Length}");
+            Application.Quit(0);
+        }
+
+        private void UpdatePointer()
+        {
+            if (mapCamera == null) return;
+            Ray ray = mapCamera.ScreenPointToRay(Input.mousePosition);
+            HexCellView nextHover = null;
+            if (Physics.Raycast(ray, out RaycastHit hit, 100f))
+            {
+                UnitCounterView pointedUnit = hit.collider.GetComponentInParent<UnitCounterView>();
+                nextHover = hit.collider.GetComponentInParent<HexCellView>();
+                if (Input.GetMouseButtonDown(0) && !unitMoving)
+                {
+                    if (pointedUnit != null) SelectUnit();
+                    else if (nextHover != null && unit.IsSelected && reachable.ContainsKey(nextHover.Coord)) StartCoroutine(MoveUnit(nextHover.Coord));
+                    else if (nextHover != null) SelectCell(nextHover);
+                }
+            }
+
+            if (nextHover == hoveredCell) return;
+            if (hoveredCell != null) hoveredCell.SetHighlighted(false);
+            hoveredCell = nextHover;
+            if (hoveredCell != null) hoveredCell.SetHighlighted(true);
+            PreviewMovementPath(hoveredCell);
+        }
+
+        private void SelectUnit()
+        {
+            if (selectedCell != null)
+            {
+                selectedCell.SetHighlighted(false);
+                selectedCell.SetSelected(false);
+            }
+            selectedCell = null;
+            unit.SetSelected(true);
+            RefreshReachable();
+        }
+
+        private void SelectCell(HexCellView cell)
+        {
+            unit.SetSelected(false);
+            ClearReachable();
+            ClearPreviewPath();
+            if (selectedCell != null && selectedCell != cell)
+            {
+                selectedCell.SetHighlighted(false);
+                selectedCell.SetSelected(false);
+            }
+            selectedCell = cell;
+            selectedCell.SetSelected(true);
+        }
+
+        private void RefreshReachable()
+        {
+            ClearReachable();
+            foreach (KeyValuePair<HexCoord, int> pair in MovementPlanner.Reachable(board, unit.Position, PlatoonMovementPoints))
+            {
+                reachable[pair.Key] = pair.Value;
+                if (!pair.Key.Equals(unit.Position) && cells.TryGetValue(pair.Key, out HexCellView cell)) cell.SetReachable(true);
+            }
+        }
+
+        private void ClearReachable()
+        {
+            foreach (HexCoord coord in reachable.Keys)
+                if (cells.TryGetValue(coord, out HexCellView cell)) cell.SetReachable(false);
+            reachable.Clear();
+        }
+
+        private void PreviewMovementPath(HexCellView destination)
+        {
+            ClearPreviewPath();
+            if (destination == null || !unit.IsSelected || !reachable.ContainsKey(destination.Coord)) return;
+            previewPath.AddRange(MovementPlanner.FindPath(board, unit.Position, destination.Coord, PlatoonMovementPoints));
+            pathLine.positionCount = previewPath.Count;
+            pathLine.enabled = previewPath.Count > 1;
+            for (int index = 0; index < previewPath.Count; index++)
+            {
+                HexCellView cell = cells[previewPath[index]];
+                cell.SetPath(index > 0);
+                pathLine.SetPosition(index, cell.transform.position + Vector3.up * .22f);
+            }
+        }
+
+        private void ClearPreviewPath()
+        {
+            foreach (HexCoord coord in previewPath)
+                if (cells.TryGetValue(coord, out HexCellView cell)) cell.SetPath(false);
+            previewPath.Clear();
+            if (pathLine != null) pathLine.enabled = false;
+        }
+
+        private IEnumerator MoveUnit(HexCoord destination)
+        {
+            List<HexCoord> path = MovementPlanner.FindPath(board, unit.Position, destination, PlatoonMovementPoints);
+            if (path.Count < 2) yield break;
+            unitMoving = true;
+            ClearReachable();
+            ClearPreviewPath();
+            for (int index = 1; index < path.Count; index++)
+            {
+                Vector3 start = unit.transform.position;
+                Vector3 end = cells[path[index]].transform.position + Vector3.up * .95f;
+                for (float elapsed = 0f; elapsed < .20f; elapsed += Time.deltaTime)
+                {
+                    float blend = Mathf.SmoothStep(0f, 1f, elapsed / .20f);
+                    unit.transform.position = Vector3.Lerp(start, end, blend);
+                    yield return null;
+                }
+                unit.transform.position = end;
+            }
+            unit.SetPosition(destination);
+            unitMoving = false;
+            RefreshReachable();
+        }
+
+        private void UpdateCamera()
+        {
+            cameraDistance = Mathf.Clamp(cameraDistance - Input.mouseScrollDelta.y * 1.5f, 8f, 28f);
+            float horizontal = (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow) ? 1f : 0f);
+            float vertical = (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow) ? 1f : 0f);
+            Vector3 pan = new Vector3(horizontal, 0f, vertical);
+            if (Input.GetMouseButton(2)) pan += new Vector3(-Input.GetAxis("Mouse X") * 3f, 0f, -Input.GetAxis("Mouse Y") * 3f);
+            cameraFocus += pan * (cameraDistance * .55f * Time.unscaledDeltaTime);
+            if (Input.GetKeyDown(KeyCode.R))
+            {
+                cameraFocus = HexToWorld(new HexCoord(Width / 2, Height / 2));
+                cameraDistance = 18f;
+            }
+            ApplyCamera();
+        }
+
+        private void ApplyCamera()
+        {
+            if (mapCamera == null) return;
+            mapCamera.transform.position = cameraFocus + new Vector3(0f, cameraDistance * 1.08f, -cameraDistance * .92f);
+            mapCamera.transform.LookAt(cameraFocus);
+        }
+
+        private void OnGUI()
+        {
+            EnsureStyles();
+            GUI.Box(new Rect(22f, 20f, 330f, 150f), GUIContent.none);
+            GUI.Label(new Rect(40f, 34f, 290f, 32f), "ALWAYS FAITHFUL", titleStyle);
+            GUI.Label(new Rect(40f, 66f, 290f, 24f), "2030 TACTICAL INTERACTION SPIKE", badgeStyle);
+            string selection = unit != null && unit.IsSelected
+                ? "SELECTED  •  USMC Rifle Platoon\nHex: " + unit.Position + "  •  4 AP  •  " + TacticalHexMetres + " m/hex"
+                : selectedCell != null
+                    ? $"SELECTED  •  Hex {selectedCell.Coord}\n{selectedCell.Terrain}  •  Move {MovementCostLabel(selectedCell.Terrain)}  •  ETOPO preview {selectedCell.ElevationMetres:0} m"
+                    : "Select the counter or a hex.";
+            GUI.Label(new Rect(40f, 98f, 290f, 58f), selection, bodyStyle);
+
+            GUI.Box(new Rect(Screen.width - 310f, Screen.height - 83f, 288f, 61f), GUIContent.none);
+            GUI.Label(new Rect(Screen.width - 294f, Screen.height - 70f, 256f, 45f), "LMB Select  •  Wheel Zoom\nMMB/WASD Pan  •  R Reset", bodyStyle);
+        }
+
+        private void EnsureStyles()
+        {
+            if (titleStyle != null) return;
+            titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 22, fontStyle = FontStyle.Bold };
+            titleStyle.normal.textColor = new Color(.92f, .86f, .68f);
+            bodyStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, wordWrap = true };
+            bodyStyle.normal.textColor = new Color(.83f, .88f, .82f);
+            badgeStyle = new GUIStyle(bodyStyle) { fontSize = 11, fontStyle = FontStyle.Bold };
+            badgeStyle.normal.textColor = new Color(.34f, .78f, .73f);
+        }
+
+        private static Vector3 HexToWorld(HexCoord hex)
+            => new Vector3(hex.Q * HexRadius * 1.5f, 0f, (hex.R + (hex.Q & 1) * .5f) * HexRadius * Mathf.Sqrt(3f));
+
+        private static Mesh CreateHexMesh(float radius, float thickness)
+        {
+            var vertices = new List<Vector3> { new Vector3(0f, thickness, 0f), new Vector3(0f, 0f, 0f) };
+            for (int index = 0; index < 6; index++)
+            {
+                float angle = index * Mathf.PI / 3f;
+                vertices.Add(new Vector3(Mathf.Cos(angle) * radius, thickness, Mathf.Sin(angle) * radius));
+                vertices.Add(new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius));
+            }
+            var triangles = new List<int>();
+            for (int index = 0; index < 6; index++)
+            {
+                int next = (index + 1) % 6;
+                triangles.Add(0);
+                triangles.Add(2 + index * 2);
+                triangles.Add(2 + next * 2);
+                triangles.Add(2 + index * 2);
+                triangles.Add(3 + index * 2);
+                triangles.Add(3 + next * 2);
+                triangles.Add(2 + index * 2);
+                triangles.Add(3 + next * 2);
+                triangles.Add(2 + next * 2);
+            }
+            var mesh = new Mesh { name = "Flat Top Tactical Hex" };
+            mesh.SetVertices(vertices);
+            mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Material NewMaterial(Color color)
+        {
+            Shader shader = Shader.Find("Standard") ?? Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Sprites/Default");
+            var material = new Material(shader) { color = color };
+            if (material.HasProperty("_Glossiness")) material.SetFloat("_Glossiness", .08f);
+            return material;
+        }
+
+        private static Color LandColor(float metres)
+        {
+            float height = Mathf.InverseLerp(0f, 1600f, Mathf.Max(0f, metres));
+            return Color.Lerp(new Color(.26f, .34f, .22f), new Color(.43f, .42f, .31f), height);
+        }
+
+        private static Color WaterColor(float metres)
+        {
+            float depth = Mathf.InverseLerp(0f, -3500f, Mathf.Min(0f, metres));
+            return Color.Lerp(new Color(.12f, .33f, .35f), new Color(.055f, .16f, .22f), depth);
+        }
+
+        private static TacticalTerrain ClassifyTerrain(bool isLand, float metres)
+        {
+            if (!isLand) return TacticalTerrain.Water;
+            if (metres >= 550f) return TacticalTerrain.Highland;
+            return metres >= 160f ? TacticalTerrain.Rough : TacticalTerrain.Open;
+        }
+
+        private static string MovementCostLabel(TacticalTerrain terrain)
+        {
+            if (terrain == TacticalTerrain.Water) return "Impassable";
+            return (terrain == TacticalTerrain.Open ? 1 : terrain == TacticalTerrain.Rough ? 2 : 3) + " AP";
+        }
+
+        private void BuildPathLine()
+        {
+            GameObject lineObject = new GameObject("Movement Path Preview");
+            lineObject.transform.SetParent(transform, false);
+            pathLine = lineObject.AddComponent<LineRenderer>();
+            pathLine.material = new Material(Shader.Find("Sprites/Default"));
+            pathLine.widthMultiplier = .075f;
+            pathLine.startColor = new Color(1f, .80f, .30f, .92f);
+            pathLine.endColor = new Color(.35f, .92f, .78f, .92f);
+            pathLine.enabled = false;
+        }
+
+        private void BuildCoastAccents()
+        {
+            foreach (KeyValuePair<HexCoord, HexCellView> pair in cells)
+            {
+                if (!pair.Value.IsLand) continue;
+                bool coastal = false;
+                foreach (HexCoord neighbor in MovementPlanner.Neighbors(pair.Key))
+                    if (cells.TryGetValue(neighbor, out HexCellView adjacent) && !adjacent.IsLand) { coastal = true; break; }
+                if (!coastal) continue;
+                GameObject accent = new GameObject("Coast Accent " + pair.Key);
+                accent.transform.SetParent(transform, false);
+                LineRenderer line = accent.AddComponent<LineRenderer>();
+                line.loop = true;
+                line.positionCount = 6;
+                line.widthMultiplier = .035f;
+                line.material = new Material(Shader.Find("Sprites/Default"));
+                line.startColor = new Color(.52f, .85f, .72f, .58f);
+                line.endColor = line.startColor;
+                for (int index = 0; index < 6; index++)
+                {
+                    float angle = index * Mathf.PI / 3f;
+                    line.SetPosition(index, pair.Value.transform.position + new Vector3(Mathf.Cos(angle) * .96f, .135f, Mathf.Sin(angle) * .96f));
+                }
+            }
+        }
+
+        private static void BuildInfantrySymbol(Transform parent)
+        {
+            Color ink = new Color(.075f, .10f, .08f, 1f);
+            CreateCounterStroke(parent, "Infantry Slash A", new Vector3(-.30f, .32f, -.20f), new Vector3(.30f, .32f, .20f), ink);
+            CreateCounterStroke(parent, "Infantry Slash B", new Vector3(-.30f, .32f, .20f), new Vector3(.30f, .32f, -.20f), ink);
+        }
+
+        private static void CreateCounterStroke(Transform parent, string name, Vector3 start, Vector3 end, Color color)
+        {
+            GameObject stroke = new GameObject(name);
+            stroke.transform.SetParent(parent, false);
+            LineRenderer line = stroke.AddComponent<LineRenderer>();
+            line.useWorldSpace = false;
+            line.positionCount = 2;
+            line.widthMultiplier = .035f;
+            line.material = new Material(Shader.Find("Sprites/Default"));
+            line.startColor = color;
+            line.endColor = color;
+            line.SetPosition(0, start);
+            line.SetPosition(1, end);
+        }
+    }
+}

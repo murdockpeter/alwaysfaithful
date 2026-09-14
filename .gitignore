@@ -1,0 +1,28 @@
+# Unity generated state
+AlwaysFaithful/[Ll]ibrary/
+AlwaysFaithful/[Tt]emp/
+AlwaysFaithful/[Oo]bj/
+AlwaysFaithful/[Ll]ogs/
+AlwaysFaithful/[Bb]uilds/
+AlwaysFaithful/[Uu]ser[Ss]ettings/
+
+# IDE and operating-system files
+.vs/
+.idea/
+.vscode/
+*.csproj
+*.sln
+*.user
+*.tmp
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+.DS_Store
+Thumbs.db
+
+# Local third-party reference manuals; do not redistribute in the repository
+docs/*.pdf
