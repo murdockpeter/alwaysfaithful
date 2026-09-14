@@ -12,7 +12,7 @@ Controls:
 
 - Left click the counter to show legal movement destinations.
 - Hover a highlighted destination to preview its least-cost path.
-- Left click a highlighted destination to move.
+- Right click a highlighted destination to move.
 - Left click another hex to inspect its terrain and movement cost.
 - Mouse wheel zooms.
 - Middle-mouse drag or WASD pans.

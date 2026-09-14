@@ -235,7 +235,16 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 return;
             }
-            Debug.Log($"ALWAYS_FAITHFUL_SMOKE_OK cells={cells.Count}, reachable={reachable.Count}, unit={unit.UnitName}, hex={unit.Position}, scale={TacticalHexMetres:0}m");
+            DisplayCapturePath();
+            bool overlaysIgnorePointer = pathMarkers.Count > 0;
+            foreach (GameObject marker in pathMarkers) overlaysIgnorePointer &= marker.layer == LayerMask.NameToLayer("Ignore Raycast");
+            if (!overlaysIgnorePointer)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED path overlays markers={pathMarkers.Count}");
+                Application.Quit(1);
+                return;
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_SMOKE_OK cells={cells.Count}, reachable={reachable.Count}, pathMarkers={pathMarkers.Count}, unit={unit.UnitName}, hex={unit.Position}, scale={TacticalHexMetres:0}m");
             Application.Quit(0);
         }
 
@@ -272,12 +281,14 @@ namespace AlwaysFaithful.Prototype
             {
                 UnitCounterView pointedUnit = hit.collider.GetComponentInParent<UnitCounterView>();
                 nextHover = hit.collider.GetComponentInParent<HexCellView>();
-                if (Input.GetMouseButtonDown(0) && !unitMoving)
+                if (!unitMoving && Input.GetMouseButtonDown(0))
                 {
                     if (pointedUnit != null) SelectUnit();
-                    else if (nextHover != null && unit.IsSelected && reachable.ContainsKey(nextHover.Coord)) StartCoroutine(MoveUnit(nextHover.Coord));
                     else if (nextHover != null) SelectCell(nextHover);
                 }
+                if (!unitMoving && Input.GetMouseButtonDown(1) && pointedUnit == null && nextHover != null &&
+                    unit.IsSelected && reachable.ContainsKey(nextHover.Coord))
+                    StartCoroutine(MoveUnit(nextHover.Coord));
             }
 
             if (nextHover == hoveredCell) return;
@@ -409,6 +420,7 @@ namespace AlwaysFaithful.Prototype
         {
             GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             marker.name = destination ? "Movement Destination" : "Movement Waypoint";
+            marker.layer = LayerMask.NameToLayer("Ignore Raycast");
             marker.transform.SetParent(transform, false);
             marker.transform.position = position;
             marker.transform.localScale = Vector3.one * (destination ? .24f : .15f);
@@ -455,14 +467,17 @@ namespace AlwaysFaithful.Prototype
             GUI.Label(new Rect(40f, 34f, 290f, 32f), "ALWAYS FAITHFUL", titleStyle);
             GUI.Label(new Rect(40f, 66f, 290f, 24f), "2030 TACTICAL INTERACTION SPIKE", badgeStyle);
             string selection = unit != null && unit.IsSelected
-                ? "SELECTED  •  USMC Rifle Platoon\nHex: " + unit.Position + "  •  4 AP  •  " + TacticalHexMetres + " m/hex"
+                ? "SELECTED  •  USMC Rifle Platoon\nHex: " + unit.Position + "  •  4 AP  •  " + TacticalHexMetres + " m/hex" +
+                  (hoveredCell != null && reachable.TryGetValue(hoveredCell.Coord, out int moveCost) && !hoveredCell.Coord.Equals(unit.Position)
+                      ? "\nRMB MOVE  •  Cost " + moveCost + " AP"
+                      : "\nHover a highlighted hex; RMB to move")
                 : selectedCell != null
                     ? $"SELECTED  •  Hex {selectedCell.Coord}\n{selectedCell.Terrain}  •  Move {MovementCostLabel(selectedCell.Terrain)}  •  ETOPO preview {selectedCell.ElevationMetres:0} m"
                     : "Select the counter or a hex.";
             GUI.Label(new Rect(40f, 98f, 290f, 58f), selection, bodyStyle);
 
             GUI.Box(new Rect(Screen.width - 310f, Screen.height - 83f, 288f, 61f), GUIContent.none);
-            GUI.Label(new Rect(Screen.width - 294f, Screen.height - 70f, 256f, 45f), "LMB Select  •  Wheel Zoom\nMMB/WASD Pan  •  R Reset", bodyStyle);
+            GUI.Label(new Rect(Screen.width - 294f, Screen.height - 70f, 256f, 45f), "LMB Select  •  RMB Move  •  Wheel Zoom\nMMB/WASD Pan  •  R Reset", bodyStyle);
         }
 
         private void EnsureStyles()
