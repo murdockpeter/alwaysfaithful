@@ -14,6 +14,9 @@ namespace AlwaysFaithful.Prototype
         private const int Height = 10;
         private const float HexRadius = 1f;
         private const float TacticalHexMetres = 250f;
+        private const float CellSurfaceOffset = .10f;
+        private const float CounterClearance = .04f;
+        private const float PathClearance = .18f;
 
         // A visual-reference crop on the northeast Luzon coastline. The inherited
         // operational datasets are intentionally not authoritative tactical terrain.
@@ -39,6 +42,7 @@ namespace AlwaysFaithful.Prototype
         private GUIStyle bodyStyle;
         private GUIStyle badgeStyle;
         private LineRenderer pathLine;
+        private LineRenderer occupiedHexRing;
         private bool unitMoving;
         private bool automatedCapture;
 
@@ -159,30 +163,35 @@ namespace AlwaysFaithful.Prototype
             }
             BuildCoastAccents();
             BuildPathLine();
+            BuildOccupiedHexRing();
         }
 
         private void BuildUnit()
         {
-            HexCoord start = new HexCoord(7, 5);
+            HexCoord start = FindDeploymentHex(new HexCoord(Width / 2, Height / 3));
             Vector3 position = HexToWorld(start);
             if (cells.TryGetValue(start, out HexCellView cell)) position.y = cell.transform.position.y;
 
             GameObject counterRoot = new GameObject("USMC Rifle Platoon");
             counterRoot.transform.SetParent(transform, false);
-            // Counters deliberately float above relief so terrain never hides critical game state.
-            counterRoot.transform.position = position + Vector3.up * .95f;
+            // The counter is physically anchored to its hex; the overlay shader, rather than
+            // a large altitude offset, guarantees that terrain cannot hide critical state.
+            counterRoot.transform.position = position + Vector3.up * (CellSurfaceOffset + CounterClearance);
             SphereCollider counterCollider = counterRoot.AddComponent<SphereCollider>();
             counterCollider.radius = .65f;
             counterCollider.center = Vector3.up * .12f;
             unit = counterRoot.AddComponent<UnitCounterView>();
             unit.Initialize("USMC Rifle Platoon", start);
+            UpdateOccupiedHexRing(start);
 
             GameObject baseObject = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             baseObject.name = "Counter Base";
             baseObject.transform.SetParent(counterRoot.transform, false);
             baseObject.transform.localPosition = Vector3.up * .10f;
             baseObject.transform.localScale = new Vector3(.66f, .10f, .66f);
-            baseObject.GetComponent<MeshRenderer>().sharedMaterial = NewMaterial(new Color(.13f, .25f, .20f));
+            MeshRenderer baseRenderer = baseObject.GetComponent<MeshRenderer>();
+            baseRenderer.sharedMaterial = NewOverlayMaterial(new Color(.13f, .25f, .20f));
+            baseRenderer.sortingOrder = 60;
             Destroy(baseObject.GetComponent<Collider>());
 
             GameObject face = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -190,7 +199,9 @@ namespace AlwaysFaithful.Prototype
             face.transform.SetParent(counterRoot.transform, false);
             face.transform.localPosition = Vector3.up * .23f;
             face.transform.localScale = new Vector3(.94f, .08f, .68f);
-            face.GetComponent<MeshRenderer>().sharedMaterial = NewMaterial(new Color(.76f, .72f, .55f));
+            MeshRenderer faceRenderer = face.GetComponent<MeshRenderer>();
+            faceRenderer.sharedMaterial = NewOverlayMaterial(new Color(.76f, .72f, .55f));
+            faceRenderer.sortingOrder = 62;
             Destroy(face.GetComponent<Collider>());
 
             GameObject symbolObject = new GameObject("Unit Label");
@@ -336,7 +347,7 @@ namespace AlwaysFaithful.Prototype
             {
                 HexCellView cell = cells[previewPath[index]];
                 cell.SetPath(index > 0);
-                Vector3 point = cell.transform.position + Vector3.up * .78f;
+                Vector3 point = cell.transform.position + Vector3.up * (CellSurfaceOffset + PathClearance);
                 pathLine.SetPosition(index, point);
                 if (index > 0) CreatePathMarker(point, index == previewPath.Count - 1);
             }
@@ -363,7 +374,7 @@ namespace AlwaysFaithful.Prototype
             for (int index = 1; index < path.Count; index++)
             {
                 Vector3 start = unit.transform.position;
-                Vector3 end = cells[path[index]].transform.position + Vector3.up * .95f;
+                Vector3 end = cells[path[index]].transform.position + Vector3.up * (CellSurfaceOffset + CounterClearance);
                 for (float elapsed = 0f; elapsed < .20f; elapsed += Time.deltaTime)
                 {
                     float blend = Mathf.SmoothStep(0f, 1f, elapsed / .20f);
@@ -373,6 +384,7 @@ namespace AlwaysFaithful.Prototype
                 unit.transform.position = end;
             }
             unit.SetPosition(destination);
+            UpdateOccupiedHexRing(destination);
             yield return new WaitForSeconds(.18f);
             ClearPreviewPath();
             unitMoving = false;
@@ -401,7 +413,8 @@ namespace AlwaysFaithful.Prototype
             marker.transform.position = position;
             marker.transform.localScale = Vector3.one * (destination ? .24f : .15f);
             Color color = destination ? new Color(1f, .78f, .20f) : new Color(.52f, .96f, .79f);
-            Material material = NewMaterial(color);
+            Material material = NewOverlayMaterial(color);
+            marker.GetComponent<MeshRenderer>().sortingOrder = destination ? 56 : 55;
             if (material.HasProperty("_EmissionColor"))
             {
                 material.EnableKeyword("_EMISSION");
@@ -505,6 +518,12 @@ namespace AlwaysFaithful.Prototype
             return material;
         }
 
+        private static Material NewOverlayMaterial(Color color)
+        {
+            Shader shader = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
+            return new Material(shader) { color = color };
+        }
+
         private static Color LandColor(float metres)
         {
             float height = Mathf.InverseLerp(0f, 1600f, Mathf.Max(0f, metres));
@@ -545,6 +564,36 @@ namespace AlwaysFaithful.Prototype
             pathLine.endColor = new Color(.40f, 1f, .80f, 1f);
             pathLine.sortingOrder = 50;
             pathLine.enabled = false;
+        }
+
+        private void BuildOccupiedHexRing()
+        {
+            GameObject ringObject = new GameObject("Occupied Hex Outline");
+            ringObject.transform.SetParent(transform, false);
+            occupiedHexRing = ringObject.AddComponent<LineRenderer>();
+            Shader overlayShader = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
+            occupiedHexRing.material = new Material(overlayShader);
+            occupiedHexRing.loop = true;
+            occupiedHexRing.useWorldSpace = true;
+            occupiedHexRing.positionCount = 6;
+            occupiedHexRing.widthMultiplier = .075f;
+            occupiedHexRing.numCornerVertices = 4;
+            occupiedHexRing.startColor = new Color(1f, .76f, .20f, 1f);
+            occupiedHexRing.endColor = occupiedHexRing.startColor;
+            occupiedHexRing.sortingOrder = 58;
+            occupiedHexRing.enabled = false;
+        }
+
+        private void UpdateOccupiedHexRing(HexCoord coord)
+        {
+            if (occupiedHexRing == null || !cells.TryGetValue(coord, out HexCellView cell)) return;
+            Vector3 center = cell.transform.position + Vector3.up * (CellSurfaceOffset + .025f);
+            for (int index = 0; index < 6; index++)
+            {
+                float angle = index * Mathf.PI / 3f;
+                occupiedHexRing.SetPosition(index, center + new Vector3(Mathf.Cos(angle) * .86f, 0f, Mathf.Sin(angle) * .86f));
+            }
+            occupiedHexRing.enabled = true;
         }
 
         private void BuildCoastAccents()
@@ -588,11 +637,32 @@ namespace AlwaysFaithful.Prototype
             line.useWorldSpace = false;
             line.positionCount = 2;
             line.widthMultiplier = .035f;
-            line.material = new Material(Shader.Find("Sprites/Default"));
+            Shader overlayShader = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
+            line.material = new Material(overlayShader);
             line.startColor = color;
             line.endColor = color;
+            line.sortingOrder = 66;
             line.SetPosition(0, start);
             line.SetPosition(1, end);
+        }
+
+        private HexCoord FindDeploymentHex(HexCoord preferred)
+        {
+            HexCoord best = preferred;
+            int bestDistance = int.MaxValue;
+            bool found = false;
+            foreach (KeyValuePair<HexCoord, TacticalCell> pair in board)
+            {
+                if (!pair.Value.IsPassable) continue;
+                int distance = HexCoord.Distance(preferred, pair.Key);
+                if (found && (distance > bestDistance || distance == bestDistance &&
+                    (pair.Key.Q > best.Q || pair.Key.Q == best.Q && pair.Key.R >= best.R))) continue;
+                best = pair.Key;
+                bestDistance = distance;
+                found = true;
+            }
+            if (!found) throw new InvalidOperationException("The prototype map contains no passable deployment hex.");
+            return best;
         }
     }
 }

@@ -41,9 +41,11 @@ namespace AlwaysFaithful.Prototype
             selectionRing.useWorldSpace = false;
             selectionRing.positionCount = 49;
             selectionRing.widthMultiplier = .045f;
-            selectionRing.material = new Material(Shader.Find("Sprites/Default"));
+            Shader overlayShader = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
+            selectionRing.material = new Material(overlayShader);
             selectionRing.startColor = new Color(.98f, .76f, .22f, 1f);
             selectionRing.endColor = selectionRing.startColor;
+            selectionRing.sortingOrder = 70;
             for (int index = 0; index < selectionRing.positionCount; index++)
             {
                 float angle = index / 48f * Mathf.PI * 2f;
