@@ -26,6 +26,7 @@ namespace AlwaysFaithful.Prototype
         private readonly Dictionary<HexCoord, TacticalCell> board = new Dictionary<HexCoord, TacticalCell>();
         private readonly Dictionary<HexCoord, int> reachable = new Dictionary<HexCoord, int>();
         private readonly List<HexCoord> previewPath = new List<HexCoord>();
+        private readonly List<GameObject> pathMarkers = new List<GameObject>();
         private Camera mapCamera;
         private UnitCounterView unit;
         private HexCellView selectedCell;
@@ -52,6 +53,7 @@ namespace AlwaysFaithful.Prototype
 
         private void Awake()
         {
+            Application.runInBackground = true;
             automatedCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-path=", StringComparison.Ordinal));
             LoadGeography();
             BuildLightingAndCamera();
@@ -59,6 +61,7 @@ namespace AlwaysFaithful.Prototype
             BuildBoard();
             BuildUnit();
             SelectUnit();
+            if (automatedCapture) DisplayCapturePath();
             CompleteSmokeTestWhenRequested();
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
@@ -231,7 +234,6 @@ namespace AlwaysFaithful.Prototype
             if (argument == null) yield break;
             string path = argument.Substring("--capture-path=".Length);
             yield return new WaitForSecondsRealtime(1f);
-            yield return new WaitForEndOfFrame();
             var target = new RenderTexture(1280, 720, 24);
             var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
             RenderTexture previous = RenderTexture.active;
@@ -321,14 +323,22 @@ namespace AlwaysFaithful.Prototype
         {
             ClearPreviewPath();
             if (destination == null || !unit.IsSelected || !reachable.ContainsKey(destination.Coord)) return;
-            previewPath.AddRange(MovementPlanner.FindPath(board, unit.Position, destination.Coord, PlatoonMovementPoints));
+            DisplayMovementPath(MovementPlanner.FindPath(board, unit.Position, destination.Coord, PlatoonMovementPoints));
+        }
+
+        private void DisplayMovementPath(IReadOnlyList<HexCoord> path)
+        {
+            ClearPreviewPath();
+            previewPath.AddRange(path);
             pathLine.positionCount = previewPath.Count;
             pathLine.enabled = previewPath.Count > 1;
             for (int index = 0; index < previewPath.Count; index++)
             {
                 HexCellView cell = cells[previewPath[index]];
                 cell.SetPath(index > 0);
-                pathLine.SetPosition(index, cell.transform.position + Vector3.up * .22f);
+                Vector3 point = cell.transform.position + Vector3.up * .78f;
+                pathLine.SetPosition(index, point);
+                if (index > 0) CreatePathMarker(point, index == previewPath.Count - 1);
             }
         }
 
@@ -337,6 +347,9 @@ namespace AlwaysFaithful.Prototype
             foreach (HexCoord coord in previewPath)
                 if (cells.TryGetValue(coord, out HexCellView cell)) cell.SetPath(false);
             previewPath.Clear();
+            foreach (GameObject marker in pathMarkers)
+                if (marker != null) Destroy(marker);
+            pathMarkers.Clear();
             if (pathLine != null) pathLine.enabled = false;
         }
 
@@ -346,7 +359,7 @@ namespace AlwaysFaithful.Prototype
             if (path.Count < 2) yield break;
             unitMoving = true;
             ClearReachable();
-            ClearPreviewPath();
+            DisplayMovementPath(path);
             for (int index = 1; index < path.Count; index++)
             {
                 Vector3 start = unit.transform.position;
@@ -360,8 +373,43 @@ namespace AlwaysFaithful.Prototype
                 unit.transform.position = end;
             }
             unit.SetPosition(destination);
+            yield return new WaitForSeconds(.18f);
+            ClearPreviewPath();
             unitMoving = false;
             RefreshReachable();
+        }
+
+        private void DisplayCapturePath()
+        {
+            HexCoord destination = unit.Position;
+            int greatestCost = -1;
+            foreach (KeyValuePair<HexCoord, int> pair in reachable)
+            {
+                if (pair.Value < greatestCost) continue;
+                if (pair.Value == greatestCost && (pair.Key.Q < destination.Q || pair.Key.Q == destination.Q && pair.Key.R <= destination.R)) continue;
+                destination = pair.Key;
+                greatestCost = pair.Value;
+            }
+            DisplayMovementPath(MovementPlanner.FindPath(board, unit.Position, destination, PlatoonMovementPoints));
+        }
+
+        private void CreatePathMarker(Vector3 position, bool destination)
+        {
+            GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            marker.name = destination ? "Movement Destination" : "Movement Waypoint";
+            marker.transform.SetParent(transform, false);
+            marker.transform.position = position;
+            marker.transform.localScale = Vector3.one * (destination ? .24f : .15f);
+            Color color = destination ? new Color(1f, .78f, .20f) : new Color(.52f, .96f, .79f);
+            Material material = NewMaterial(color);
+            if (material.HasProperty("_EmissionColor"))
+            {
+                material.EnableKeyword("_EMISSION");
+                material.SetColor("_EmissionColor", color * .65f);
+            }
+            marker.GetComponent<MeshRenderer>().sharedMaterial = material;
+            Destroy(marker.GetComponent<Collider>());
+            pathMarkers.Add(marker);
         }
 
         private void UpdateCamera()
@@ -487,10 +535,15 @@ namespace AlwaysFaithful.Prototype
             GameObject lineObject = new GameObject("Movement Path Preview");
             lineObject.transform.SetParent(transform, false);
             pathLine = lineObject.AddComponent<LineRenderer>();
-            pathLine.material = new Material(Shader.Find("Sprites/Default"));
-            pathLine.widthMultiplier = .075f;
-            pathLine.startColor = new Color(1f, .80f, .30f, .92f);
-            pathLine.endColor = new Color(.35f, .92f, .78f, .92f);
+            Shader overlayShader = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
+            pathLine.material = new Material(overlayShader);
+            pathLine.alignment = LineAlignment.View;
+            pathLine.numCapVertices = 6;
+            pathLine.numCornerVertices = 5;
+            pathLine.widthMultiplier = .13f;
+            pathLine.startColor = new Color(1f, .82f, .28f, 1f);
+            pathLine.endColor = new Color(.40f, 1f, .80f, 1f);
+            pathLine.sortingOrder = 50;
             pathLine.enabled = false;
         }
 

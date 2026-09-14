@@ -57,7 +57,7 @@ namespace AlwaysFaithful.Prototype
             if (material == null) return;
             Color color = baseColor;
             if (reachable) color = Color.Lerp(color, new Color(.20f, .64f, .55f), .38f);
-            if (path) color = Color.Lerp(color, new Color(.96f, .68f, .18f), .58f);
+            if (path) color = Color.Lerp(color, new Color(1f, .69f, .16f), .78f);
             if (hovered) color = Color.Lerp(color, Color.white, .28f);
             if (selected) color = Color.Lerp(color, new Color(1f, .78f, .25f), .48f);
             material.color = color;
