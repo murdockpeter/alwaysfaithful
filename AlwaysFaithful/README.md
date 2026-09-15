@@ -10,6 +10,8 @@ Platoon position, AP, readiness, and selection now live in serializable gameplay
 
 Any selected land hex can now open a deterministic 25×19 local battlefield. Its 475 hexes use 250 m geographic spacing and retain a versioned battlefield ID, parent operational hex, center/origin coordinates, bounds, terrain, and elevation samples. A short command-table transition leads to a local briefing card, amplified local relief, continuous coastal classification and shoreline accents, local hex inspection, bounded camera navigation, and a Return to Island control that restores the exact prior overview camera.
 
+The USMC rifle platoon deploys onto each local map with eight tactical AP. Local movement combines destination terrain and elevation-change costs, rejects water, slopes over 90 m per edge, occupied cells, out-of-bounds destinations, and unaffordable routes, and persists completed, rejected, and cancelled orders as serializable movement events. A continuous teal-to-gold route ribbon, destination ghost, reachable-area wash, live AP label, invalid red state, and terrain-following counter animation keep every order legible.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -21,6 +23,8 @@ Controls:
 - Left click a highlighted destination to confirm the move.
 - Left click another hex to inspect its terrain and movement cost.
 - Select a land hex and choose **Open 250 m Map** to enter its local tactical battlefield.
+- On the tactical map, right click the platoon and choose **Move**; hover a destination and left click to confirm.
+- Right click away from the unit or press **Escape** to cancel tactical movement planning.
 - Use **Return to Island** to restore the operational map and its prior camera position.
 - Use **End Turn** on the unit card to advance the turn and restore the platoon's AP.
 - Mouse wheel zooms.

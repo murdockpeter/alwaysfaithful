@@ -34,6 +34,7 @@ namespace AlwaysFaithful.Core
         public double South;
         public double North;
         public List<TacticalBattlefieldCell> Cells = new List<TacticalBattlefieldCell>();
+        public List<TacticalMovementEvent> MovementEvents = new List<TacticalMovementEvent>();
 
         public bool Contains(double longitude, double latitude)
             => longitude >= West && longitude <= East && latitude >= South && latitude <= North;

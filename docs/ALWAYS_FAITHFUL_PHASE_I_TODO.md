@@ -60,9 +60,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 4 — Tactical movement quality
 
-- [ ] **Function:** apply terrain and slope costs, impassable edges, occupancy, destination validation, cancellation, and movement event records.
-- [ ] **Presentation:** replace waypoint beads with a polished directional route ribbon, destination ghost, AP cost label, invalid-route feedback, and purposeful counter movement animation.
-- [ ] **Proof:** test cheapest paths, slope/terrain modifiers, occupied destinations, cancel/reissue behavior, and route visibility throughout animation.
+- [x] **Function:** apply terrain and slope costs, impassable edges, occupancy, destination validation, cancellation, and movement event records.
+- [x] **Presentation:** replace waypoint beads with a polished directional route ribbon, destination ghost, AP cost label, invalid-route feedback, and purposeful counter movement animation.
+- [x] **Proof:** test cheapest paths, slope/terrain modifiers, occupied destinations, cancel/reissue behavior, and route visibility throughout animation.
 
 ### Pass 5 — LOS and observation tool
 

@@ -12,6 +12,7 @@ namespace AlwaysFaithful.Prototype
         private bool selected;
         private bool reachable;
         private bool path;
+        private bool invalid;
 
         public HexCoord Coord { get; private set; }
         public bool IsLand { get; private set; }
@@ -58,6 +59,12 @@ namespace AlwaysFaithful.Prototype
             RefreshColor();
         }
 
+        public void SetInvalid(bool value)
+        {
+            invalid = value;
+            RefreshColor();
+        }
+
         private void RefreshColor()
         {
             if (meshRenderer == null) return;
@@ -66,6 +73,7 @@ namespace AlwaysFaithful.Prototype
             if (path) color = Color.Lerp(color, new Color(1f, .69f, .16f), .78f);
             if (hovered) color = Color.Lerp(color, Color.white, .28f);
             if (selected) color = Color.Lerp(color, new Color(1f, .78f, .25f), .48f);
+            if (invalid) color = Color.Lerp(color, new Color(.92f, .18f, .12f), .68f);
             properties.SetColor("_Color", color);
             meshRenderer.SetPropertyBlock(properties);
         }
