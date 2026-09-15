@@ -22,7 +22,7 @@ Controls:
 
 ## Geography strategy
 
-The prototype carries a full-Taiwan crop from the same Natural Earth coastline and NOAA ETOPO 2022 source pipeline used by Sea of Uncertainty so the games share geographic provenance and a related command-map palette. Land elevation uses subtle 250 m contour bands, water uses measured shelf/slope/abyss depth bands, and true land-water edges receive a two-stage wet-shore/coast highlight.
+The prototype carries a full-Taiwan crop from the same Natural Earth coastline and NOAA ETOPO 2022 source pipeline used by Sea of Uncertainty so the games share geographic provenance and a related command-map palette. A dedicated two-sided cartographic terrain shader renders the complete board consistently from strategic and tactical camera angles. Land elevation uses subtle 250 m contour bands, water uses measured shelf/slope/abyss depth bands, and true land-water edges receive a two-stage wet-shore/coast highlight.
 
 The current ETOPO bake is two arc-minutes (roughly 3–4 km sample spacing) and the coastline is simplified for an operational map. These resources drive presentation and broad terrain classes on the whole-island layer; they are not authoritative sources for tactical cover or LOS. Sea of Uncertainty engagements will later open localized 250 m tactical boards backed by higher-resolution DEM and vector data.
 

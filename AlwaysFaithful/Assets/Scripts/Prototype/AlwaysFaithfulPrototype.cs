@@ -54,6 +54,7 @@ namespace AlwaysFaithful.Prototype
         private int landCellCount;
         private int waterCellCount;
         private float maximumLandElevation;
+        private float hexTopNormalY;
         private Vector3 cachedPickCameraPosition;
         private Quaternion cachedPickCameraRotation;
         private int cachedPickScreenWidth;
@@ -122,7 +123,8 @@ namespace AlwaysFaithful.Prototype
         private void BuildLightingAndCamera()
         {
             RenderSettings.ambientLight = new Color(.42f, .46f, .40f);
-            RenderSettings.fog = true;
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+            RenderSettings.fog = false;
             RenderSettings.fogColor = new Color(.15f, .22f, .23f);
             RenderSettings.fogMode = FogMode.Linear;
             RenderSettings.fogStartDistance = 210f;
@@ -162,13 +164,17 @@ namespace AlwaysFaithful.Prototype
             table.transform.SetParent(transform, false);
             table.transform.position = (first + last) * .5f + Vector3.down * .27f;
             table.transform.localScale = new Vector3(last.x - first.x + 4f, .42f, last.z - first.z + 4f);
-            table.GetComponent<MeshRenderer>().sharedMaterial = NewMaterial(new Color(.045f, .065f, .062f));
+            MeshRenderer tableRenderer = table.GetComponent<MeshRenderer>();
+            tableRenderer.sharedMaterial = NewMaterial(new Color(.045f, .065f, .062f));
+            tableRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            tableRenderer.receiveShadows = false;
             Destroy(table.GetComponent<Collider>());
         }
 
         private void BuildBoard()
         {
             Mesh sharedHexMesh = CreateHexMesh(HexRadius * .99f, .10f);
+            hexTopNormalY = sharedHexMesh.normals[0].y;
             Material sharedHexMaterial = NewMaterial(Color.white);
             for (int q = 0; q < Width; q++)
             {
@@ -194,6 +200,8 @@ namespace AlwaysFaithful.Prototype
                     cellObject.AddComponent<MeshFilter>().sharedMesh = sharedHexMesh;
                     var renderer = cellObject.AddComponent<MeshRenderer>();
                     renderer.sharedMaterial = sharedHexMaterial;
+                    renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                    renderer.receiveShadows = false;
                     Color color = isLand ? LandColor(measuredElevation) : WaterColor(measuredElevation);
                     HexCellView view = cellObject.AddComponent<HexCellView>();
                     view.Initialize(coord, terrain, measuredElevation, longitude, latitude, renderer, color);
@@ -265,9 +273,10 @@ namespace AlwaysFaithful.Prototype
         {
             if (Array.IndexOf(Environment.GetCommandLineArgs(), "--smoke-test") < 0) return;
             if (cells.Count != Width * Height || board.Count != Width * Height || unit == null || elevation == null || coastline == null ||
+                Resources.Load<Shader>("Shaders/MapTerrain") == null || hexTopNormalY < .99f ||
                 landCellCount < 1000 || waterCellCount < 1000 || maximumLandElevation < 3000f)
             {
-                Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED cells={cells.Count}, board={board.Count}, land={landCellCount}, water={waterCellCount}, maximumElevation={maximumLandElevation:0}, unit={unit != null}, elevation={elevation != null}, coastline={coastline != null}");
+                Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED cells={cells.Count}, board={board.Count}, land={landCellCount}, water={waterCellCount}, maximumElevation={maximumLandElevation:0}, topNormalY={hexTopNormalY:0.000}, terrainShader={Resources.Load<Shader>("Shaders/MapTerrain") != null}, unit={unit != null}, elevation={elevation != null}, coastline={coastline != null}");
                 Application.Quit(1);
                 return;
             }
@@ -312,7 +321,7 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 return;
             }
-            Debug.Log($"ALWAYS_FAITHFUL_SMOKE_OK cells={cells.Count}, land={landCellCount}, water={waterCellCount}, maximumElevation={maximumLandElevation:0}m, reachable={reachable.Count}, pathMarkers={pathMarkers.Count}, unit={unit.UnitName}, hex={unit.Position}, scale={MapHexKilometres:0.#}km");
+            Debug.Log($"ALWAYS_FAITHFUL_SMOKE_OK cells={cells.Count}, land={landCellCount}, water={waterCellCount}, maximumElevation={maximumLandElevation:0}m, topNormalY={hexTopNormalY:0.000}, reachable={reachable.Count}, pathMarkers={pathMarkers.Count}, unit={unit.UnitName}, hex={unit.Position}, scale={MapHexKilometres:0.#}km");
             Application.Quit(0);
         }
 
@@ -852,8 +861,8 @@ namespace AlwaysFaithful.Prototype
             {
                 int next = (index + 1) % 6;
                 triangles.Add(0);
-                triangles.Add(2 + index * 2);
                 triangles.Add(2 + next * 2);
+                triangles.Add(2 + index * 2);
                 triangles.Add(2 + index * 2);
                 triangles.Add(3 + index * 2);
                 triangles.Add(3 + next * 2);
@@ -871,9 +880,8 @@ namespace AlwaysFaithful.Prototype
 
         private static Material NewMaterial(Color color)
         {
-            Shader shader = Shader.Find("Standard") ?? Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Sprites/Default");
+            Shader shader = Resources.Load<Shader>("Shaders/MapTerrain") ?? Shader.Find("Sprites/Default");
             var material = new Material(shader) { color = color };
-            if (material.HasProperty("_Glossiness")) material.SetFloat("_Glossiness", .08f);
             return material;
         }
 
@@ -1013,6 +1021,8 @@ namespace AlwaysFaithful.Prototype
             line.widthMultiplier = width;
             line.numCapVertices = 2;
             line.sharedMaterial = material;
+            line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            line.receiveShadows = false;
             line.startColor = color;
             line.endColor = color;
             line.sortingOrder = sortingOrder;
@@ -1049,7 +1059,10 @@ namespace AlwaysFaithful.Prototype
             label.characterSize = size;
             label.color = color;
             label.fontStyle = FontStyle.Bold;
-            labelObject.GetComponent<MeshRenderer>().sortingOrder = 18;
+            MeshRenderer labelRenderer = labelObject.GetComponent<MeshRenderer>();
+            labelRenderer.sortingOrder = 18;
+            labelRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            labelRenderer.receiveShadows = false;
             geographicLabels.Add(new GeographicLabel
             {
                 Transform = labelObject.transform,
