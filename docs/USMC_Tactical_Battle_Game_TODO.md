@@ -3,6 +3,8 @@
 Status: planning baseline  
 Target: **Always Faithful**, a standalone Unity USMC tactical game that can also be launched by, receive battle context from, and return results to **Sea of Uncertainty**.
 
+Active near-term execution plan: [`ALWAYS_FAITHFUL_PHASE_I_TODO.md`](ALWAYS_FAITHFUL_PHASE_I_TODO.md)
+
 ## 1. Product direction
 
 Build **Always Faithful**, an original, turn-based US Marine Corps tactical game with:

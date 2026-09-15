@@ -23,4 +23,4 @@ Open `AlwaysFaithful/Assets/Scenes/HexAndCounterPrototype.unity` and enter Play 
 
 ## Planning
 
-See [`docs/USMC_Tactical_Battle_Game_TODO.md`](docs/USMC_Tactical_Battle_Game_TODO.md) for the product and implementation roadmap.
+Use [`docs/ALWAYS_FAITHFUL_PHASE_I_TODO.md`](docs/ALWAYS_FAITHFUL_PHASE_I_TODO.md) as the active paired functionality/graphics execution plan. See [`docs/USMC_Tactical_Battle_Game_TODO.md`](docs/USMC_Tactical_Battle_Game_TODO.md) for the broader product roadmap.

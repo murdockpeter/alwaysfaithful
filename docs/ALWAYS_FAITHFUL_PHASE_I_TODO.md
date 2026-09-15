@@ -1,0 +1,134 @@
+# Always Faithful — Phase I Paired-Pass TODO
+
+Target window: approximately 4–6 weeks  
+Phase goal: a short, understandable, and repeatable 2030 USMC attack-or-defend engagement on Taiwan that runs standalone and can complete a stub round trip with Sea of Uncertainty.
+
+## Working rule for every development pass
+
+Every normal pass must deliver all four items below. An urgent regression fix may be narrower, but the following pass returns to this balance.
+
+- [ ] **Function:** add or deepen one player decision, rule, tool, or integration capability.
+- [ ] **Presentation:** add an equally meaningful improvement to graphics, animation, sound, or information readability.
+- [ ] **Proof:** add or extend deterministic/domain, interaction, and visual regression checks appropriate to the change.
+- [ ] **Playable build:** rebuild the Windows player, inspect a current capture, update documentation, and push one focused commit.
+
+Do not count invisible refactoring as the functional half unless it directly unlocks the paired playable feature. Do not count decoration as the presentation half unless it communicates game state or materially improves the battlefield.
+
+## Phase I completion gate
+
+A new player can launch a scenario, understand the terrain and objective, issue movement and fire orders, experience enemy activity and reaction fire, finish the battle, and understand the result without consulting a manual. The same battle can be launched from a versioned Sea of Uncertainty request and return one deterministic result.
+
+Required slice:
+
+- one localized Taiwan battlefield derived from a selected whole-island hex;
+- one USMC rifle platoon, one attached support element, and at least two opposing units;
+- movement, AP expenditure, terrain cost, LOS, spotting, direct fire, suppression/cohesion, and reaction fire;
+- one attack objective and one defense setup;
+- a short turn limit, victory conditions, event log, and after-action result;
+- standalone launch plus file-based `BattleRequest`/`BattleResult` developer flow.
+
+## Baseline already complete
+
+- [x] Unity 6000.2 project and Windows build pipeline.
+- [x] Full-Taiwan 64×104 operational board with Natural Earth coastline and NOAA ETOPO elevation/bathymetry.
+- [x] Shared-mesh 6,656-cell rendering and overview/tactical camera zoom.
+- [x] Neutral unit state and contextual `RMB unit → Move → LMB destination` workflow.
+- [x] Deterministic reachable-area and least-cost path calculation.
+- [x] Stable elevation-aware screen picking, route preview, and completed-movement regression.
+
+## Paired implementation passes
+
+Complete these in order unless a discovered dependency requires a documented reorder.
+
+### Pass 1 — Taiwan navigation and terrain legibility
+
+- [ ] **Function:** add cursor latitude/longitude, hex coordinates, elevation, broad terrain, movement cost, and land/water inspection without selecting a unit.
+- [ ] **Presentation:** add subtle elevation contours, improved coastal treatment, clearer shallow/deep water bands, and restrained geographic labels for Taiwan and nearby islands.
+- [ ] **Proof:** validate coordinate round trips, land/water classification, elevation sampling, and map-edge picking; capture overview and close-zoom reference frames.
+
+### Pass 2 — Authoritative unit/AP state
+
+- [ ] **Function:** move the platoon, AP, readiness, and selection state out of presentation objects into serializable domain state; spend AP on movement and add End Turn.
+- [ ] **Presentation:** replace prototype text with a compact Broken Front-inspired unit card, AP pips, terrain readout, and clear selected/available/spent counter states.
+- [ ] **Proof:** test AP spending, illegal orders, turn reset, state/view agreement, and selection/menu transitions.
+
+### Pass 3 — Strategic-to-tactical battlefield extraction
+
+- [ ] **Function:** select a Taiwan operational hex and generate/load a bounded local 250 m tactical board with stable geographic origin and parent-hex identity.
+- [ ] **Presentation:** add an overview-to-tactical camera transition, location briefing card, local relief, shoreline continuity, and a visible return-to-island control.
+- [ ] **Proof:** test deterministic extraction, coordinate containment, parent/local ID preservation, and repeated entry/exit without drift.
+
+### Pass 4 — Tactical movement quality
+
+- [ ] **Function:** apply terrain and slope costs, impassable edges, occupancy, destination validation, cancellation, and movement event records.
+- [ ] **Presentation:** replace waypoint beads with a polished directional route ribbon, destination ghost, AP cost label, invalid-route feedback, and purposeful counter movement animation.
+- [ ] **Proof:** test cheapest paths, slope/terrain modifiers, occupied destinations, cancel/reissue behavior, and route visibility throughout animation.
+
+### Pass 5 — LOS and observation tool
+
+- [ ] **Function:** implement deterministic hex LOS using elevation and blocking terrain, plus an inspect-only LOS command available before firing.
+- [ ] **Presentation:** draw clear/open, obscured, and blocked LOS segments; highlight intervening terrain and show a concise modifier breakdown.
+- [ ] **Proof:** cover ridge, reverse-slope, same-height, adjacent, maximum-range, and map-edge cases with fixed fixtures.
+
+### Pass 6 — Spotting and fog of war
+
+- [ ] **Function:** add hidden, contact, identified, and currently observed states with deterministic observer checks.
+- [ ] **Presentation:** add terrain-aware fog shading, uncertain contact markers, reveal/loss transitions, and observer-source feedback.
+- [ ] **Proof:** test state transitions, stale contacts, save/reload visibility, and prohibition of attacks on illegal information states.
+
+### Pass 7 — Direct fire
+
+- [ ] **Function:** add one deterministic small-arms fire action with range, terrain, LOS, target state, ammunition abstraction, and seeded outcome events.
+- [ ] **Presentation:** add target preview, expected-effect panel, fire line, restrained muzzle/impact effects, and readable hit/miss/suppression feedback.
+- [ ] **Proof:** test identical-seed replay, modifier accounting, illegal targets, ammunition expenditure, and event/view synchronization.
+
+### Pass 8 — Suppression, cohesion, and recovery
+
+- [ ] **Function:** add Ready, Suppressed, Disrupted, and Reduced effects plus a Rally/Recover action and movement/fire restrictions.
+- [ ] **Presentation:** add counter badges, desaturation/pulse language, compact status tooltips, and recovery feedback without excessive screen effects.
+- [ ] **Proof:** test thresholds, cumulative effects, restrictions, recovery, and state persistence.
+
+### Pass 9 — Reaction fire and interruption
+
+- [ ] **Function:** detect eligible movement exposure, pause movement, resolve one reaction shot, and deterministically resume, halt, or suppress the mover.
+- [ ] **Presentation:** add an interruption banner, reaction-source indication, paused route state, camera cue, and event timing that remains readable at faster speeds.
+- [ ] **Proof:** test eligibility arcs/range/LOS, multiple reactors with deterministic ordering, interrupted paths, and no duplicate reactions.
+
+### Pass 10 — Enemy turn and scenario loop
+
+- [ ] **Function:** add a deterministic objective-aware opponent capable of movement, observation, fire, and recovery through the same legal-command interface as the player.
+- [ ] **Presentation:** add enemy-activity pacing, visible-action focus, hidden-action summaries, turn transition treatment, and optional fast animation.
+- [ ] **Proof:** run headless battles, reject illegal AI orders, verify fixed-seed replay, and enforce a maximum turn-processing time.
+
+### Pass 11 — Objectives, victory, and after-action review
+
+- [ ] **Function:** add attack/defend setup, objective control, turn limit, losses, victory calculation, and a structured battle-event history.
+- [ ] **Presentation:** add objective markers, setup boundaries, turn/side banner, victory progress, final result screen, and an inspectable chronological action log.
+- [ ] **Proof:** test every victory branch, ties, timeout, objective ownership, casualty totals, and result reconstruction from events.
+
+### Pass 12 — Sea of Uncertainty round trip
+
+- [ ] **Function:** define versioned `BattleRequest` and `BattleResult` schemas; import theater location, forces, posture, seed, and objective; atomically export outcome exactly once.
+- [ ] **Presentation:** add campaign handoff/loading treatment, strategic-context briefing, imported-force provenance, return-to-campaign confirmation, and graceful validation errors.
+- [ ] **Proof:** add schema fixtures, malformed/unsupported-version cases, deterministic request replay, ID preservation, atomic-write checks, and an automated launch/result round trip.
+
+## Phase I polish and release gate
+
+- [ ] Profile overview and tactical maps on the target Windows hardware; establish frame-time, memory, load-time, and draw-call budgets.
+- [ ] Add graphics presets, UI scaling, color-safe overlays, reduced motion, animation speed, and remappable essential controls.
+- [ ] Save and restore an in-progress standalone battle.
+- [ ] Ensure every important action has visible feedback and an event-log explanation.
+- [ ] Run a clean-machine Windows build test and archive the exact executable plus test logs.
+- [ ] Conduct at least three no-instruction playtests and record confusion, misclicks, and unreadable states.
+- [ ] Resolve all blocking and high-severity findings before calling Phase I complete.
+
+## Explicitly deferred beyond Phase I
+
+- multiple tactical maps and a public map editor;
+- full contemporary USMC and opposing-force rosters;
+- vehicles, transport, aviation, naval gunfire, detailed logistics, EW, drones, smoke, engineering, and amphibious movement;
+- campaign progression inside Always Faithful;
+- multiplayer;
+- authoritative 250 m terrain coverage for the entire island at once.
+
+These are not rejected features. They are deferred so Phase I can prove the core decision loop, presentation language, deterministic architecture, and Sea of Uncertainty handoff first.
