@@ -38,6 +38,8 @@ namespace AlwaysFaithful.Prototype
         private readonly Dictionary<HexCoord, TacticalMovementCell> localMovementBoard = new Dictionary<HexCoord, TacticalMovementCell>();
         private readonly Dictionary<HexCoord, int> tacticalReachable = new Dictionary<HexCoord, int>();
         private readonly List<HexCoord> tacticalPreviewPath = new List<HexCoord>();
+        private readonly List<LineRenderer> tacticalLosSegments = new List<LineRenderer>();
+        private readonly List<HexCoord> tacticalLosCells = new List<HexCoord>();
         private Camera mapCamera;
         private GameObject overviewRoot;
         private GameObject tacticalRoot;
@@ -81,6 +83,10 @@ namespace AlwaysFaithful.Prototype
         private string tacticalOrderFeedback;
         private int tacticalPreviewCost;
         private int tacticalEventSequence;
+        private bool tacticalLosPlanning;
+        private TacticalLosResult tacticalLosResult;
+        private GameObject tacticalLosTarget;
+        private MeshRenderer tacticalLosTargetRenderer;
         private Vector3 overviewCameraFocus;
         private float overviewCameraDistance;
         private float localMinimumLandElevation;
@@ -91,6 +97,8 @@ namespace AlwaysFaithful.Prototype
         private bool automatedTacticalRegression;
         private bool automatedTacticalCapture;
         private bool automatedTacticalMovementRegression;
+        private bool automatedLosRegression;
+        private bool automatedLosCapture;
         private int landCellCount;
         private int waterCellCount;
         private float maximumLandElevation;
@@ -133,6 +141,8 @@ namespace AlwaysFaithful.Prototype
             automatedTacticalRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--tactical-regression") >= 0;
             automatedTacticalCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--tactical-capture-path=", StringComparison.Ordinal));
             automatedTacticalMovementRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--tactical-movement-regression") >= 0;
+            automatedLosRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--los-regression") >= 0;
+            automatedLosCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--los-capture-path=", StringComparison.Ordinal));
             LoadGeography();
             BuildLightingAndCamera();
             overviewRoot = new GameObject("Taiwan Operational Map");
@@ -150,6 +160,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedMovementRegression) StartCoroutine(RunMovementRegression());
             if (automatedTacticalRegression) StartCoroutine(RunTacticalRegression());
             if (automatedTacticalMovementRegression) StartCoroutine(RunTacticalMovementRegression());
+            if (automatedLosRegression) StartCoroutine(RunLosRegression());
             if (automatedTacticalCapture)
             {
                 EnterTacticalMap(FindCoastalOperationalCell(), false);
@@ -157,12 +168,19 @@ namespace AlwaysFaithful.Prototype
                 DisplayTacticalCaptureRoute();
                 StartCoroutine(CaptureTacticalScreenshotWhenRequested());
             }
+            if (automatedLosCapture)
+            {
+                EnterTacticalMap(FindHighReliefOperationalCell(), false);
+                BeginTacticalLosPlanning();
+                PreviewTacticalLineOfSight(FindLosCaptureTarget());
+                StartCoroutine(CaptureLosScreenshotWhenRequested());
+            }
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
         private void Update()
         {
-            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedTacticalCapture || mapTransitionActive) return;
+            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedTacticalCapture || automatedLosCapture || mapTransitionActive) return;
             UpdateCamera();
             if (tacticalMode) UpdateTacticalPointer();
             else UpdatePointer();
@@ -437,6 +455,29 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator CaptureLosScreenshotWhenRequested()
+        {
+            string argument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--los-capture-path=", StringComparison.Ordinal));
+            if (argument == null) yield break;
+            string path = argument.Substring("--los-capture-path=".Length);
+            yield return new WaitForSecondsRealtime(1f);
+            var target = new RenderTexture(1280, 720, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            mapCamera.targetTexture = target;
+            mapCamera.Render();
+            RenderTexture.active = target;
+            image.ReadPixels(new Rect(0f, 0f, target.width, target.height), 0, 0);
+            image.Apply();
+            File.WriteAllBytes(path, image.EncodeToPNG());
+            mapCamera.targetTexture = null;
+            RenderTexture.active = previous;
+            Destroy(target);
+            Destroy(image);
+            Debug.Log($"ALWAYS_FAITHFUL_LOS_CAPTURED {path} state={tacticalLosResult?.State} segments={tacticalLosSegments.Count}");
+            Application.Quit(0);
+        }
+
         private void RequestTacticalMap(HexCellView parentCell)
         {
             if (parentCell == null || !parentCell.IsLand || mapTransitionActive) return;
@@ -574,6 +615,7 @@ namespace AlwaysFaithful.Prototype
             BuildTacticalReferenceMarks();
             BuildTacticalUnit();
             BuildTacticalMovementVisuals();
+            BuildTacticalLosVisuals();
             tacticalOrderFeedback = "RMB platoon for tactical orders";
             Debug.Log($"Built tactical battlefield {tacticalBattlefield.BattlefieldId}: {localCells.Count} cells at {tacticalBattlefield.CellSizeMetres} m, relief {localMinimumLandElevation:0}-{localMaximumLandElevation:0} m.");
         }
@@ -728,6 +770,21 @@ namespace AlwaysFaithful.Prototype
             tacticalDestinationGhost.SetActive(false);
         }
 
+        private void BuildTacticalLosVisuals()
+        {
+            tacticalLosSegments.Clear();
+            tacticalLosCells.Clear();
+            tacticalLosTarget = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            tacticalLosTarget.name = "LOS Target Reticle";
+            tacticalLosTarget.layer = LayerMask.NameToLayer("Ignore Raycast");
+            tacticalLosTarget.transform.SetParent(tacticalRoot.transform, false);
+            tacticalLosTarget.transform.localScale = new Vector3(.78f, .025f, .78f);
+            tacticalLosTargetRenderer = tacticalLosTarget.GetComponent<MeshRenderer>();
+            tacticalLosTargetRenderer.sharedMaterial = NewOverlayMaterial(new Color(.25f, .92f, .79f, .48f));
+            Destroy(tacticalLosTarget.GetComponent<Collider>());
+            tacticalLosTarget.SetActive(false);
+        }
+
         private void UpdateTacticalPointer()
         {
             if (tacticalUnitMoving) return;
@@ -749,7 +806,7 @@ namespace AlwaysFaithful.Prototype
             }
             if (Input.GetMouseButtonDown(1))
             {
-                if (tacticalMovePlanning)
+                if (tacticalMovePlanning || tacticalLosPlanning)
                 {
                     CancelTacticalInteraction(true);
                     return;
@@ -775,6 +832,7 @@ namespace AlwaysFaithful.Prototype
             hoveredLocalCell = next;
             if (hoveredLocalCell != null) hoveredLocalCell.SetHighlighted(true);
             PreviewTacticalRoute(hoveredLocalCell);
+            PreviewTacticalLineOfSight(hoveredLocalCell);
         }
 
         private HexCellView PickLocalHexAtScreenPoint(Vector2 screenPoint)
@@ -803,8 +861,8 @@ namespace AlwaysFaithful.Prototype
             tacticalUnit.Present(tacticalUnitState);
             tacticalMenuRect = new Rect(
                 Mathf.Clamp(pointer.x, 8f, Screen.width / GetUiScale() - 190f),
-                Mathf.Clamp(pointer.y, 8f, Screen.height / GetUiScale() - 90f),
-                178f, 72f);
+                Mathf.Clamp(pointer.y, 8f, Screen.height / GetUiScale() - 124f),
+                178f, 106f);
             tacticalMenuOpen = true;
             tacticalOrderFeedback = "Choose a tactical order.";
         }
@@ -812,6 +870,8 @@ namespace AlwaysFaithful.Prototype
         private void BeginTacticalMovePlanning()
         {
             if (!tacticalUnitState.CanMove) return;
+            ClearTacticalLineOfSight();
+            tacticalLosPlanning = false;
             tacticalMenuOpen = false;
             tacticalMovePlanning = true;
             tacticalUnitState.IsSelected = true;
@@ -824,6 +884,19 @@ namespace AlwaysFaithful.Prototype
                 if (!pair.Key.Equals(tacticalUnitState.Position)) localCells[pair.Key].SetReachable(true);
             }
             tacticalOrderFeedback = "Hover a destination • RMB/Escape cancels";
+        }
+
+        private void BeginTacticalLosPlanning()
+        {
+            tacticalMenuOpen = false;
+            tacticalMovePlanning = false;
+            ClearTacticalReachable();
+            ClearTacticalPreview();
+            tacticalLosPlanning = true;
+            tacticalUnitState.IsSelected = true;
+            tacticalUnit.Present(tacticalUnitState);
+            tacticalOrderFeedback = $"INSPECT LOS • {TacticalLineOfSight.MaximumInspectionRangeHexes} hex / {TacticalLineOfSight.MaximumInspectionRangeHexes * 250} m max";
+            PreviewTacticalLineOfSight(hoveredLocalCell);
         }
 
         private void PreviewTacticalRoute(HexCellView destination)
@@ -862,6 +935,74 @@ namespace AlwaysFaithful.Prototype
             tacticalGhostRenderer.material.color = valid
                 ? new Color(.98f, .72f, .17f, .52f)
                 : new Color(.92f, .18f, .12f, .52f);
+        }
+
+        private void PreviewTacticalLineOfSight(HexCellView target)
+        {
+            ClearTacticalLineOfSight();
+            if (!tacticalLosPlanning || target == null) return;
+            tacticalLosResult = TacticalLineOfSight.Inspect(localMovementBoard, tacticalUnitState.Position, target.Coord);
+            tacticalLosTarget.SetActive(true);
+            tacticalLosTarget.transform.position = target.transform.position + Vector3.up * (CellSurfaceOffset + .18f);
+            if (!tacticalLosResult.IsValid)
+            {
+                tacticalLosTargetRenderer.material.color = new Color(.91f, .16f, .13f, .58f);
+                target.SetLineOfSight(TacticalLosState.Blocked);
+                tacticalLosCells.Add(target.Coord);
+                tacticalOrderFeedback = tacticalLosResult.RejectionReason;
+                return;
+            }
+
+            tacticalLosTargetRenderer.material.color = LosColor(tacticalLosResult.State, .56f);
+            for (int index = 0; index < tacticalLosResult.Samples.Count; index++)
+            {
+                TacticalLosSample sample = tacticalLosResult.Samples[index];
+                if (index > 0)
+                {
+                    localCells[sample.Coord].SetLineOfSight(sample.State);
+                    tacticalLosCells.Add(sample.Coord);
+                    CreateTacticalLosSegment(tacticalLosResult.Samples[index - 1], sample);
+                }
+            }
+            tacticalOrderFeedback = $"LOS {tacticalLosResult.State.ToString().ToUpperInvariant()} • {tacticalLosResult.RangeHexes} HEX / {tacticalLosResult.RangeHexes * 250} M";
+        }
+
+        private void CreateTacticalLosSegment(TacticalLosSample from, TacticalLosSample to)
+        {
+            GameObject segmentObject = new GameObject("LOS " + to.State + " " + to.Coord);
+            segmentObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+            segmentObject.transform.SetParent(tacticalRoot.transform, false);
+            LineRenderer segment = segmentObject.AddComponent<LineRenderer>();
+            segment.useWorldSpace = true;
+            segment.positionCount = 2;
+            segment.widthMultiplier = .115f;
+            segment.numCapVertices = 5;
+            Color color = LosColor(to.State, .96f);
+            segment.material = NewOverlayMaterial(color);
+            segment.startColor = color;
+            segment.endColor = color;
+            segment.SetPosition(0, localCells[from.Coord].transform.position + Vector3.up * (CellSurfaceOffset + .31f));
+            segment.SetPosition(1, localCells[to.Coord].transform.position + Vector3.up * (CellSurfaceOffset + .31f));
+            tacticalLosSegments.Add(segment);
+        }
+
+        private void ClearTacticalLineOfSight()
+        {
+            foreach (HexCoord coord in tacticalLosCells)
+                if (localCells.TryGetValue(coord, out HexCellView cell)) cell.SetLineOfSight(TacticalLosState.None);
+            tacticalLosCells.Clear();
+            foreach (LineRenderer segment in tacticalLosSegments)
+                if (segment != null) Destroy(segment.gameObject);
+            tacticalLosSegments.Clear();
+            if (tacticalLosTarget != null) tacticalLosTarget.SetActive(false);
+            tacticalLosResult = null;
+        }
+
+        private static Color LosColor(TacticalLosState state, float alpha)
+        {
+            if (state == TacticalLosState.Blocked) return new Color(.92f, .17f, .13f, alpha);
+            if (state == TacticalLosState.Obscured) return new Color(.98f, .66f, .16f, alpha);
+            return new Color(.25f, .94f, .78f, alpha);
         }
 
         private bool TryIssueTacticalMove(HexCoord destination)
@@ -906,6 +1047,7 @@ namespace AlwaysFaithful.Prototype
         {
             tacticalUnitMoving = true;
             tacticalMovePlanning = false;
+            tacticalLosPlanning = false;
             tacticalMenuOpen = false;
             tacticalOrderFeedback = $"MOVING • {route.ActionPointCost} AP";
             for (int index = 1; index < route.Path.Count; index++)
@@ -934,6 +1076,7 @@ namespace AlwaysFaithful.Prototype
             tacticalOrderFeedback = $"MOVE COMPLETE • {tacticalUnitState.RemainingActionPoints} AP REMAIN";
             yield return new WaitForSeconds(.30f);
             ClearTacticalPreview();
+            ClearTacticalLineOfSight();
             tacticalUnitMoving = false;
         }
 
@@ -945,11 +1088,13 @@ namespace AlwaysFaithful.Prototype
                     tacticalUnitState.RemainingActionPoints, tacticalUnitState.RemainingActionPoints,
                     "Cancelled", "Move planning cancelled", new List<HexCoord>());
             tacticalMovePlanning = false;
+            tacticalLosPlanning = false;
             tacticalMenuOpen = false;
             tacticalUnitState.IsSelected = false;
             tacticalUnit.Present(tacticalUnitState);
             ClearTacticalReachable();
             ClearTacticalPreview();
+            ClearTacticalLineOfSight();
             tacticalOrderFeedback = tacticalUnitState.CanMove ? "RMB platoon for orders" : "Unit spent • End turn";
         }
 
@@ -1647,6 +1792,130 @@ namespace AlwaysFaithful.Prototype
             return true;
         }
 
+        private IEnumerator RunLosRegression()
+        {
+            yield return null;
+            if (!ValidateLosRules(out string failure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_LOS_REGRESSION_FAILED rules " + failure);
+                Application.Quit(1);
+                yield break;
+            }
+            EnterTacticalMap(FindHighReliefOperationalCell(), false);
+            BeginTacticalLosPlanning();
+            HexCellView target = FindLosCaptureTarget();
+            PreviewTacticalLineOfSight(target);
+            if (!tacticalLosPlanning || tacticalLosResult == null || !tacticalLosResult.IsValid ||
+                tacticalLosResult.RangeHexes < 1 || tacticalLosSegments.Count != tacticalLosResult.RangeHexes ||
+                tacticalLosCells.Count != tacticalLosResult.RangeHexes || !tacticalLosTarget.activeSelf)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_LOS_REGRESSION_FAILED presentation state={tacticalLosResult?.State} range={tacticalLosResult?.RangeHexes} segments={tacticalLosSegments.Count} cells={tacticalLosCells.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+            TacticalLosState inspectedState = tacticalLosResult.State;
+            int inspectedRange = tacticalLosResult.RangeHexes;
+            int modifierCount = tacticalLosResult.Modifiers.Count;
+            string serialized = JsonUtility.ToJson(tacticalLosResult);
+            CancelTacticalInteraction(false);
+            if (tacticalLosPlanning || tacticalLosSegments.Count != 0 || tacticalLosCells.Count != 0 || tacticalLosTarget.activeSelf ||
+                string.IsNullOrEmpty(serialized) || modifierCount == 0)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_LOS_REGRESSION_FAILED cleanup or serialization");
+                Application.Quit(1);
+                yield break;
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_LOS_REGRESSION_OK state={inspectedState} range={inspectedRange} segments={inspectedRange} modifiers={modifierCount} maxRange={TacticalLineOfSight.MaximumInspectionRangeHexes}");
+            Application.Quit(0);
+        }
+
+        private static bool ValidateLosRules(out string failure)
+        {
+            var flat = new Dictionary<HexCoord, TacticalMovementCell>();
+            for (int r = 0; r <= 13; r++)
+            {
+                var coord = new HexCoord(0, r);
+                flat[coord] = new TacticalMovementCell { Coord = coord, Terrain = TacticalTerrain.Open, ElevationMetres = 20f };
+            }
+            TacticalLosResult adjacent = TacticalLineOfSight.Inspect(flat, new HexCoord(0, 0), new HexCoord(0, 1));
+            TacticalLosResult sameHeight = TacticalLineOfSight.Inspect(flat, new HexCoord(0, 0), new HexCoord(0, 6));
+            TacticalLosResult maximum = TacticalLineOfSight.Inspect(flat, new HexCoord(0, 0), new HexCoord(0, 12));
+            TacticalLosResult beyond = TacticalLineOfSight.Inspect(flat, new HexCoord(0, 0), new HexCoord(0, 13));
+            if (!adjacent.IsValid || adjacent.State != TacticalLosState.Clear || adjacent.Samples.Count != 2 ||
+                !sameHeight.IsValid || sameHeight.State != TacticalLosState.Clear ||
+                !maximum.IsValid || maximum.RangeHexes != TacticalLineOfSight.MaximumInspectionRangeHexes ||
+                beyond.IsValid || !beyond.RejectionReason.StartsWith("Beyond", StringComparison.Ordinal))
+            {
+                failure = "adjacent, same-height, or maximum range";
+                return false;
+            }
+
+            var ridge = CopyMovementFixture(flat, 0, 6);
+            ridge[new HexCoord(0, 3)].ElevationMetres = 100f;
+            TacticalLosResult ridgeResult = TacticalLineOfSight.Inspect(ridge, new HexCoord(0, 0), new HexCoord(0, 6));
+            if (ridgeResult.State != TacticalLosState.Blocked || !ridgeResult.BlockingCell.Equals(new HexCoord(0, 3)) ||
+                ridgeResult.Samples[2].State != TacticalLosState.Clear || ridgeResult.Samples[3].State != TacticalLosState.Blocked ||
+                ridgeResult.Samples[6].State != TacticalLosState.Blocked)
+            {
+                failure = "ridge blocking or segment transition";
+                return false;
+            }
+
+            var reverseSlope = CopyMovementFixture(flat, 0, 4);
+            reverseSlope[new HexCoord(0, 0)].ElevationMetres = 100f;
+            reverseSlope[new HexCoord(0, 1)].ElevationMetres = 80f;
+            reverseSlope[new HexCoord(0, 4)].ElevationMetres = 0f;
+            TacticalLosResult reverseResult = TacticalLineOfSight.Inspect(reverseSlope, new HexCoord(0, 0), new HexCoord(0, 4));
+            if (reverseResult.State != TacticalLosState.Blocked || !reverseResult.BlockingCell.Equals(new HexCoord(0, 1)))
+            {
+                failure = "reverse-slope blocking";
+                return false;
+            }
+
+            var obscured = CopyMovementFixture(flat, 0, 5);
+            obscured[new HexCoord(0, 2)].Terrain = TacticalTerrain.Rough;
+            obscured[new HexCoord(0, 2)].ElevationMetres = 0f;
+            TacticalLosResult obscuredResult = TacticalLineOfSight.Inspect(obscured, new HexCoord(0, 0), new HexCoord(0, 5));
+            if (obscuredResult.State != TacticalLosState.Obscured ||
+                obscuredResult.Samples[1].State != TacticalLosState.Clear ||
+                obscuredResult.Samples[2].State != TacticalLosState.Obscured ||
+                obscuredResult.Samples[5].State != TacticalLosState.Obscured)
+            {
+                failure = "intervening terrain obscuration";
+                return false;
+            }
+
+            var mapEdge = CopyMovementFixture(flat, 0, 4);
+            mapEdge.Remove(new HexCoord(0, 2));
+            TacticalLosResult edgeResult = TacticalLineOfSight.Inspect(mapEdge, new HexCoord(0, 0), new HexCoord(0, 4));
+            if (edgeResult.IsValid || edgeResult.RejectionReason != "LOS crosses map edge")
+            {
+                failure = "map-edge containment";
+                return false;
+            }
+            failure = null;
+            return true;
+        }
+
+        private static Dictionary<HexCoord, TacticalMovementCell> CopyMovementFixture(
+            IReadOnlyDictionary<HexCoord, TacticalMovementCell> source, int firstRow, int lastRow)
+        {
+            var copy = new Dictionary<HexCoord, TacticalMovementCell>();
+            for (int row = firstRow; row <= lastRow; row++)
+            {
+                HexCoord coord = new HexCoord(0, row);
+                TacticalMovementCell cell = source[coord];
+                copy[coord] = new TacticalMovementCell
+                {
+                    Coord = coord,
+                    Terrain = cell.Terrain,
+                    ElevationMetres = cell.ElevationMetres,
+                    OccupantId = cell.OccupantId
+                };
+            }
+            return copy;
+        }
+
         private static bool BattlefieldsMatch(TacticalBattlefieldState first, TacticalBattlefieldState second, out string failure)
         {
             if (first.BattlefieldId != second.BattlefieldId || !first.ParentHex.Equals(second.ParentHex) ||
@@ -1905,8 +2174,11 @@ namespace AlwaysFaithful.Prototype
 
             if (hoveredLocalCell != null)
             {
-                GUI.Box(new Rect(20f, 321f, 405f, 76f), GUIContent.none);
-                GUI.Label(new Rect(38f, 331f, 360f, 54f), CellInspectionText(hoveredLocalCell, "LOCAL INSPECT"), bodyStyle);
+                float height = tacticalLosPlanning && tacticalLosResult != null ? 124f : 76f;
+                GUI.Box(new Rect(20f, 321f, 405f, height), GUIContent.none);
+                string inspection = CellInspectionText(hoveredLocalCell, tacticalLosPlanning ? "LOS TARGET" : "LOCAL INSPECT");
+                if (tacticalLosPlanning && tacticalLosResult != null) inspection += "\n" + TacticalLosBreakdown(tacticalLosResult);
+                GUI.Label(new Rect(38f, 331f, 360f, height - 16f), inspection, bodyStyle);
             }
             if (tacticalMovePlanning)
             {
@@ -1922,9 +2194,20 @@ namespace AlwaysFaithful.Prototype
                         tacticalUnitState.CanMove ? $"MOVE • {tacticalUnitState.RemainingActionPoints} AP" : "MOVE • SPENT", buttonStyle))
                     BeginTacticalMovePlanning();
                 GUI.enabled = true;
+                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 67f, 158f, 28f), "INSPECT LOS", buttonStyle))
+                    BeginTacticalLosPlanning();
             }
             GUI.Box(new Rect(uiWidth - 310f, uiHeight - 83f, 288f, 61f), GUIContent.none);
-            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 70f, 256f, 45f), "RMB Unit Orders  •  LMB Confirm\nRMB/Escape Cancel  •  Wheel Zoom", bodyStyle);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 70f, 256f, 45f), "RMB Unit Orders  •  LMB Confirm\nInspect LOS  •  RMB/Escape Cancel", bodyStyle);
+        }
+
+        private static string TacticalLosBreakdown(TacticalLosResult result)
+        {
+            if (!result.IsValid) return result.RejectionReason;
+            string text = $"{result.State.ToString().ToUpperInvariant()} • {result.RangeHexes * 250} m";
+            int count = Mathf.Min(2, result.Modifiers.Count);
+            for (int index = 0; index < count; index++) text += "\n" + result.Modifiers[index];
+            return text;
         }
 
         private void DrawTransitionOverlay(float uiWidth, float uiHeight)
@@ -2261,6 +2544,38 @@ namespace AlwaysFaithful.Prototype
                 if (distance >= bestDistance) continue;
                 best = candidate;
                 bestDistance = distance;
+            }
+            return best;
+        }
+
+        private HexCellView FindHighReliefOperationalCell()
+        {
+            HexCellView best = cells[unitState.Position];
+            foreach (HexCellView candidate in cells.Values)
+                if (candidate.IsLand && candidate.ElevationMetres > best.ElevationMetres) best = candidate;
+            return best;
+        }
+
+        private HexCellView FindLosCaptureTarget()
+        {
+            HexCellView best = localCells[tacticalUnitState.Position];
+            int bestScore = -1;
+            foreach (HexCellView candidate in localCells.Values)
+            {
+                int distance = HexCoord.Distance(tacticalUnitState.Position, candidate.Coord);
+                if (distance == 0 || distance > TacticalLineOfSight.MaximumInspectionRangeHexes) continue;
+                TacticalLosResult result = TacticalLineOfSight.Inspect(localMovementBoard, tacticalUnitState.Position, candidate.Coord);
+                if (!result.IsValid) continue;
+                int firstBlocked = result.Samples.FindIndex(sample => sample.State == TacticalLosState.Blocked);
+                int visibleApproach = firstBlocked < 0 ? result.RangeHexes : Math.Max(0, firstBlocked - 1);
+                bool readableTransition = result.State == TacticalLosState.Blocked && visibleApproach >= 2;
+                int stateScore = readableTransition ? 3 : result.State == TacticalLosState.Obscured ? 2 : result.State == TacticalLosState.Clear ? 1 : 0;
+                // The proof image should explain the system at a glance: prefer a blocked
+                // sightline with a visible clear approach, then obscured, then fully clear.
+                int score = stateScore * 10000 + visibleApproach * 100 + distance;
+                if (score <= bestScore) continue;
+                best = candidate;
+                bestScore = score;
             }
             return best;
         }

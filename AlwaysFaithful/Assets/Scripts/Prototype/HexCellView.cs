@@ -13,6 +13,7 @@ namespace AlwaysFaithful.Prototype
         private bool reachable;
         private bool path;
         private bool invalid;
+        private TacticalLosState lineOfSight;
 
         public HexCoord Coord { get; private set; }
         public bool IsLand { get; private set; }
@@ -65,6 +66,12 @@ namespace AlwaysFaithful.Prototype
             RefreshColor();
         }
 
+        public void SetLineOfSight(TacticalLosState value)
+        {
+            lineOfSight = value;
+            RefreshColor();
+        }
+
         private void RefreshColor()
         {
             if (meshRenderer == null) return;
@@ -74,6 +81,9 @@ namespace AlwaysFaithful.Prototype
             if (hovered) color = Color.Lerp(color, Color.white, .28f);
             if (selected) color = Color.Lerp(color, new Color(1f, .78f, .25f), .48f);
             if (invalid) color = Color.Lerp(color, new Color(.92f, .18f, .12f), .68f);
+            if (lineOfSight == TacticalLosState.Clear) color = Color.Lerp(color, new Color(.20f, .78f, .70f), .42f);
+            else if (lineOfSight == TacticalLosState.Obscured) color = Color.Lerp(color, new Color(.95f, .66f, .18f), .52f);
+            else if (lineOfSight == TacticalLosState.Blocked) color = Color.Lerp(color, new Color(.88f, .16f, .13f), .62f);
             properties.SetColor("_Color", color);
             meshRenderer.SetPropertyBlock(properties);
         }

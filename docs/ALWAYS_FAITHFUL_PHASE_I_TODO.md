@@ -66,9 +66,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 5 — LOS and observation tool
 
-- [ ] **Function:** implement deterministic hex LOS using elevation and blocking terrain, plus an inspect-only LOS command available before firing.
-- [ ] **Presentation:** draw clear/open, obscured, and blocked LOS segments; highlight intervening terrain and show a concise modifier breakdown.
-- [ ] **Proof:** cover ridge, reverse-slope, same-height, adjacent, maximum-range, and map-edge cases with fixed fixtures.
+- [x] **Function:** implement deterministic hex LOS using elevation and blocking terrain, plus an inspect-only LOS command available before firing.
+- [x] **Presentation:** draw clear/open, obscured, and blocked LOS segments; highlight intervening terrain and show a concise modifier breakdown.
+- [x] **Proof:** cover ridge, reverse-slope, same-height, adjacent, maximum-range, and map-edge cases with fixed fixtures.
 
 ### Pass 6 — Spotting and fog of war
 

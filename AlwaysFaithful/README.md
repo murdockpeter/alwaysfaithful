@@ -12,6 +12,8 @@ Any selected land hex can now open a deterministic 25×19 local battlefield. Its
 
 The USMC rifle platoon deploys onto each local map with eight tactical AP. Local movement combines destination terrain and elevation-change costs, rejects water, slopes over 90 m per edge, occupied cells, out-of-bounds destinations, and unaffordable routes, and persists completed, rejected, and cancelled orders as serializable movement events. A continuous teal-to-gold route ribbon, destination ghost, reachable-area wash, live AP label, invalid red state, and terrain-following counter animation keep every order legible.
 
+The tactical order menu also provides an inspect-only line-of-sight tool with a 12-hex (3 km) limit. It traces a deterministic hex line between observer and target, compares the interpolated sightline against measured elevation and rough-terrain obstruction, and reports clear, obscured, blocked, out-of-range, and map-edge results without committing an attack. Teal, amber, and red line segments and intervening-hex washes make the visibility transition readable directly on the terrain, while the inspection card lists the range and decisive modifiers.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -24,7 +26,8 @@ Controls:
 - Left click another hex to inspect its terrain and movement cost.
 - Select a land hex and choose **Open 250 m Map** to enter its local tactical battlefield.
 - On the tactical map, right click the platoon and choose **Move**; hover a destination and left click to confirm.
-- Right click away from the unit or press **Escape** to cancel tactical movement planning.
+- On the tactical map, right click the platoon and choose **Inspect LOS**, then hover hexes to inspect visibility.
+- Right click away from the unit or press **Escape** to cancel tactical movement or LOS inspection.
 - Use **Return to Island** to restore the operational map and its prior camera position.
 - Use **End Turn** on the unit card to advance the turn and restore the platoon's AP.
 - Mouse wheel zooms.
