@@ -16,14 +16,18 @@ namespace AlwaysFaithful.Prototype
         public HexCoord Coord { get; private set; }
         public bool IsLand { get; private set; }
         public float ElevationMetres { get; private set; }
+        public double Longitude { get; private set; }
+        public double Latitude { get; private set; }
         public TacticalTerrain Terrain { get; private set; }
 
-        public void Initialize(HexCoord coord, TacticalTerrain terrain, float elevationMetres, MeshRenderer renderer, Color color)
+        public void Initialize(HexCoord coord, TacticalTerrain terrain, float elevationMetres, double longitude, double latitude, MeshRenderer renderer, Color color)
         {
             Coord = coord;
             Terrain = terrain;
             IsLand = terrain != TacticalTerrain.Water;
             ElevationMetres = elevationMetres;
+            Longitude = longitude;
+            Latitude = latitude;
             meshRenderer = renderer;
             properties = new MaterialPropertyBlock();
             baseColor = color;

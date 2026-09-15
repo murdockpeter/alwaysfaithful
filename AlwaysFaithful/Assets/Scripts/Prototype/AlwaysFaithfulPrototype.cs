@@ -30,6 +30,7 @@ namespace AlwaysFaithful.Prototype
         private readonly Dictionary<HexCoord, int> reachable = new Dictionary<HexCoord, int>();
         private readonly List<HexCoord> previewPath = new List<HexCoord>();
         private readonly List<GameObject> pathMarkers = new List<GameObject>();
+        private readonly List<ScreenHexPick> screenPickCache = new List<ScreenHexPick>();
         private Camera mapCamera;
         private UnitCounterView unit;
         private HexCellView selectedCell;
@@ -52,6 +53,18 @@ namespace AlwaysFaithful.Prototype
         private int landCellCount;
         private int waterCellCount;
         private float maximumLandElevation;
+        private Vector3 cachedPickCameraPosition;
+        private Quaternion cachedPickCameraRotation;
+        private int cachedPickScreenWidth;
+        private int cachedPickScreenHeight;
+        private bool screenPickCacheValid;
+
+        private struct ScreenHexPick
+        {
+            public HexCellView Cell;
+            public Vector2 Center;
+            public float Radius;
+        }
 
         private const int PlatoonMovementPoints = 4;
 
@@ -154,8 +167,7 @@ namespace AlwaysFaithful.Prototype
                 {
                     var coord = new HexCoord(q, r);
                     Vector3 center = HexToWorld(coord);
-                    double longitude = Mathf.Lerp((float)DemoWest, (float)DemoEast, q / (float)(Width - 1));
-                    double latitude = Mathf.Lerp((float)DemoSouth, (float)DemoNorth, r / (float)(Height - 1));
+                    HexToGeographic(coord, out double longitude, out double latitude);
                     float measuredElevation = elevation != null ? elevation.SampleMetres(longitude, latitude) : 0f;
                     bool isLand = coastline == null || coastline.ContainsLand(longitude, latitude);
                     TacticalTerrain terrain = ClassifyTerrain(isLand, measuredElevation);
@@ -175,12 +187,13 @@ namespace AlwaysFaithful.Prototype
                     renderer.sharedMaterial = sharedHexMaterial;
                     Color color = isLand ? LandColor(measuredElevation) : WaterColor(measuredElevation);
                     HexCellView view = cellObject.AddComponent<HexCellView>();
-                    view.Initialize(coord, terrain, measuredElevation, renderer, color);
+                    view.Initialize(coord, terrain, measuredElevation, longitude, latitude, renderer, color);
                     cells.Add(coord, view);
                     board.Add(coord, new TacticalCell(coord, terrain));
                 }
             }
             BuildCoastAccents();
+            BuildGeographicLabels();
             BuildPathLine();
             BuildOccupiedHexRing();
             Debug.Log($"Built Taiwan whole-island board: {cells.Count} hexes, {landCellCount} land, {waterCellCount} water, maximum sampled land elevation {maximumLandElevation:0} m.");
@@ -255,6 +268,12 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 return;
             }
+            if (!ValidateGeographyInspection(out string geographyFailure))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED geography inspection {geographyFailure}");
+                Application.Quit(1);
+                return;
+            }
             OpenCounterMenu(new Vector2(640f, 360f));
             if (!counterMenuOpen || movePlanning || reachable.Count != 0)
             {
@@ -322,7 +341,7 @@ namespace AlwaysFaithful.Prototype
             bool leftClick = Input.GetMouseButtonDown(0);
             bool rightClick = Input.GetMouseButtonDown(1);
             Ray ray = mapCamera.ScreenPointToRay(Input.mousePosition);
-            HexCellView nextHover = movePlanning || leftClick ? PickHexAtScreenPoint(Input.mousePosition) : null;
+            HexCellView nextHover = PickHexAtScreenPoint(Input.mousePosition);
             UnitCounterView pointedUnit = null;
             float closestUnitHit = float.MaxValue;
             foreach (RaycastHit hit in Physics.RaycastAll(ray, 100f))
@@ -370,26 +389,46 @@ namespace AlwaysFaithful.Prototype
             // Visual picking is deliberately independent of the raised mesh colliders.
             // Those colliders have small presentation gaps and exposed sides, which made
             // a single physics ray oscillate between a hex and empty space over relief.
+            EnsureScreenPickCache();
             HexCellView best = null;
             float bestDistance = float.MaxValue;
-            IEnumerable<HexCoord> candidates = movePlanning && reachable.Count > 0 ? reachable.Keys : cells.Keys;
-            foreach (HexCoord coord in candidates)
+            foreach (ScreenHexPick candidate in screenPickCache)
             {
-                HexCellView cell = cells[coord];
+                if (movePlanning && !reachable.ContainsKey(candidate.Cell.Coord)) continue;
+                float distance = Vector2.SqrMagnitude(screenPoint - candidate.Center);
+                if (distance > candidate.Radius * candidate.Radius || distance >= bestDistance) continue;
+                best = candidate.Cell;
+                bestDistance = distance;
+            }
+            return best;
+        }
+
+        private void EnsureScreenPickCache()
+        {
+            if (screenPickCacheValid && mapCamera.transform.position == cachedPickCameraPosition &&
+                mapCamera.transform.rotation == cachedPickCameraRotation && Screen.width == cachedPickScreenWidth &&
+                Screen.height == cachedPickScreenHeight) return;
+
+            screenPickCache.Clear();
+            foreach (HexCellView cell in cells.Values)
+            {
                 Vector3 surface = cell.transform.position + Vector3.up * CellSurfaceOffset;
                 Vector3 center = mapCamera.WorldToScreenPoint(surface);
                 if (center.z <= 0f) continue;
                 Vector3 edgeX = mapCamera.WorldToScreenPoint(surface + Vector3.right * HexRadius);
                 Vector3 edgeZ = mapCamera.WorldToScreenPoint(surface + Vector3.forward * HexRadius);
-                float pickRadius = Mathf.Max(
-                    Vector2.Distance(center, edgeX),
-                    Vector2.Distance(center, edgeZ)) * 1.04f;
-                float distance = Vector2.SqrMagnitude(screenPoint - new Vector2(center.x, center.y));
-                if (distance > pickRadius * pickRadius || distance >= bestDistance) continue;
-                best = cell;
-                bestDistance = distance;
+                screenPickCache.Add(new ScreenHexPick
+                {
+                    Cell = cell,
+                    Center = new Vector2(center.x, center.y),
+                    Radius = Mathf.Max(Vector2.Distance(center, edgeX), Vector2.Distance(center, edgeZ)) * 1.04f
+                });
             }
-            return best;
+            cachedPickCameraPosition = mapCamera.transform.position;
+            cachedPickCameraRotation = mapCamera.transform.rotation;
+            cachedPickScreenWidth = Screen.width;
+            cachedPickScreenHeight = Screen.height;
+            screenPickCacheValid = true;
         }
 
         private bool ValidateMovementPicking(out string failure)
@@ -417,6 +456,57 @@ namespace AlwaysFaithful.Prototype
             }
             failure = null;
             return true;
+        }
+
+        private bool ValidateGeographyInspection(out string failure)
+        {
+            HexCoord[] samples =
+            {
+                new HexCoord(0, 0),
+                new HexCoord(Width - 1, 0),
+                new HexCoord(0, Height - 1),
+                new HexCoord(Width - 1, Height - 1),
+                new HexCoord(Width / 2, Height / 2)
+            };
+            foreach (HexCoord expected in samples)
+            {
+                HexToGeographic(expected, out double longitude, out double latitude);
+                if (!TryGeographicToHex(longitude, latitude, out HexCoord actual) || !actual.Equals(expected))
+                {
+                    failure = $"round-trip expected={expected} actual={actual} at={latitude:0.0000},{longitude:0.0000}";
+                    return false;
+                }
+                HexCellView cell = cells[expected];
+                bool expectedLand = coastline.ContainsLand(longitude, latitude);
+                if (cell.IsLand != expectedLand || Mathf.Abs(cell.ElevationMetres - elevation.SampleMetres(longitude, latitude)) > .1f)
+                {
+                    failure = $"source mismatch hex={expected} land={cell.IsLand}/{expectedLand} elevation={cell.ElevationMetres:0.0}";
+                    return false;
+                }
+                Vector3 screen = mapCamera.WorldToScreenPoint(cell.transform.position + Vector3.up * CellSurfaceOffset);
+                HexCellView picked = PickHexAtScreenPoint(new Vector2(screen.x, screen.y));
+                if (picked != cell)
+                {
+                    failure = $"screen edge expected={expected} actual={(picked == null ? "none" : picked.Coord.ToString())}";
+                    return false;
+                }
+            }
+            failure = null;
+            return true;
+        }
+
+        private static void HexToGeographic(HexCoord coord, out double longitude, out double latitude)
+        {
+            longitude = DemoWest + (DemoEast - DemoWest) * coord.Q / (Width - 1d);
+            latitude = DemoSouth + (DemoNorth - DemoSouth) * coord.R / (Height - 1d);
+        }
+
+        private static bool TryGeographicToHex(double longitude, double latitude, out HexCoord coord)
+        {
+            int q = (int)Math.Round((longitude - DemoWest) / (DemoEast - DemoWest) * (Width - 1));
+            int r = (int)Math.Round((latitude - DemoSouth) / (DemoNorth - DemoSouth) * (Height - 1));
+            coord = new HexCoord(Mathf.Clamp(q, 0, Width - 1), Mathf.Clamp(r, 0, Height - 1));
+            return longitude >= DemoWest && longitude <= DemoEast && latitude >= DemoSouth && latitude <= DemoNorth;
         }
 
         private bool TryIssueMove(HexCoord destination)
@@ -674,13 +764,14 @@ namespace AlwaysFaithful.Prototype
             float setback = Mathf.Lerp(.92f, .34f, overview);
             mapCamera.transform.position = cameraFocus + new Vector3(0f, cameraDistance * height, -cameraDistance * setback);
             mapCamera.transform.LookAt(cameraFocus);
+            screenPickCacheValid = false;
             if (unit != null) unit.transform.localScale = Vector3.one * Mathf.Clamp(cameraDistance / 52f, 1f, 3.2f);
         }
 
         private void OnGUI()
         {
             EnsureStyles();
-            GUI.Box(new Rect(22f, 20f, 330f, 150f), GUIContent.none);
+            GUI.Box(new Rect(22f, 20f, 350f, 180f), GUIContent.none);
             GUI.Label(new Rect(40f, 34f, 290f, 32f), "ALWAYS FAITHFUL", titleStyle);
             GUI.Label(new Rect(40f, 66f, 290f, 24f), "TAIWAN 2030  •  WHOLE-ISLAND MAP", badgeStyle);
             string selection = counterMenuOpen
@@ -691,9 +782,11 @@ namespace AlwaysFaithful.Prototype
                       ? "\nLMB CONFIRM  •  Cost " + moveCost + " AP"
                       : "\nHover a highlighted hex; LMB confirms")
                 : selectedCell != null
-                    ? $"SELECTED  •  Hex {selectedCell.Coord}\n{selectedCell.Terrain}  •  Move {MovementCostLabel(selectedCell.Terrain)}  •  ETOPO preview {selectedCell.ElevationMetres:0} m"
-                    : "No unit selected.\nRMB the counter to open unit orders.";
-            GUI.Label(new Rect(40f, 98f, 290f, 58f), selection, bodyStyle);
+                    ? CellInspectionText(selectedCell, "SELECTED")
+                    : hoveredCell != null
+                        ? CellInspectionText(hoveredCell, "MAP INSPECT")
+                        : "No unit selected.\nRMB the counter to open unit orders.\nHover any hex to inspect geography.";
+            GUI.Label(new Rect(40f, 98f, 314f, 88f), selection, bodyStyle);
 
             GUI.Box(new Rect(Screen.width - 310f, Screen.height - 83f, 288f, 61f), GUIContent.none);
             GUI.Label(new Rect(Screen.width - 294f, Screen.height - 70f, 256f, 45f), "RMB Unit Orders  •  LMB Confirm\nMMB/WASD Pan  •  Wheel Zoom  •  R Reset", bodyStyle);
@@ -769,17 +862,32 @@ namespace AlwaysFaithful.Prototype
         private static Color LandColor(float metres)
         {
             float height = Mathf.InverseLerp(0f, 3900f, Mathf.Max(0f, metres));
+            Color color;
             if (height < .28f)
-                return Color.Lerp(new Color(.20f, .34f, .21f), new Color(.35f, .43f, .24f), height / .28f);
-            if (height < .68f)
-                return Color.Lerp(new Color(.35f, .43f, .24f), new Color(.46f, .39f, .29f), (height - .28f) / .40f);
-            return Color.Lerp(new Color(.46f, .39f, .29f), new Color(.70f, .67f, .57f), (height - .68f) / .32f);
+                color = Color.Lerp(new Color(.18f, .33f, .20f), new Color(.35f, .43f, .24f), height / .28f);
+            else if (height < .68f)
+                color = Color.Lerp(new Color(.35f, .43f, .24f), new Color(.46f, .39f, .29f), (height - .28f) / .40f);
+            else
+                color = Color.Lerp(new Color(.46f, .39f, .29f), new Color(.72f, .69f, .60f), (height - .68f) / .32f);
+            float contourDistance = Mathf.Abs(Mathf.Repeat(Mathf.Max(0f, metres) + 125f, 250f) - 125f);
+            float contour = 1f - Mathf.SmoothStep(0f, 48f, contourDistance);
+            return Color.Lerp(color, color * .68f, contour * .30f);
         }
 
         private static Color WaterColor(float metres)
         {
-            float depth = Mathf.InverseLerp(0f, -3500f, Mathf.Min(0f, metres));
-            return Color.Lerp(new Color(.12f, .33f, .35f), new Color(.055f, .16f, .22f), depth);
+            float depth = Mathf.Max(0f, -metres);
+            Color color;
+            if (depth < 200f)
+                color = Color.Lerp(new Color(.16f, .43f, .43f), new Color(.10f, .32f, .37f), depth / 200f);
+            else if (depth < 1500f)
+                color = Color.Lerp(new Color(.10f, .32f, .37f), new Color(.055f, .20f, .29f), (depth - 200f) / 1300f);
+            else
+                color = Color.Lerp(new Color(.055f, .20f, .29f), new Color(.025f, .095f, .17f), Mathf.InverseLerp(1500f, 5000f, depth));
+            float interval = depth < 500f ? 100f : depth < 2000f ? 500f : 1000f;
+            float contourDistance = Mathf.Abs(Mathf.Repeat(depth + interval * .5f, interval) - interval * .5f);
+            float contour = 1f - Mathf.SmoothStep(0f, interval * .10f, contourDistance);
+            return Color.Lerp(color, color * .70f, contour * .20f);
         }
 
         private static TacticalTerrain ClassifyTerrain(bool isLand, float metres)
@@ -793,6 +901,12 @@ namespace AlwaysFaithful.Prototype
         {
             if (terrain == TacticalTerrain.Water) return "Impassable";
             return (terrain == TacticalTerrain.Open ? 1 : terrain == TacticalTerrain.Rough ? 2 : 3) + " AP";
+        }
+
+        private static string CellInspectionText(HexCellView cell, string heading)
+        {
+            string vertical = cell.IsLand ? $"Elevation {cell.ElevationMetres:0} m" : $"Depth {Mathf.Max(0f, -cell.ElevationMetres):0} m";
+            return $"{heading}  •  Hex {cell.Coord}\n{cell.Latitude:0.0000}°N  •  {cell.Longitude:0.0000}°E\n{cell.Terrain}  •  {vertical}  •  Move {MovementCostLabel(cell.Terrain)}";
         }
 
         private void BuildPathLine()
@@ -844,28 +958,74 @@ namespace AlwaysFaithful.Prototype
 
         private void BuildCoastAccents()
         {
+            Material coastMaterial = NewOverlayMaterial(Color.white);
             foreach (KeyValuePair<HexCoord, HexCellView> pair in cells)
             {
                 if (!pair.Value.IsLand) continue;
-                bool coastal = false;
                 foreach (HexCoord neighbor in MovementPlanner.Neighbors(pair.Key))
-                    if (cells.TryGetValue(neighbor, out HexCellView adjacent) && !adjacent.IsLand) { coastal = true; break; }
-                if (!coastal) continue;
-                GameObject accent = new GameObject("Coast Accent " + pair.Key);
-                accent.transform.SetParent(transform, false);
-                LineRenderer line = accent.AddComponent<LineRenderer>();
-                line.loop = true;
-                line.positionCount = 6;
-                line.widthMultiplier = .035f;
-                line.material = new Material(Shader.Find("Sprites/Default"));
-                line.startColor = new Color(.52f, .85f, .72f, .58f);
-                line.endColor = line.startColor;
-                for (int index = 0; index < 6; index++)
                 {
-                    float angle = index * Mathf.PI / 3f;
-                    line.SetPosition(index, pair.Value.transform.position + new Vector3(Mathf.Cos(angle) * .96f, .135f, Mathf.Sin(angle) * .96f));
+                    if (!cells.TryGetValue(neighbor, out HexCellView adjacent) || adjacent.IsLand) continue;
+                    Vector3 landCenter = pair.Value.transform.position;
+                    Vector3 direction = HexToWorld(neighbor) - HexToWorld(pair.Key);
+                    direction.y = 0f;
+                    direction.Normalize();
+                    Vector3 tangent = new Vector3(-direction.z, 0f, direction.x);
+                    Vector3 midpoint = landCenter + direction * (HexRadius * .855f);
+                    Vector3 start = midpoint - tangent * (HexRadius * .49f);
+                    Vector3 end = midpoint + tangent * (HexRadius * .49f);
+                    CreateCoastStroke("Wet Shore " + pair.Key, start + Vector3.up * .115f, end + Vector3.up * .115f, .15f, new Color(.035f, .20f, .20f, .82f), coastMaterial, 20);
+                    CreateCoastStroke("Coast Highlight " + pair.Key, start + Vector3.up * .145f, end + Vector3.up * .145f, .045f, new Color(.60f, .91f, .76f, .78f), coastMaterial, 21);
                 }
             }
+        }
+
+        private void CreateCoastStroke(string objectName, Vector3 start, Vector3 end, float width, Color color, Material material, int sortingOrder)
+        {
+            GameObject accent = new GameObject(objectName);
+            accent.transform.SetParent(transform, false);
+            LineRenderer line = accent.AddComponent<LineRenderer>();
+            line.useWorldSpace = true;
+            line.positionCount = 2;
+            line.widthMultiplier = width;
+            line.numCapVertices = 2;
+            line.sharedMaterial = material;
+            line.startColor = color;
+            line.endColor = color;
+            line.sortingOrder = sortingOrder;
+            line.SetPosition(0, start);
+            line.SetPosition(1, end);
+        }
+
+        private void BuildGeographicLabels()
+        {
+            CreateMapLabel("TAIWAN", 120.96, 23.70, 2.0f, new Color(.91f, .85f, .66f, .52f));
+            CreateMapLabel("TAIWAN STRAIT", 119.93, 23.55, 1.25f, new Color(.55f, .82f, .82f, .40f));
+            CreateMapLabel("PHILIPPINE SEA", 121.90, 23.30, 1.25f, new Color(.55f, .82f, .82f, .36f));
+            CreateMapLabel("TAIPEI", 121.565, 25.035, .82f, new Color(.92f, .88f, .72f, .72f));
+            CreateMapLabel("KAOHSIUNG", 120.30, 22.63, .82f, new Color(.92f, .88f, .72f, .72f));
+        }
+
+        private void CreateMapLabel(string text, double longitude, double latitude, float size, Color color)
+        {
+            float q = (float)((longitude - DemoWest) / (DemoEast - DemoWest) * (Width - 1));
+            float r = (float)((latitude - DemoSouth) / (DemoNorth - DemoSouth) * (Height - 1));
+            float measuredElevation = elevation == null ? 0f : elevation.SampleMetres(longitude, latitude);
+            float y = coastline != null && coastline.ContainsLand(longitude, latitude)
+                ? Mathf.Clamp(measuredElevation, 0f, 4000f) * .00072f + .34f
+                : .22f;
+            GameObject labelObject = new GameObject("Map Label " + text);
+            labelObject.transform.SetParent(transform, false);
+            labelObject.transform.position = new Vector3(q * HexRadius * 1.5f, y, (r + .25f) * HexRadius * Mathf.Sqrt(3f));
+            labelObject.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            TextMesh label = labelObject.AddComponent<TextMesh>();
+            label.text = text;
+            label.alignment = TextAlignment.Center;
+            label.anchor = TextAnchor.MiddleCenter;
+            label.fontSize = 64;
+            label.characterSize = size;
+            label.color = color;
+            label.fontStyle = FontStyle.Bold;
+            labelObject.GetComponent<MeshRenderer>().sortingOrder = 18;
         }
 
         private static void BuildInfantrySymbol(Transform parent)
