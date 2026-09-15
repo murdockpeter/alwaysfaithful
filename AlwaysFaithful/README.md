@@ -20,6 +20,8 @@ Pass 7 activates that combat-information gate with a deterministic M27 small-arm
 
 Tactical units now use compact procedural formation models inspired by Sea of Uncertainty's counter language instead of flat blocks. The USMC rifle platoon and identified PLA formations combine three maneuver elements, a command node, affiliation-specific recognition stripe, designation plate, soft shadow, and selection halo. Uncertain enemy information remains a diamond contact rather than revealing formation geometry. The whole-island operational counter is intentionally unchanged in this first tactical-only art pass.
 
+Pass 8 gives direct fire lasting consequences. Every Suppressed or Hit outcome now adds cumulative suppression points to the target, moving it through Ready, Suppressed, Disrupted, and Reduced cohesion states with their own movement and fire restrictions: Disrupted units cannot return fire, and a Reduced unit cannot move or fire at all until it recovers. A Rally order spends one AP to shake off a fixed amount of suppression, cohesion also decays passively at the start of every turn, and every application is a persistent, serializable event rather than a one-off die roll. Suppressed formations carry a pulsing status badge and a desaturated body color on the tactical counter and on any identified or observed enemy marker, the command card reports the unit's own status and point total once it leaves Ready, the direct-fire target tooltip previews the enemy's current cohesion, and the tactical intelligence panel appends a known enemy's status next to its contact state.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -34,6 +36,7 @@ Controls:
 - On the tactical map, right click the platoon and choose **Move**; hover a destination and left click to confirm.
 - On the tactical map, right click the platoon and choose **Inspect LOS**, then hover hexes to inspect visibility.
 - On the tactical map, right click the platoon and choose **Direct Fire**, hover a currently observed enemy, and left click to fire.
+- On the tactical map, right click the platoon and choose **Rally** to spend 1 AP recovering suppression once the unit is Suppressed, Disrupted, or Reduced.
 - Right click away from the unit or press **Escape** to cancel tactical movement, LOS inspection, or fire targeting.
 - Use **Return to Island** to restore the operational map and its prior camera position.
 - Use **End Turn** on the unit card to advance the turn and restore the platoon's AP.

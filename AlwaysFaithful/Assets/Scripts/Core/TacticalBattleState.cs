@@ -9,6 +9,14 @@ namespace AlwaysFaithful.Core
         Spent
     }
 
+    public enum TacticalCombatStatus
+    {
+        Ready,
+        Suppressed,
+        Disrupted,
+        Reduced
+    }
+
     [Serializable]
     public sealed class TacticalUnitState
     {
@@ -19,6 +27,8 @@ namespace AlwaysFaithful.Core
         public int RemainingActionPoints;
         public UnitReadiness Readiness;
         public bool IsSelected;
+        public int SuppressionPoints;
+        public TacticalCombatStatus CombatStatus;
 
         public TacticalUnitState(string id, string displayName, HexCoord position, int maximumActionPoints)
         {
@@ -28,9 +38,32 @@ namespace AlwaysFaithful.Core
             MaximumActionPoints = Math.Max(1, maximumActionPoints);
             RemainingActionPoints = MaximumActionPoints;
             Readiness = UnitReadiness.Available;
+            CombatStatus = TacticalCombatStatus.Ready;
         }
 
-        public bool CanMove => Readiness == UnitReadiness.Available && RemainingActionPoints > 0;
+        public bool CanMove => Readiness == UnitReadiness.Available && RemainingActionPoints > 0 &&
+            CombatStatus != TacticalCombatStatus.Reduced;
+
+        public bool CanFire => CanMove && CombatStatus != TacticalCombatStatus.Disrupted;
+
+        public bool CanRally => Readiness == UnitReadiness.Available && RemainingActionPoints > 0 &&
+            CombatStatus != TacticalCombatStatus.Ready;
+
+        public void ApplySuppressionPoints(int delta)
+        {
+            SuppressionPoints = Math.Max(0, Math.Min(TacticalSuppression.MaximumPoints, SuppressionPoints + delta));
+            CombatStatus = TacticalSuppression.ComputeStatus(SuppressionPoints);
+        }
+
+        public bool TryRally(int actionPointCost)
+        {
+            if (!CanRally || actionPointCost <= 0 || actionPointCost > RemainingActionPoints) return false;
+            RemainingActionPoints -= actionPointCost;
+            Readiness = RemainingActionPoints > 0 ? UnitReadiness.Available : UnitReadiness.Spent;
+            IsSelected = false;
+            ApplySuppressionPoints(-TacticalSuppression.RallyRecoveryAmount);
+            return true;
+        }
 
         public bool TryBeginMove(int actionPointCost)
         {
@@ -58,6 +91,7 @@ namespace AlwaysFaithful.Core
 
         public void BeginTurn()
         {
+            ApplySuppressionPoints(-TacticalSuppression.PassiveRecoveryAmount);
             RemainingActionPoints = MaximumActionPoints;
             Readiness = UnitReadiness.Available;
             IsSelected = false;

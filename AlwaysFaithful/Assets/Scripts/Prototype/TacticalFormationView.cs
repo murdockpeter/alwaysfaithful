@@ -18,6 +18,8 @@ namespace AlwaysFaithful.Prototype
         private Color bodyColor;
         private Color deckColor;
         private Color plateColor;
+        private GameObject statusBadge;
+        private MeshRenderer statusBadgeRenderer;
 
         public int ManeuverElementCount { get; private set; }
         public bool HasRecognitionStripe { get; private set; }
@@ -25,6 +27,7 @@ namespace AlwaysFaithful.Prototype
         public TacticalFormationAffiliation Affiliation { get; private set; }
         public MeshRenderer CommandDeckRenderer => commandDeckRenderer;
         public MeshRenderer DesignationRenderer => designationRenderer;
+        public TacticalCombatStatus PresentedStatus { get; private set; }
 
         public void Initialize(TacticalFormationAffiliation affiliation, string formationCode, string echelon)
         {
@@ -110,16 +113,43 @@ namespace AlwaysFaithful.Prototype
             frontage.SetPosition(0, new Vector3(-.54f, .275f, .24f));
             frontage.SetPosition(1, new Vector3(0f, .275f, .48f));
             frontage.SetPosition(2, new Vector3(.54f, .275f, .24f));
+
+            statusBadge = Primitive(PrimitiveType.Sphere, "Suppression Status Badge", transform, overlay, new Color(1f, 1f, 1f, 0f));
+            statusBadge.transform.localPosition = new Vector3(0f, .47f, .12f);
+            statusBadge.transform.localScale = Vector3.one * .16f;
+            statusBadgeRenderer = statusBadge.GetComponent<MeshRenderer>();
+            statusBadge.SetActive(false);
         }
 
         public void Present(TacticalUnitState state)
         {
             if (state == null) return;
+            PresentedStatus = state.CombatStatus;
             float readiness = state.Readiness == UnitReadiness.Spent ? .42f : state.Readiness == UnitReadiness.Moving ? .82f : 1f;
-            commandDeckRenderer.material.color = Color.Lerp(new Color(.06f, .075f, .07f), deckColor, readiness);
-            designationRenderer.material.color = Color.Lerp(new Color(.28f, .29f, .25f), plateColor, readiness);
+            float desaturation = TacticalStatusVisuals.DesaturationFor(state.CombatStatus);
+            Color effectiveDeck = TacticalStatusVisuals.Desaturate(deckColor, desaturation);
+            Color effectivePlate = TacticalStatusVisuals.Desaturate(plateColor, desaturation);
+            Color effectiveBody = TacticalStatusVisuals.Desaturate(bodyColor, desaturation);
+            commandDeckRenderer.material.color = Color.Lerp(new Color(.06f, .075f, .07f), effectiveDeck, readiness);
+            designationRenderer.material.color = Color.Lerp(new Color(.28f, .29f, .25f), effectivePlate, readiness);
             foreach (MeshRenderer renderer in elementRenderers)
-                renderer.material.color = Color.Lerp(new Color(.15f, .17f, .15f), bodyColor, readiness);
+                renderer.material.color = Color.Lerp(new Color(.15f, .17f, .15f), effectiveBody, readiness);
+            UpdateStatusBadge(state.CombatStatus);
+        }
+
+        private void UpdateStatusBadge(TacticalCombatStatus status)
+        {
+            if (statusBadge == null) return;
+            bool visible = status != TacticalCombatStatus.Ready;
+            statusBadge.SetActive(visible);
+            if (!visible) return;
+            statusBadgeRenderer.material.color = TacticalStatusVisuals.BadgeColor(status);
+        }
+
+        private void Update()
+        {
+            if (statusBadge == null || !statusBadge.activeSelf) return;
+            statusBadge.transform.localScale = Vector3.one * TacticalStatusVisuals.PulseScale(PresentedStatus, .16f);
         }
 
         private static GameObject Primitive(PrimitiveType type, string objectName, Transform parent, Shader shader, Color color)

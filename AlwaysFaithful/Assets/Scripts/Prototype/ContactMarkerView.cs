@@ -15,12 +15,15 @@ namespace AlwaysFaithful.Prototype
         private TacticalFormationView formationView;
         private LineRenderer uncertaintyRing;
         private Vector3 settledScale = Vector3.one;
+        private GameObject statusBadge;
+        private MeshRenderer statusBadgeRenderer;
 
         public TacticalVisibilityState PresentedState { get; private set; } = TacticalVisibilityState.Hidden;
         public bool PresentedStale { get; private set; }
         public int TransitionCount { get; private set; }
         public TacticalFireOutcome LastFireOutcome { get; private set; } = TacticalFireOutcome.Rejected;
         public int FireCueCount { get; private set; }
+        public TacticalCombatStatus PresentedStatus { get; private set; } = TacticalCombatStatus.Ready;
         public bool DetailedFormationVisible => formationDetail != null && formationDetail.activeSelf;
         public bool ContactGlyphVisible => contactGlyph != null && contactGlyph.activeSelf;
         public int FormationElementCount => formationView != null ? formationView.ManeuverElementCount : 0;
@@ -71,10 +74,22 @@ namespace AlwaysFaithful.Prototype
                 float radius = index % 2 == 0 ? .70f : .64f;
                 uncertaintyRing.SetPosition(index, new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius));
             }
+
+            statusBadge = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            statusBadge.name = "Contact Status Badge";
+            statusBadge.layer = LayerMask.NameToLayer("Ignore Raycast");
+            statusBadge.transform.SetParent(transform, false);
+            statusBadge.transform.localPosition = new Vector3(0f, .47f, .12f);
+            statusBadge.transform.localScale = Vector3.one * .16f;
+            statusBadgeRenderer = statusBadge.GetComponent<MeshRenderer>();
+            statusBadgeRenderer.sharedMaterial = new Material(overlay);
+            Destroy(statusBadge.GetComponent<Collider>());
+            statusBadge.SetActive(false);
+
             gameObject.SetActive(false);
         }
 
-        public void Present(TacticalContactState contact)
+        public void Present(TacticalContactState contact, TacticalUnitState unit = null)
         {
             bool changed = contact.State != PresentedState || contact.IsStale != PresentedStale;
             PresentedState = contact.State;
@@ -124,13 +139,24 @@ namespace AlwaysFaithful.Prototype
                 contactGlyph.SetActive(false);
                 labelObject.SetActive(false);
             }
-            baseRenderer.material.color = baseColor;
-            faceRenderer.material.color = faceColor;
+            bool statusKnown = unit != null && formationDetail.activeSelf;
+            PresentedStatus = statusKnown ? unit.CombatStatus : TacticalCombatStatus.Ready;
+            float desaturation = statusKnown ? TacticalStatusVisuals.DesaturationFor(PresentedStatus) : 0f;
+            baseRenderer.material.color = TacticalStatusVisuals.Desaturate(baseColor, desaturation);
+            faceRenderer.material.color = TacticalStatusVisuals.Desaturate(faceColor, desaturation);
             contactGlyphRenderer.material.color = faceColor;
             label.color = new Color(.10f, .07f, .05f, 1f);
             uncertaintyRing.startColor = ringColor;
             uncertaintyRing.endColor = ringColor;
             uncertaintyRing.enabled = contact.State != TacticalVisibilityState.Observed;
+            UpdateStatusBadge(statusKnown && PresentedStatus != TacticalCombatStatus.Ready);
+        }
+
+        private void UpdateStatusBadge(bool visible)
+        {
+            if (statusBadge == null) return;
+            statusBadge.SetActive(visible);
+            if (visible) statusBadgeRenderer.material.color = TacticalStatusVisuals.BadgeColor(PresentedStatus);
         }
 
         public void CueFireOutcome(TacticalFireOutcome outcome)
@@ -146,6 +172,8 @@ namespace AlwaysFaithful.Prototype
         private void Update()
         {
             transform.localScale = Vector3.Lerp(transform.localScale, settledScale, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 9f));
+            if (statusBadge != null && statusBadge.activeSelf)
+                statusBadge.transform.localScale = Vector3.one * TacticalStatusVisuals.PulseScale(PresentedStatus, .16f);
         }
     }
 }

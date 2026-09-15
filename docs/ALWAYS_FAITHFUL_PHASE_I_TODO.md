@@ -84,9 +84,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 8 — Suppression, cohesion, and recovery
 
-- [ ] **Function:** add Ready, Suppressed, Disrupted, and Reduced effects plus a Rally/Recover action and movement/fire restrictions.
-- [ ] **Presentation:** add counter badges, desaturation/pulse language, compact status tooltips, and recovery feedback without excessive screen effects.
-- [ ] **Proof:** test thresholds, cumulative effects, restrictions, recovery, and state persistence.
+- [x] **Function:** add Ready, Suppressed, Disrupted, and Reduced effects plus a Rally/Recover action and movement/fire restrictions.
+- [x] **Presentation:** add counter badges, desaturation/pulse language, compact status tooltips, and recovery feedback without excessive screen effects.
+- [x] **Proof:** test thresholds, cumulative effects, restrictions, recovery, and state persistence.
 
 ### Pass 9 — Reaction fire and interruption
 
