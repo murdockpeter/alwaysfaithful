@@ -44,6 +44,7 @@ namespace AlwaysFaithful.Prototype
         private readonly Dictionary<string, TacticalContactState> tacticalContacts = new Dictionary<string, TacticalContactState>();
         private readonly Dictionary<string, ContactMarkerView> tacticalContactViews = new Dictionary<string, ContactMarkerView>();
         private Camera mapCamera;
+        private TacticalAudio tacticalAudio;
         private GameObject overviewRoot;
         private GameObject tacticalRoot;
         private UnitCounterView unit;
@@ -278,6 +279,9 @@ namespace AlwaysFaithful.Prototype
             mapCamera.nearClipPlane = .1f;
             mapCamera.farClipPlane = 700f;
             mapCamera.fieldOfView = 38f;
+            cameraObject.AddComponent<AudioListener>();
+            tacticalAudio = cameraObject.AddComponent<TacticalAudio>();
+            tacticalAudio.Initialize();
             cameraFocus = HexToWorld(new HexCoord(Width / 2, Height / 2));
             ApplyCamera();
         }
@@ -604,6 +608,7 @@ namespace AlwaysFaithful.Prototype
         private void RequestTacticalMap(HexCellView parentCell)
         {
             if (parentCell == null || !parentCell.IsLand || mapTransitionActive) return;
+            tacticalAudio.Play(TacticalSound.MapTransition);
             StartCoroutine(TransitionToTactical(parentCell));
         }
 
@@ -665,6 +670,7 @@ namespace AlwaysFaithful.Prototype
             if (!tacticalMode || tacticalUnitMoving || tacticalFireResolving || mapTransitionActive && animate) return;
             if (animate)
             {
+                tacticalAudio.Play(TacticalSound.MapTransition);
                 StartCoroutine(TransitionToOverview());
                 return;
             }
@@ -975,6 +981,13 @@ namespace AlwaysFaithful.Prototype
                 TacticalContactState report = TacticalObservation.Check(localMovementBoard, tacticalUnitState.Id,
                     tacticalUnitState.Position, enemy.Id, enemy.DisplayName, enemy.Position, turnState.TurnNumber, previous);
                 tacticalContacts[enemy.Id] = report;
+                if (previous != null)
+                {
+                    bool wasHidden = previous.State == TacticalVisibilityState.Hidden;
+                    bool isHidden = report.State == TacticalVisibilityState.Hidden;
+                    if (wasHidden && !isHidden) tacticalAudio.Play(TacticalSound.ContactDetected);
+                    else if (!wasHidden && isHidden) tacticalAudio.Play(TacticalSound.ContactLost);
+                }
                 ContactMarkerView marker = tacticalContactViews[enemy.Id];
                 marker.transform.position = LocalCounterPosition(report.LastKnownPosition) + Vector3.up * .03f;
                 marker.Present(report, enemy);
@@ -1084,6 +1097,7 @@ namespace AlwaysFaithful.Prototype
                 178f, 172f);
             tacticalMenuOpen = true;
             tacticalOrderFeedback = "Choose a tactical order.";
+            tacticalAudio.Play(TacticalSound.MenuOpen);
         }
 
         private void BeginTacticalMovePlanning()
@@ -1097,6 +1111,7 @@ namespace AlwaysFaithful.Prototype
             tacticalMovePlanning = true;
             tacticalUnitState.IsSelected = true;
             tacticalUnit.Present(tacticalUnitState);
+            tacticalAudio.Play(TacticalSound.Inspect);
             ClearTacticalReachable();
             foreach (KeyValuePair<HexCoord, int> pair in TacticalMovementPlanner.Reachable(
                          localMovementBoard, tacticalUnitState.Position, tacticalUnitState.RemainingActionPoints, tacticalUnitState.Id))
@@ -1118,6 +1133,7 @@ namespace AlwaysFaithful.Prototype
             tacticalLosPlanning = true;
             tacticalUnitState.IsSelected = true;
             tacticalUnit.Present(tacticalUnitState);
+            tacticalAudio.Play(TacticalSound.Inspect);
             tacticalOrderFeedback = $"INSPECT LOS • {TacticalLineOfSight.MaximumInspectionRangeHexes} hex / {TacticalLineOfSight.MaximumInspectionRangeHexes * 250} m max";
             PreviewTacticalLineOfSight(hoveredLocalCell);
         }
@@ -1136,6 +1152,7 @@ namespace AlwaysFaithful.Prototype
             tacticalFirePlanning = true;
             tacticalUnitState.IsSelected = true;
             tacticalUnit.Present(tacticalUnitState);
+            tacticalAudio.Play(TacticalSound.Inspect);
             tacticalOrderFeedback = $"DIRECT FIRE • {tacticalWeapon.RemainingAmmunition} AMMO • Hover observed target";
             PreviewTacticalFire(hoveredLocalCell);
         }
@@ -1212,6 +1229,8 @@ namespace AlwaysFaithful.Prototype
                 : fireEvent.Outcome == TacticalFireOutcome.Suppressed ? new Color(1f, .62f, .14f, .92f) : new Color(.62f, .72f, .68f, .75f);
             impact.GetComponent<MeshRenderer>().sharedMaterial = NewOverlayMaterial(impactColor);
             Destroy(impact.GetComponent<Collider>());
+            tacticalAudio.Play(fireEvent.Outcome == TacticalFireOutcome.Hit ? TacticalSound.FireHit
+                : fireEvent.Outcome == TacticalFireOutcome.Suppressed ? TacticalSound.FireSuppressed : TacticalSound.FireMiss);
             for (float elapsed = 0f; elapsed < .46f; elapsed += Time.deltaTime)
             {
                 float progress = Mathf.Clamp01(elapsed / .46f);
@@ -1248,6 +1267,7 @@ namespace AlwaysFaithful.Prototype
             tacticalUnit.Present(tacticalUnitState);
             tacticalFormationView.Present(tacticalUnitState);
             tacticalOrderFeedback = $"RALLY • {rallyEvent.StatusBefore.ToString().ToUpperInvariant()} → {rallyEvent.StatusAfter.ToString().ToUpperInvariant()} • {rallyEvent.PointsBefore}→{rallyEvent.PointsAfter} PTS";
+            tacticalAudio.Play(TacticalSound.Rally);
             Debug.Log($"ALWAYS_FAITHFUL_SUPPRESSION_EVENT sequence={rallyEvent.Sequence} unit={rallyEvent.UnitId} cause={rallyEvent.Cause} points={rallyEvent.PointsBefore}->{rallyEvent.PointsAfter} status={rallyEvent.StatusBefore}->{rallyEvent.StatusAfter}");
         }
 
@@ -1394,11 +1414,13 @@ namespace AlwaysFaithful.Prototype
                 tacticalOrderFeedback = reason;
                 if (localCells.TryGetValue(destination, out HexCellView rejected)) rejected.SetInvalid(true);
                 RecordTacticalMovement(origin, destination, 0, before, before, "Rejected", reason, route.Path);
+                tacticalAudio.Play(TacticalSound.OrderCancel);
                 return false;
             }
             tacticalUnit.Present(tacticalUnitState);
             ClearTacticalReachable();
             DisplayCommittedTacticalRoute(route);
+            tacticalAudio.Play(TacticalSound.OrderConfirm);
             StartCoroutine(MoveTacticalUnit(origin, destination, before, route));
             return true;
         }
@@ -1460,6 +1482,8 @@ namespace AlwaysFaithful.Prototype
         private void CancelTacticalInteraction(bool recordCancellation)
         {
             if (tacticalUnitMoving || tacticalFireResolving) return;
+            if (recordCancellation && (tacticalMovePlanning || tacticalLosPlanning || tacticalFirePlanning || tacticalMenuOpen))
+                tacticalAudio.Play(TacticalSound.OrderCancel);
             if (recordCancellation && tacticalMovePlanning)
                 RecordTacticalMovement(tacticalUnitState.Position, tacticalUnitState.Position, 0,
                     tacticalUnitState.RemainingActionPoints, tacticalUnitState.RemainingActionPoints,
@@ -1724,6 +1748,7 @@ namespace AlwaysFaithful.Prototype
             if (!unitState.TryBeginMove(moveCost)) return false;
             unit.Present(unitState);
             Debug.Log($"ALWAYS_FAITHFUL_MOVE_ACCEPTED from={unitState.Position} to={destination} steps={path.Count - 1} cost={moveCost} ap={unitState.RemainingActionPoints}/{unitState.MaximumActionPoints}");
+            tacticalAudio.Play(TacticalSound.OrderConfirm);
             StartCoroutine(MoveUnit(destination, path));
             return true;
         }
@@ -1747,6 +1772,7 @@ namespace AlwaysFaithful.Prototype
                 178f,
                 72f);
             counterMenuOpen = true;
+            tacticalAudio.Play(TacticalSound.MenuOpen);
         }
 
         private void BeginMovePlanning()
@@ -1756,6 +1782,7 @@ namespace AlwaysFaithful.Prototype
             movePlanning = true;
             unitState.IsSelected = true;
             unit.Present(unitState);
+            tacticalAudio.Play(TacticalSound.Inspect);
             RefreshReachable();
         }
 
@@ -1780,6 +1807,7 @@ namespace AlwaysFaithful.Prototype
                 tacticalUnit.Present(tacticalUnitState);
             }
             unit.Present(unitState);
+            tacticalAudio.Play(TacticalSound.EndTurn);
             Debug.Log($"ALWAYS_FAITHFUL_TURN_STARTED turn={turnState.TurnNumber} side={turnState.ActiveSide} ap={unitState.RemainingActionPoints}/{unitState.MaximumActionPoints}");
         }
 
@@ -1795,6 +1823,7 @@ namespace AlwaysFaithful.Prototype
             foreach (TacticalUnitState enemy in tacticalEnemyStates) enemy.ApplySuppressionPoints(-TacticalSuppression.PassiveRecoveryAmount);
             RefreshTacticalObservation();
             tacticalOrderFeedback = "NEW TURN • AP RESTORED";
+            tacticalAudio.Play(TacticalSound.EndTurn);
             Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_TURN_STARTED turn={turnState.TurnNumber} ap={tacticalUnitState.RemainingActionPoints}/{tacticalUnitState.MaximumActionPoints}");
         }
 
@@ -1808,6 +1837,7 @@ namespace AlwaysFaithful.Prototype
             }
             selectedCell = cell;
             selectedCell.SetSelected(true);
+            tacticalAudio.Play(TacticalSound.Select);
         }
 
         private void RefreshReachable()

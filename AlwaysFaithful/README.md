@@ -22,6 +22,8 @@ Tactical units now use compact procedural formation models inspired by Sea of Un
 
 Pass 8 gives direct fire lasting consequences. Every Suppressed or Hit outcome now adds cumulative suppression points to the target, moving it through Ready, Suppressed, Disrupted, and Reduced cohesion states with their own movement and fire restrictions: Disrupted units cannot return fire, and a Reduced unit cannot move or fire at all until it recovers. A Rally order spends one AP to shake off a fixed amount of suppression, cohesion also decays passively at the start of every turn, and every application is a persistent, serializable event rather than a one-off die roll. Suppressed formations carry a pulsing status badge and a desaturated body color on the tactical counter and on any identified or observed enemy marker, the command card reports the unit's own status and point total once it leaves Ready, the direct-fire target tooltip previews the enemy's current cohesion, and the tactical intelligence panel appends a known enemy's status next to its contact state.
 
+Every player action now has a rudimentary audio cue. Short tones are synthesized at runtime (no imported sound assets) for selecting a hex, opening an order menu, entering a planning mode, confirming or rejecting a move, each direct-fire outcome, rallying, ending a turn, transitioning to or from the tactical map, and a contact being gained or lost.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
