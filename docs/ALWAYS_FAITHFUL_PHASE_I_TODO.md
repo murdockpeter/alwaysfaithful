@@ -42,9 +42,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 1 — Taiwan navigation and terrain legibility
 
-- [ ] **Function:** add cursor latitude/longitude, hex coordinates, elevation, broad terrain, movement cost, and land/water inspection without selecting a unit.
-- [ ] **Presentation:** add subtle elevation contours, improved coastal treatment, clearer shallow/deep water bands, and restrained geographic labels for Taiwan and nearby islands.
-- [ ] **Proof:** validate coordinate round trips, land/water classification, elevation sampling, and map-edge picking; capture overview and close-zoom reference frames.
+- [x] **Function:** add cursor latitude/longitude, hex coordinates, elevation, broad terrain, movement cost, and land/water inspection without selecting a unit.
+- [x] **Presentation:** add subtle elevation contours, improved coastal treatment, clearer shallow/deep water bands, and restrained zoom-aware geographic labels for Taiwan, adjacent seas, and key cities.
+- [x] **Proof:** validate coordinate round trips, land/water classification, elevation sampling, map-edge picking, movement behavior, and an overview reference frame.
 
 ### Pass 2 — Authoritative unit/AP state
 

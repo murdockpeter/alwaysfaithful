@@ -31,6 +31,7 @@ namespace AlwaysFaithful.Prototype
         private readonly List<HexCoord> previewPath = new List<HexCoord>();
         private readonly List<GameObject> pathMarkers = new List<GameObject>();
         private readonly List<ScreenHexPick> screenPickCache = new List<ScreenHexPick>();
+        private readonly List<GeographicLabel> geographicLabels = new List<GeographicLabel>();
         private Camera mapCamera;
         private UnitCounterView unit;
         private HexCellView selectedCell;
@@ -64,6 +65,14 @@ namespace AlwaysFaithful.Prototype
             public HexCellView Cell;
             public Vector2 Center;
             public float Radius;
+        }
+
+        private sealed class GeographicLabel
+        {
+            public Transform Transform;
+            public TextMesh Text;
+            public Color BaseColor;
+            public bool OverviewOnly;
         }
 
         private const int PlatoonMovementPoints = 4;
@@ -766,6 +775,21 @@ namespace AlwaysFaithful.Prototype
             mapCamera.transform.LookAt(cameraFocus);
             screenPickCacheValid = false;
             if (unit != null) unit.transform.localScale = Vector3.one * Mathf.Clamp(cameraDistance / 52f, 1f, 3.2f);
+            UpdateGeographicLabels();
+        }
+
+        private void UpdateGeographicLabels()
+        {
+            float constantScreenScale = Mathf.Clamp(cameraDistance / 190f, .08f, 1.18f);
+            float overviewAlpha = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(58f, 105f, cameraDistance));
+            foreach (GeographicLabel label in geographicLabels)
+            {
+                label.Transform.localScale = Vector3.one * constantScreenScale;
+                Color color = label.BaseColor;
+                if (label.OverviewOnly) color.a *= overviewAlpha;
+                label.Text.color = color;
+                label.Text.gameObject.SetActive(color.a > .015f);
+            }
         }
 
         private void OnGUI()
@@ -998,14 +1022,14 @@ namespace AlwaysFaithful.Prototype
 
         private void BuildGeographicLabels()
         {
-            CreateMapLabel("TAIWAN", 120.96, 23.70, 2.0f, new Color(.91f, .85f, .66f, .52f));
-            CreateMapLabel("TAIWAN STRAIT", 119.93, 23.55, 1.25f, new Color(.55f, .82f, .82f, .40f));
-            CreateMapLabel("PHILIPPINE SEA", 121.90, 23.30, 1.25f, new Color(.55f, .82f, .82f, .36f));
-            CreateMapLabel("TAIPEI", 121.565, 25.035, .82f, new Color(.92f, .88f, .72f, .72f));
-            CreateMapLabel("KAOHSIUNG", 120.30, 22.63, .82f, new Color(.92f, .88f, .72f, .72f));
+            CreateMapLabel("TAIWAN", 120.96, 23.70, .80f, new Color(.91f, .85f, .66f, .46f), true);
+            CreateMapLabel("TAIWAN STRAIT", 119.93, 23.55, .52f, new Color(.55f, .82f, .82f, .34f), true);
+            CreateMapLabel("PHILIPPINE SEA", 121.90, 23.30, .52f, new Color(.55f, .82f, .82f, .30f), true);
+            CreateMapLabel("TAIPEI", 121.565, 25.035, .42f, new Color(.92f, .88f, .72f, .68f), false);
+            CreateMapLabel("KAOHSIUNG", 120.30, 22.63, .42f, new Color(.92f, .88f, .72f, .68f), false);
         }
 
-        private void CreateMapLabel(string text, double longitude, double latitude, float size, Color color)
+        private void CreateMapLabel(string text, double longitude, double latitude, float size, Color color, bool overviewOnly)
         {
             float q = (float)((longitude - DemoWest) / (DemoEast - DemoWest) * (Width - 1));
             float r = (float)((latitude - DemoSouth) / (DemoNorth - DemoSouth) * (Height - 1));
@@ -1026,6 +1050,13 @@ namespace AlwaysFaithful.Prototype
             label.color = color;
             label.fontStyle = FontStyle.Bold;
             labelObject.GetComponent<MeshRenderer>().sortingOrder = 18;
+            geographicLabels.Add(new GeographicLabel
+            {
+                Transform = labelObject.transform,
+                Text = label,
+                BaseColor = color,
+                OverviewOnly = overviewOnly
+            });
         }
 
         private static void BuildInfantrySymbol(Transform parent)

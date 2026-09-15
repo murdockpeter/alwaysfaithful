@@ -10,6 +10,7 @@ Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
 
+- Hover any map hex to inspect its coordinates, latitude/longitude, elevation or depth, terrain class, and movement cost.
 - Right click the counter to open its unit-order menu.
 - Choose **Move** to show legal movement destinations.
 - Hover a highlighted destination to preview its least-cost path.
@@ -21,7 +22,7 @@ Controls:
 
 ## Geography strategy
 
-The prototype carries a full-Taiwan crop from the same Natural Earth coastline and NOAA ETOPO 2022 source pipeline used by Sea of Uncertainty so the games share geographic provenance and a related command-map palette.
+The prototype carries a full-Taiwan crop from the same Natural Earth coastline and NOAA ETOPO 2022 source pipeline used by Sea of Uncertainty so the games share geographic provenance and a related command-map palette. Land elevation uses subtle 250 m contour bands, water uses measured shelf/slope/abyss depth bands, and true land-water edges receive a two-stage wet-shore/coast highlight.
 
 The current ETOPO bake is two arc-minutes (roughly 3–4 km sample spacing) and the coastline is simplified for an operational map. These resources drive presentation and broad terrain classes on the whole-island layer; they are not authoritative sources for tactical cover or LOS. Sea of Uncertainty engagements will later open localized 250 m tactical boards backed by higher-resolution DEM and vector data.
 
