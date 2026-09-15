@@ -54,9 +54,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 3 — Strategic-to-tactical battlefield extraction
 
-- [ ] **Function:** select a Taiwan operational hex and generate/load a bounded local 250 m tactical board with stable geographic origin and parent-hex identity.
-- [ ] **Presentation:** add an overview-to-tactical camera transition, location briefing card, local relief, shoreline continuity, and a visible return-to-island control.
-- [ ] **Proof:** test deterministic extraction, coordinate containment, parent/local ID preservation, and repeated entry/exit without drift.
+- [x] **Function:** select a Taiwan operational hex and generate/load a bounded local 250 m tactical board with stable geographic origin and parent-hex identity.
+- [x] **Presentation:** add an overview-to-tactical camera transition, location briefing card, local relief, shoreline continuity, and a visible return-to-island control.
+- [x] **Proof:** test deterministic extraction, coordinate containment, parent/local ID preservation, and repeated entry/exit without drift.
 
 ### Pass 4 — Tactical movement quality
 

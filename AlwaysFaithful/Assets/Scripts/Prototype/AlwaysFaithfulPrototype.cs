@@ -17,6 +17,7 @@ namespace AlwaysFaithful.Prototype
         private const float CellSurfaceOffset = .10f;
         private const float CounterClearance = .04f;
         private const float PathClearance = .18f;
+        private const float LocalReliefScale = .006f;
 
         // Whole-island operational layer shared with Sea of Uncertainty. Tactical
         // engagements will resolve into separate 250 m local maps in a later pass.
@@ -32,7 +33,10 @@ namespace AlwaysFaithful.Prototype
         private readonly List<GameObject> pathMarkers = new List<GameObject>();
         private readonly List<ScreenHexPick> screenPickCache = new List<ScreenHexPick>();
         private readonly List<GeographicLabel> geographicLabels = new List<GeographicLabel>();
+        private readonly Dictionary<HexCoord, HexCellView> localCells = new Dictionary<HexCoord, HexCellView>();
         private Camera mapCamera;
+        private GameObject overviewRoot;
+        private GameObject tacticalRoot;
         private UnitCounterView unit;
         private TacticalUnitState unitState;
         private TacticalTurnState turnState;
@@ -57,6 +61,19 @@ namespace AlwaysFaithful.Prototype
         private bool movePlanning;
         private Rect counterMenuRect;
         private Rect endTurnRect;
+        private Rect enterTacticalRect;
+        private Rect returnToIslandRect;
+        private TacticalBattlefieldState tacticalBattlefield;
+        private HexCellView hoveredLocalCell;
+        private Vector3 overviewCameraFocus;
+        private float overviewCameraDistance;
+        private float localMinimumLandElevation;
+        private float localMaximumLandElevation;
+        private bool tacticalMode;
+        private bool mapTransitionActive;
+        private float mapTransitionOpacity;
+        private bool automatedTacticalRegression;
+        private bool automatedTacticalCapture;
         private int landCellCount;
         private int waterCellCount;
         private float maximumLandElevation;
@@ -96,8 +113,12 @@ namespace AlwaysFaithful.Prototype
             Application.runInBackground = true;
             automatedCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-path=", StringComparison.Ordinal));
             automatedMovementRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--movement-regression") >= 0;
+            automatedTacticalRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--tactical-regression") >= 0;
+            automatedTacticalCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--tactical-capture-path=", StringComparison.Ordinal));
             LoadGeography();
             BuildLightingAndCamera();
+            overviewRoot = new GameObject("Taiwan Operational Map");
+            overviewRoot.transform.SetParent(transform, false);
             BuildCommandTable();
             BuildBoard();
             BuildUnit();
@@ -109,14 +130,21 @@ namespace AlwaysFaithful.Prototype
             }
             CompleteSmokeTestWhenRequested();
             if (automatedMovementRegression) StartCoroutine(RunMovementRegression());
+            if (automatedTacticalRegression) StartCoroutine(RunTacticalRegression());
+            if (automatedTacticalCapture)
+            {
+                EnterTacticalMap(FindCoastalOperationalCell(), false);
+                StartCoroutine(CaptureTacticalScreenshotWhenRequested());
+            }
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
         private void Update()
         {
-            if (automatedCapture || automatedMovementRegression) return;
+            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalCapture || mapTransitionActive) return;
             UpdateCamera();
-            UpdatePointer();
+            if (tacticalMode) UpdateTacticalPointer();
+            else UpdatePointer();
         }
 
         private void LoadGeography()
@@ -167,7 +195,7 @@ namespace AlwaysFaithful.Prototype
             Vector3 last = HexToWorld(new HexCoord(Width - 1, Height - 1));
             GameObject table = GameObject.CreatePrimitive(PrimitiveType.Cube);
             table.name = "Recessed Command Table";
-            table.transform.SetParent(transform, false);
+            table.transform.SetParent(overviewRoot.transform, false);
             table.transform.position = (first + last) * .5f + Vector3.down * .27f;
             table.transform.localScale = new Vector3(last.x - first.x + 4f, .42f, last.z - first.z + 4f);
             MeshRenderer tableRenderer = table.GetComponent<MeshRenderer>();
@@ -201,7 +229,7 @@ namespace AlwaysFaithful.Prototype
                     center.y = isLand ? Mathf.Clamp(measuredElevation, 0f, 4000f) * .00072f : 0f;
 
                     GameObject cellObject = new GameObject("Hex " + coord);
-                    cellObject.transform.SetParent(transform, false);
+                    cellObject.transform.SetParent(overviewRoot.transform, false);
                     cellObject.transform.position = center;
                     cellObject.AddComponent<MeshFilter>().sharedMesh = sharedHexMesh;
                     var renderer = cellObject.AddComponent<MeshRenderer>();
@@ -229,7 +257,7 @@ namespace AlwaysFaithful.Prototype
             if (cells.TryGetValue(start, out HexCellView cell)) position.y = cell.transform.position.y;
 
             GameObject counterRoot = new GameObject("USMC Rifle Platoon");
-            counterRoot.transform.SetParent(transform, false);
+            counterRoot.transform.SetParent(overviewRoot.transform, false);
             // The counter is physically anchored to its hex; the overlay shader, rather than
             // a large altitude offset, guarantees that terrain cannot hide critical state.
             counterRoot.transform.position = position + Vector3.up * (CellSurfaceOffset + CounterClearance);
@@ -365,13 +393,269 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator CaptureTacticalScreenshotWhenRequested()
+        {
+            string argument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--tactical-capture-path=", StringComparison.Ordinal));
+            if (argument == null) yield break;
+            string path = argument.Substring("--tactical-capture-path=".Length);
+            yield return new WaitForSecondsRealtime(1f);
+            var target = new RenderTexture(1280, 720, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            mapCamera.targetTexture = target;
+            mapCamera.Render();
+            RenderTexture.active = target;
+            image.ReadPixels(new Rect(0f, 0f, target.width, target.height), 0, 0);
+            image.Apply();
+            File.WriteAllBytes(path, image.EncodeToPNG());
+            mapCamera.targetTexture = null;
+            RenderTexture.active = previous;
+            Destroy(target);
+            Destroy(image);
+            Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_CAPTURED {path} battlefield={tacticalBattlefield.BattlefieldId} cells={localCells.Count}");
+            Application.Quit(0);
+        }
+
+        private void RequestTacticalMap(HexCellView parentCell)
+        {
+            if (parentCell == null || !parentCell.IsLand || mapTransitionActive) return;
+            StartCoroutine(TransitionToTactical(parentCell));
+        }
+
+        private IEnumerator TransitionToTactical(HexCellView parentCell)
+        {
+            mapTransitionActive = true;
+            yield return FadeMapTransition(0f, 1f, .22f);
+            EnterTacticalMap(parentCell, false);
+            yield return FadeMapTransition(1f, 0f, .36f);
+            mapTransitionActive = false;
+        }
+
+        private IEnumerator TransitionToOverview()
+        {
+            mapTransitionActive = true;
+            yield return FadeMapTransition(0f, 1f, .22f);
+            ReturnToIsland(false);
+            yield return FadeMapTransition(1f, 0f, .36f);
+            mapTransitionActive = false;
+        }
+
+        private IEnumerator FadeMapTransition(float from, float to, float duration)
+        {
+            for (float elapsed = 0f; elapsed < duration; elapsed += Time.unscaledDeltaTime)
+            {
+                mapTransitionOpacity = Mathf.SmoothStep(from, to, elapsed / duration);
+                yield return null;
+            }
+            mapTransitionOpacity = to;
+        }
+
+        private void EnterTacticalMap(HexCellView parentCell, bool animate)
+        {
+            if (animate)
+            {
+                RequestTacticalMap(parentCell);
+                return;
+            }
+            if (!tacticalMode)
+            {
+                overviewCameraFocus = cameraFocus;
+                overviewCameraDistance = cameraDistance;
+            }
+            CancelUnitInteraction();
+            string requestedId = $"TW-{parentCell.Coord.Q:D2}-{parentCell.Coord.R:D3}-250M";
+            if (tacticalBattlefield == null || tacticalBattlefield.BattlefieldId != requestedId) BuildTacticalBattlefield(parentCell);
+            tacticalMode = true;
+            overviewRoot.SetActive(false);
+            tacticalRoot.SetActive(true);
+            cameraFocus = Vector3.zero;
+            cameraDistance = 33f;
+            hoveredLocalCell = null;
+            ApplyCamera();
+            Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_ENTER battlefield={tacticalBattlefield.BattlefieldId} parent={tacticalBattlefield.ParentHex} center={tacticalBattlefield.CenterLatitude:0.00000},{tacticalBattlefield.CenterLongitude:0.00000}");
+        }
+
+        private void ReturnToIsland(bool animate)
+        {
+            if (!tacticalMode || mapTransitionActive && animate) return;
+            if (animate)
+            {
+                StartCoroutine(TransitionToOverview());
+                return;
+            }
+            if (hoveredLocalCell != null) hoveredLocalCell.SetHighlighted(false);
+            hoveredLocalCell = null;
+            tacticalRoot.SetActive(false);
+            overviewRoot.SetActive(true);
+            tacticalMode = false;
+            cameraFocus = overviewCameraFocus;
+            cameraDistance = overviewCameraDistance;
+            ApplyCamera();
+            Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_EXIT battlefield={tacticalBattlefield.BattlefieldId} parent={tacticalBattlefield.ParentHex}");
+        }
+
+        private void BuildTacticalBattlefield(HexCellView parentCell)
+        {
+            if (tacticalRoot != null) Destroy(tacticalRoot);
+            localCells.Clear();
+            tacticalBattlefield = TacticalBattlefieldExtractor.Extract(
+                parentCell.Coord,
+                parentCell.Longitude,
+                parentCell.Latitude,
+                (longitude, latitude) => elevation.SampleMetres(longitude, latitude),
+                (longitude, latitude) => coastline.ContainsLand(longitude, latitude));
+            tacticalRoot = new GameObject("Tactical Battlefield " + tacticalBattlefield.BattlefieldId);
+            tacticalRoot.transform.SetParent(transform, false);
+
+            localMinimumLandElevation = float.MaxValue;
+            localMaximumLandElevation = float.MinValue;
+            foreach (TacticalBattlefieldCell cell in tacticalBattlefield.Cells)
+            {
+                if (cell.Terrain == TacticalTerrain.Water) continue;
+                localMinimumLandElevation = Mathf.Min(localMinimumLandElevation, cell.ElevationMetres);
+                localMaximumLandElevation = Mathf.Max(localMaximumLandElevation, cell.ElevationMetres);
+            }
+            if (localMinimumLandElevation == float.MaxValue) localMinimumLandElevation = 0f;
+            if (localMaximumLandElevation == float.MinValue) localMaximumLandElevation = 0f;
+
+            Mesh sharedMesh = CreateHexMesh(HexRadius * .985f, .12f);
+            Material sharedMaterial = NewMaterial(Color.white);
+            foreach (TacticalBattlefieldCell source in tacticalBattlefield.Cells)
+            {
+                Vector3 position = LocalHexToWorld(source.LocalCoord);
+                position.y = source.Terrain == TacticalTerrain.Water
+                    ? 0f
+                    : .08f + Mathf.Max(0f, source.ElevationMetres - localMinimumLandElevation) * LocalReliefScale;
+                GameObject cellObject = new GameObject("Local Hex " + source.LocalCoord);
+                cellObject.transform.SetParent(tacticalRoot.transform, false);
+                cellObject.transform.position = position;
+                cellObject.AddComponent<MeshFilter>().sharedMesh = sharedMesh;
+                MeshRenderer renderer = cellObject.AddComponent<MeshRenderer>();
+                renderer.sharedMaterial = sharedMaterial;
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                Color color = source.Terrain == TacticalTerrain.Water ? WaterColor(source.ElevationMetres) : LocalLandColor(source.ElevationMetres);
+                HexCellView view = cellObject.AddComponent<HexCellView>();
+                view.Initialize(source.LocalCoord, source.Terrain, source.ElevationMetres, source.Longitude, source.Latitude, renderer, color);
+                localCells.Add(source.LocalCoord, view);
+            }
+            BuildTacticalTable();
+            BuildTacticalShoreline();
+            BuildTacticalReferenceMarks();
+            Debug.Log($"Built tactical battlefield {tacticalBattlefield.BattlefieldId}: {localCells.Count} cells at {tacticalBattlefield.CellSizeMetres} m, relief {localMinimumLandElevation:0}-{localMaximumLandElevation:0} m.");
+        }
+
+        private void BuildTacticalTable()
+        {
+            GameObject table = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            table.name = "Tactical Map Table";
+            table.transform.SetParent(tacticalRoot.transform, false);
+            table.transform.position = Vector3.down * .30f;
+            table.transform.localScale = new Vector3(tacticalBattlefield.Width * 1.55f, .45f, tacticalBattlefield.Height * 1.82f);
+            table.GetComponent<MeshRenderer>().sharedMaterial = NewMaterial(new Color(.035f, .055f, .052f));
+            Destroy(table.GetComponent<Collider>());
+        }
+
+        private void BuildTacticalShoreline()
+        {
+            foreach (KeyValuePair<HexCoord, HexCellView> pair in localCells)
+            {
+                if (!pair.Value.IsLand) continue;
+                bool coastal = false;
+                foreach (HexCoord neighbor in MovementPlanner.Neighbors(pair.Key))
+                    if (localCells.TryGetValue(neighbor, out HexCellView adjacent) && !adjacent.IsLand) coastal = true;
+                if (!coastal) continue;
+                GameObject rimObject = new GameObject("Shore " + pair.Key);
+                rimObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+                rimObject.transform.SetParent(tacticalRoot.transform, false);
+                LineRenderer rim = rimObject.AddComponent<LineRenderer>();
+                rim.loop = true;
+                rim.useWorldSpace = true;
+                rim.positionCount = 6;
+                rim.widthMultiplier = .055f;
+                rim.material = NewOverlayMaterial(new Color(.50f, .88f, .76f, .72f));
+                rim.startColor = new Color(.50f, .88f, .76f, .72f);
+                rim.endColor = rim.startColor;
+                for (int corner = 0; corner < 6; corner++)
+                {
+                    float angle = corner * Mathf.PI / 3f;
+                    rim.SetPosition(corner, pair.Value.transform.position + new Vector3(Mathf.Cos(angle) * .96f, CellSurfaceOffset + .03f, Mathf.Sin(angle) * .96f));
+                }
+            }
+        }
+
+        private void BuildTacticalReferenceMarks()
+        {
+            HexCoord centerCoord = new HexCoord(tacticalBattlefield.Width / 2, tacticalBattlefield.Height / 2);
+            HexCellView centerCell = localCells[centerCoord];
+            GameObject centerObject = new GameObject("Parent Hex Center");
+            centerObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+            centerObject.transform.SetParent(tacticalRoot.transform, false);
+            LineRenderer ring = centerObject.AddComponent<LineRenderer>();
+            ring.loop = true;
+            ring.useWorldSpace = true;
+            ring.positionCount = 48;
+            ring.widthMultiplier = .075f;
+            ring.material = NewOverlayMaterial(new Color(.98f, .73f, .19f, .92f));
+            ring.startColor = new Color(.98f, .73f, .19f, .92f);
+            ring.endColor = ring.startColor;
+            for (int index = 0; index < ring.positionCount; index++)
+            {
+                float angle = index / (float)ring.positionCount * Mathf.PI * 2f;
+                ring.SetPosition(index, centerCell.transform.position + new Vector3(Mathf.Cos(angle) * .54f, CellSurfaceOffset + .09f, Mathf.Sin(angle) * .54f));
+            }
+
+            GameObject northObject = new GameObject("North Reference");
+            northObject.transform.SetParent(tacticalRoot.transform, false);
+            HexCoord northCoord = new HexCoord(tacticalBattlefield.Width - 2, tacticalBattlefield.Height - 2);
+            northObject.transform.position = localCells[northCoord].transform.position + Vector3.up * .34f;
+            northObject.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            TextMesh north = northObject.AddComponent<TextMesh>();
+            north.text = "N\n▲";
+            north.alignment = TextAlignment.Center;
+            north.anchor = TextAnchor.MiddleCenter;
+            north.fontSize = 48;
+            north.characterSize = .10f;
+            north.color = new Color(.91f, .86f, .67f, .92f);
+        }
+
+        private void UpdateTacticalPointer()
+        {
+            Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
+            if (returnToIslandRect.Contains(guiPointer)) return;
+            HexCellView next = PickLocalHexAtScreenPoint(Input.mousePosition);
+            if (next == hoveredLocalCell) return;
+            if (hoveredLocalCell != null) hoveredLocalCell.SetHighlighted(false);
+            hoveredLocalCell = next;
+            if (hoveredLocalCell != null) hoveredLocalCell.SetHighlighted(true);
+        }
+
+        private HexCellView PickLocalHexAtScreenPoint(Vector2 screenPoint)
+        {
+            HexCellView best = null;
+            float bestDistance = float.MaxValue;
+            foreach (HexCellView cell in localCells.Values)
+            {
+                Vector3 surface = cell.transform.position + Vector3.up * CellSurfaceOffset;
+                Vector3 center = mapCamera.WorldToScreenPoint(surface);
+                if (center.z <= 0f) continue;
+                Vector3 edge = mapCamera.WorldToScreenPoint(surface + Vector3.right * HexRadius);
+                float radius = Vector2.Distance(center, edge) * 1.04f;
+                float distance = Vector2.SqrMagnitude(screenPoint - new Vector2(center.x, center.y));
+                if (distance > radius * radius || distance >= bestDistance) continue;
+                best = cell;
+                bestDistance = distance;
+            }
+            return best;
+        }
+
         private void UpdatePointer()
         {
             // Do not let hover bookkeeping clear the committed route while its
             // movement coroutine is animating the counter.
             if (mapCamera == null || unitMoving) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
-            if (endTurnRect.Contains(guiPointer) || counterMenuOpen && counterMenuRect.Contains(guiPointer)) return;
+            if (endTurnRect.Contains(guiPointer) || enterTacticalRect.Contains(guiPointer) || counterMenuOpen && counterMenuRect.Contains(guiPointer)) return;
             bool leftClick = Input.GetMouseButtonDown(0);
             bool rightClick = Input.GetMouseButtonDown(1);
             Ray ray = mapCamera.ScreenPointToRay(Input.mousePosition);
@@ -766,6 +1050,100 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator RunTacticalRegression()
+        {
+            yield return null;
+            HexCellView parent = FindCoastalOperationalCell();
+            Vector3 originalFocus = cameraFocus;
+            float originalDistance = cameraDistance;
+            TacticalBattlefieldState first = TacticalBattlefieldExtractor.Extract(
+                parent.Coord, parent.Longitude, parent.Latitude,
+                (longitude, latitude) => elevation.SampleMetres(longitude, latitude),
+                (longitude, latitude) => coastline.ContainsLand(longitude, latitude));
+            TacticalBattlefieldState second = TacticalBattlefieldExtractor.Extract(
+                parent.Coord, parent.Longitude, parent.Latitude,
+                (longitude, latitude) => elevation.SampleMetres(longitude, latitude),
+                (longitude, latitude) => coastline.ContainsLand(longitude, latitude));
+            if (!BattlefieldsMatch(first, second, out string deterministicFailure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_TACTICAL_REGRESSION_FAILED deterministic " + deterministicFailure);
+                Application.Quit(1);
+                yield break;
+            }
+            foreach (TacticalBattlefieldCell cell in first.Cells)
+            {
+                HexCoord roundTrip = default;
+                if (!first.Contains(cell.Longitude, cell.Latitude) ||
+                    !first.TryGeographicToLocal(cell.Longitude, cell.Latitude, out roundTrip) ||
+                    !roundTrip.Equals(cell.LocalCoord) || !cell.Id.StartsWith(first.BattlefieldId + ":", StringComparison.Ordinal))
+                {
+                    Debug.LogError($"ALWAYS_FAITHFUL_TACTICAL_REGRESSION_FAILED containment cell={cell.Id} roundTrip={roundTrip}");
+                    Application.Quit(1);
+                    yield break;
+                }
+            }
+            TacticalBattlefieldState restored = JsonUtility.FromJson<TacticalBattlefieldState>(JsonUtility.ToJson(first));
+            int coastalLand = 0;
+            int coastalWater = 0;
+            foreach (TacticalBattlefieldCell cell in first.Cells)
+            {
+                if (cell.Terrain == TacticalTerrain.Water) coastalWater++;
+                else coastalLand++;
+            }
+            if (restored == null || restored.SchemaVersion != TacticalBattlefieldState.CurrentSchemaVersion ||
+                restored.BattlefieldId != first.BattlefieldId || !restored.ParentHex.Equals(parent.Coord) ||
+                restored.Cells.Count != first.Cells.Count || coastalLand == 0 || coastalWater == 0)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_TACTICAL_REGRESSION_FAILED serialized identity");
+                Application.Quit(1);
+                yield break;
+            }
+            for (int cycle = 0; cycle < 3; cycle++)
+            {
+                EnterTacticalMap(parent, false);
+                if (!tacticalMode || tacticalRoot == null || !tacticalRoot.activeSelf || overviewRoot.activeSelf || localCells.Count != first.Cells.Count)
+                {
+                    Debug.LogError($"ALWAYS_FAITHFUL_TACTICAL_REGRESSION_FAILED enter cycle={cycle + 1}");
+                    Application.Quit(1);
+                    yield break;
+                }
+                ReturnToIsland(false);
+                if (tacticalMode || !overviewRoot.activeSelf || tacticalRoot.activeSelf ||
+                    Vector3.Distance(cameraFocus, originalFocus) > .0001f || Mathf.Abs(cameraDistance - originalDistance) > .0001f)
+                {
+                    Debug.LogError($"ALWAYS_FAITHFUL_TACTICAL_REGRESSION_FAILED drift cycle={cycle + 1} focus={cameraFocus}/{originalFocus} distance={cameraDistance}/{originalDistance}");
+                    Application.Quit(1);
+                    yield break;
+                }
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_REGRESSION_OK battlefield={first.BattlefieldId} parent={first.ParentHex} cells={first.Cells.Count} land={coastalLand} water={coastalWater} cellSize={first.CellSizeMetres}m origin={first.OriginLatitude:0.00000},{first.OriginLongitude:0.00000} cycles=3");
+            Application.Quit(0);
+        }
+
+        private static bool BattlefieldsMatch(TacticalBattlefieldState first, TacticalBattlefieldState second, out string failure)
+        {
+            if (first.BattlefieldId != second.BattlefieldId || !first.ParentHex.Equals(second.ParentHex) ||
+                first.OriginLongitude != second.OriginLongitude || first.OriginLatitude != second.OriginLatitude ||
+                first.Cells.Count != second.Cells.Count)
+            {
+                failure = "header mismatch";
+                return false;
+            }
+            for (int index = 0; index < first.Cells.Count; index++)
+            {
+                TacticalBattlefieldCell a = first.Cells[index];
+                TacticalBattlefieldCell b = second.Cells[index];
+                if (a.Id != b.Id || !a.LocalCoord.Equals(b.LocalCoord) || a.Longitude != b.Longitude ||
+                    a.Latitude != b.Latitude || a.ElevationMetres != b.ElevationMetres || a.Terrain != b.Terrain)
+                {
+                    failure = "cell mismatch at " + index;
+                    return false;
+                }
+            }
+            failure = null;
+            return true;
+        }
+
         private bool ValidateAuthoritativeState(out string failure)
         {
             var probe = new TacticalUnitState("test-unit", "Test Unit", new HexCoord(2, 3), 4);
@@ -819,7 +1197,7 @@ namespace AlwaysFaithful.Prototype
             GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             marker.name = destination ? "Movement Destination" : "Movement Waypoint";
             marker.layer = LayerMask.NameToLayer("Ignore Raycast");
-            marker.transform.SetParent(transform, false);
+            marker.transform.SetParent(overviewRoot.transform, false);
             marker.transform.position = position;
             marker.transform.localScale = Vector3.one * (destination ? .24f : .15f);
             Color color = destination ? new Color(1f, .78f, .20f) : new Color(.52f, .96f, .79f);
@@ -837,16 +1215,22 @@ namespace AlwaysFaithful.Prototype
 
         private void UpdateCamera()
         {
-            cameraDistance = Mathf.Clamp(cameraDistance - Input.mouseScrollDelta.y * Mathf.Max(1.5f, cameraDistance * .08f), 10f, 240f);
+            float maximumDistance = tacticalMode ? 48f : 240f;
+            cameraDistance = Mathf.Clamp(cameraDistance - Input.mouseScrollDelta.y * Mathf.Max(1.5f, cameraDistance * .08f), 10f, maximumDistance);
             float horizontal = (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow) ? 1f : 0f);
             float vertical = (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow) ? 1f : 0f);
             Vector3 pan = new Vector3(horizontal, 0f, vertical);
             if (Input.GetMouseButton(2)) pan += new Vector3(-Input.GetAxis("Mouse X") * 3f, 0f, -Input.GetAxis("Mouse Y") * 3f);
             cameraFocus += pan * (cameraDistance * .55f * Time.unscaledDeltaTime);
+            if (tacticalMode)
+            {
+                cameraFocus.x = Mathf.Clamp(cameraFocus.x, -14f, 14f);
+                cameraFocus.z = Mathf.Clamp(cameraFocus.z, -11f, 11f);
+            }
             if (Input.GetKeyDown(KeyCode.R))
             {
-                cameraFocus = HexToWorld(new HexCoord(Width / 2, Height / 2));
-                cameraDistance = 190f;
+                cameraFocus = tacticalMode ? Vector3.zero : HexToWorld(new HexCoord(Width / 2, Height / 2));
+                cameraDistance = tacticalMode ? 33f : 190f;
             }
             ApplyCamera();
         }
@@ -854,6 +1238,12 @@ namespace AlwaysFaithful.Prototype
         private void ApplyCamera()
         {
             if (mapCamera == null) return;
+            if (tacticalMode)
+            {
+                mapCamera.transform.position = cameraFocus + new Vector3(0f, cameraDistance * 1.08f, -cameraDistance * .56f);
+                mapCamera.transform.LookAt(cameraFocus);
+                return;
+            }
             float overview = Mathf.InverseLerp(42f, 190f, cameraDistance);
             float height = Mathf.Lerp(1.08f, 1.48f, overview);
             float setback = Mathf.Lerp(.92f, .34f, overview);
@@ -885,6 +1275,14 @@ namespace AlwaysFaithful.Prototype
             GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
             float uiWidth = Screen.width / scale;
             float uiHeight = Screen.height / scale;
+
+            if (tacticalMode)
+            {
+                DrawTacticalInterface(uiWidth, uiHeight);
+                DrawTransitionOverlay(uiWidth, uiHeight);
+                GUI.matrix = Matrix4x4.identity;
+                return;
+            }
 
             GUI.Box(new Rect(20f, 18f, 370f, 224f), GUIContent.none);
             GUI.Label(new Rect(38f, 30f, 235f, 30f), "ALWAYS FAITHFUL", titleStyle);
@@ -919,10 +1317,17 @@ namespace AlwaysFaithful.Prototype
             GUI.enabled = true;
 
             HexCellView inspected = selectedCell != null ? selectedCell : hoveredCell;
+            enterTacticalRect = Rect.zero;
             if (inspected != null && !movePlanning)
             {
-                GUI.Box(new Rect(20f, 250f, 370f, 72f), GUIContent.none);
+                float inspectionHeight = inspected.IsLand && selectedCell == inspected ? 110f : 72f;
+                GUI.Box(new Rect(20f, 250f, 370f, inspectionHeight), GUIContent.none);
                 GUI.Label(new Rect(38f, 259f, 330f, 50f), CellInspectionText(inspected, selectedCell != null ? "SELECTED" : "MAP INSPECT"), bodyStyle);
+                if (inspected.IsLand && selectedCell == inspected)
+                {
+                    enterTacticalRect = new Rect(218f, 320f, 152f, 30f);
+                    if (GUI.Button(enterTacticalRect, "OPEN 250 M MAP", buttonStyle)) RequestTacticalMap(inspected);
+                }
             }
 
             GUI.Box(new Rect(uiWidth - 310f, uiHeight - 83f, 288f, 61f), GUIContent.none);
@@ -938,7 +1343,43 @@ namespace AlwaysFaithful.Prototype
                     BeginMovePlanning();
                 GUI.enabled = true;
             }
+            DrawTransitionOverlay(uiWidth, uiHeight);
             GUI.matrix = Matrix4x4.identity;
+        }
+
+        private void DrawTacticalInterface(float uiWidth, float uiHeight)
+        {
+            GUI.Box(new Rect(20f, 18f, 405f, 244f), GUIContent.none);
+            GUI.Label(new Rect(38f, 30f, 250f, 30f), "ALWAYS FAITHFUL", titleStyle);
+            GUI.Label(new Rect(287f, 34f, 118f, 22f), "TACTICAL LAYER", badgeStyle);
+            GUI.Label(new Rect(38f, 63f, 350f, 24f), "LOCAL BATTLEFIELD  •  250 M HEXES", badgeStyle);
+            GUI.Label(new Rect(38f, 94f, 340f, 25f), tacticalBattlefield.BattlefieldId, unitNameStyle);
+            GUI.Label(new Rect(38f, 124f, 340f, 40f),
+                $"Parent hex {tacticalBattlefield.ParentHex}  •  {tacticalBattlefield.Cells.Count} cells\n" +
+                $"Center {tacticalBattlefield.CenterLatitude:0.00000}°N  •  {tacticalBattlefield.CenterLongitude:0.00000}°E", bodyStyle);
+            GUI.Label(new Rect(38f, 170f, 340f, 34f),
+                $"Area {TacticalWidthKilometres():0.00} × {(tacticalBattlefield.Height * tacticalBattlefield.CellSizeMetres / 1000f):0.00} km  •  Relief {localMinimumLandElevation:0}–{localMaximumLandElevation:0} m", bodyStyle);
+            returnToIslandRect = new Rect(244f, 207f, 161f, 34f);
+            GUI.enabled = !mapTransitionActive;
+            if (GUI.Button(returnToIslandRect, "RETURN TO ISLAND", buttonStyle)) ReturnToIsland(true);
+            GUI.enabled = true;
+
+            if (hoveredLocalCell != null)
+            {
+                GUI.Box(new Rect(20f, 272f, 405f, 76f), GUIContent.none);
+                GUI.Label(new Rect(38f, 282f, 360f, 54f), CellInspectionText(hoveredLocalCell, "LOCAL INSPECT"), bodyStyle);
+            }
+            GUI.Box(new Rect(uiWidth - 310f, uiHeight - 83f, 288f, 61f), GUIContent.none);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 70f, 256f, 45f), "Hover Hex  •  Return to Island\nMMB/WASD Pan  •  Wheel Zoom  •  R Reset", bodyStyle);
+        }
+
+        private void DrawTransitionOverlay(float uiWidth, float uiHeight)
+        {
+            if (mapTransitionOpacity <= .001f) return;
+            Color previous = GUI.color;
+            GUI.color = new Color(.025f, .055f, .052f, mapTransitionOpacity);
+            GUI.DrawTexture(new Rect(0f, 0f, uiWidth, uiHeight), Texture2D.whiteTexture);
+            GUI.color = previous;
         }
 
         private void DrawActionPointPips(Rect area)
@@ -975,8 +1416,21 @@ namespace AlwaysFaithful.Prototype
 
         private static float GetUiScale() => Mathf.Clamp(Screen.height / 720f, .90f, 1.35f);
 
+        private float TacticalWidthKilometres()
+            => ((tacticalBattlefield.Width - 1) * Mathf.Sqrt(3f) * .5f + 1f) * tacticalBattlefield.CellSizeMetres / 1000f;
+
         private static Vector3 HexToWorld(HexCoord hex)
             => new Vector3(hex.Q * HexRadius * 1.5f, 0f, (hex.R + (hex.Q & 1) * .5f) * HexRadius * Mathf.Sqrt(3f));
+
+        private static Vector3 LocalHexToWorld(HexCoord hex)
+        {
+            int centerQ = TacticalBattlefieldExtractor.DefaultWidth / 2;
+            int centerR = TacticalBattlefieldExtractor.DefaultHeight / 2;
+            return new Vector3(
+                (hex.Q - centerQ) * HexRadius * 1.5f,
+                0f,
+                (hex.R - centerR + ((hex.Q & 1) - (centerQ & 1)) * .5f) * HexRadius * Mathf.Sqrt(3f));
+        }
 
         private static Mesh CreateHexMesh(float radius, float thickness)
         {
@@ -1037,6 +1491,17 @@ namespace AlwaysFaithful.Prototype
             return Color.Lerp(color, color * .68f, contour * .30f);
         }
 
+        private Color LocalLandColor(float metres)
+        {
+            float relief = Mathf.InverseLerp(localMinimumLandElevation, Mathf.Max(localMinimumLandElevation + 1f, localMaximumLandElevation), metres);
+            Color low = new Color(.18f, .34f, .22f);
+            Color high = new Color(.58f, .53f, .38f);
+            Color color = Color.Lerp(low, high, relief);
+            float contourDistance = Mathf.Abs(Mathf.Repeat(metres + 12.5f, 25f) - 12.5f);
+            float contour = 1f - Mathf.SmoothStep(0f, 3.5f, contourDistance);
+            return Color.Lerp(color, color * .69f, contour * .34f);
+        }
+
         private static Color WaterColor(float metres)
         {
             float depth = Mathf.Max(0f, -metres);
@@ -1075,7 +1540,7 @@ namespace AlwaysFaithful.Prototype
         private void BuildPathLine()
         {
             GameObject lineObject = new GameObject("Movement Path Preview");
-            lineObject.transform.SetParent(transform, false);
+            lineObject.transform.SetParent(overviewRoot.transform, false);
             pathLine = lineObject.AddComponent<LineRenderer>();
             Shader overlayShader = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
             pathLine.material = new Material(overlayShader);
@@ -1092,7 +1557,7 @@ namespace AlwaysFaithful.Prototype
         private void BuildOccupiedHexRing()
         {
             GameObject ringObject = new GameObject("Occupied Hex Outline");
-            ringObject.transform.SetParent(transform, false);
+            ringObject.transform.SetParent(overviewRoot.transform, false);
             occupiedHexRing = ringObject.AddComponent<LineRenderer>();
             Shader overlayShader = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
             occupiedHexRing.material = new Material(overlayShader);
@@ -1145,7 +1610,7 @@ namespace AlwaysFaithful.Prototype
         private void CreateCoastStroke(string objectName, Vector3 start, Vector3 end, float width, Color color, Material material, int sortingOrder)
         {
             GameObject accent = new GameObject(objectName);
-            accent.transform.SetParent(transform, false);
+            accent.transform.SetParent(overviewRoot.transform, false);
             LineRenderer line = accent.AddComponent<LineRenderer>();
             line.useWorldSpace = true;
             line.positionCount = 2;
@@ -1179,7 +1644,7 @@ namespace AlwaysFaithful.Prototype
                 ? Mathf.Clamp(measuredElevation, 0f, 4000f) * .00072f + .34f
                 : .22f;
             GameObject labelObject = new GameObject("Map Label " + text);
-            labelObject.transform.SetParent(transform, false);
+            labelObject.transform.SetParent(overviewRoot.transform, false);
             labelObject.transform.position = new Vector3(q * HexRadius * 1.5f, y, (r + .25f) * HexRadius * Mathf.Sqrt(3f));
             labelObject.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
             TextMesh label = labelObject.AddComponent<TextMesh>();
@@ -1225,6 +1690,25 @@ namespace AlwaysFaithful.Prototype
             line.sortingOrder = 66;
             line.SetPosition(0, start);
             line.SetPosition(1, end);
+        }
+
+        private HexCellView FindCoastalOperationalCell()
+        {
+            HexCellView best = cells[unitState.Position];
+            int bestDistance = int.MaxValue;
+            foreach (HexCellView candidate in cells.Values)
+            {
+                if (!candidate.IsLand) continue;
+                bool coast = false;
+                foreach (HexCoord neighbor in MovementPlanner.Neighbors(candidate.Coord))
+                    if (cells.TryGetValue(neighbor, out HexCellView adjacent) && !adjacent.IsLand) coast = true;
+                if (!coast) continue;
+                int distance = HexCoord.Distance(unitState.Position, candidate.Coord);
+                if (distance >= bestDistance) continue;
+                best = candidate;
+                bestDistance = distance;
+            }
+            return best;
         }
 
         private HexCoord FindDeploymentHex(HexCoord preferred)

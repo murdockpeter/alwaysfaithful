@@ -8,6 +8,8 @@ The prototype now presents the complete island of Taiwan as a 64×104 whole-isla
 
 Platoon position, AP, readiness, and selection now live in serializable gameplay state rather than in the counter renderer. The compact command card presents the current turn, unit state, occupied terrain, and four readable AP pips at every supported window height.
 
+Any selected land hex can now open a deterministic 25×19 local battlefield. Its 475 hexes use 250 m geographic spacing and retain a versioned battlefield ID, parent operational hex, center/origin coordinates, bounds, terrain, and elevation samples. A short command-table transition leads to a local briefing card, amplified local relief, continuous coastal classification and shoreline accents, local hex inspection, bounded camera navigation, and a Return to Island control that restores the exact prior overview camera.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -18,6 +20,8 @@ Controls:
 - Hover a highlighted destination to preview its least-cost path.
 - Left click a highlighted destination to confirm the move.
 - Left click another hex to inspect its terrain and movement cost.
+- Select a land hex and choose **Open 250 m Map** to enter its local tactical battlefield.
+- Use **Return to Island** to restore the operational map and its prior camera position.
 - Use **End Turn** on the unit card to advance the turn and restore the platoon's AP.
 - Mouse wheel zooms.
 - Middle-mouse drag or WASD pans.
@@ -27,7 +31,7 @@ Controls:
 
 The prototype carries a full-Taiwan crop from the same Natural Earth coastline and NOAA ETOPO 2022 source pipeline used by Sea of Uncertainty so the games share geographic provenance and a related command-map palette. A dedicated two-sided cartographic terrain shader renders the complete board consistently from strategic and tactical camera angles. Land elevation uses subtle 250 m contour bands, water uses measured shelf/slope/abyss depth bands, and true land-water edges receive a two-stage wet-shore/coast highlight.
 
-The current ETOPO bake is two arc-minutes (roughly 3–4 km sample spacing) and the coastline is simplified for an operational map. These resources drive presentation and broad terrain classes on the whole-island layer; they are not authoritative sources for tactical cover or LOS. Sea of Uncertainty engagements will later open localized 250 m tactical boards backed by higher-resolution DEM and vector data.
+The current ETOPO bake is two arc-minutes (roughly 3–4 km sample spacing) and the coastline is simplified for an operational map. The 250 m local grids presently resample and visually amplify these shared sources, which preserves geographic identity and shoreline continuity but does not invent tactical-detail accuracy. Higher-resolution DEM and vector data will later replace those samples for tactical cover and LOS.
 
 Regenerate the checked-in Taiwan resources with `tools/build-taiwan-coastline.cjs` and `tools/build-taiwan-elevation.ps1`.
 
