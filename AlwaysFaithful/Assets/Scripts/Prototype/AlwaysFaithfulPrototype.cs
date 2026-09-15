@@ -34,6 +34,8 @@ namespace AlwaysFaithful.Prototype
         private readonly List<GeographicLabel> geographicLabels = new List<GeographicLabel>();
         private Camera mapCamera;
         private UnitCounterView unit;
+        private TacticalUnitState unitState;
+        private TacticalTurnState turnState;
         private HexCellView selectedCell;
         private HexCellView hoveredCell;
         private Vector3 cameraFocus;
@@ -43,6 +45,9 @@ namespace AlwaysFaithful.Prototype
         private GUIStyle titleStyle;
         private GUIStyle bodyStyle;
         private GUIStyle badgeStyle;
+        private GUIStyle unitNameStyle;
+        private GUIStyle stateStyle;
+        private GUIStyle buttonStyle;
         private LineRenderer pathLine;
         private LineRenderer occupiedHexRing;
         private bool unitMoving;
@@ -51,6 +56,7 @@ namespace AlwaysFaithful.Prototype
         private bool counterMenuOpen;
         private bool movePlanning;
         private Rect counterMenuRect;
+        private Rect endTurnRect;
         private int landCellCount;
         private int waterCellCount;
         private float maximumLandElevation;
@@ -231,7 +237,9 @@ namespace AlwaysFaithful.Prototype
             counterCollider.radius = .65f;
             counterCollider.center = Vector3.up * .12f;
             unit = counterRoot.AddComponent<UnitCounterView>();
-            unit.Initialize("USMC Rifle Platoon", start);
+            unitState = new TacticalUnitState("usmc-rifle-platoon-1", "USMC Rifle Platoon", start, PlatoonMovementPoints);
+            turnState = new TacticalTurnState();
+            unit.Initialize(unitState.DisplayName);
             UpdateOccupiedHexRing(start);
 
             GameObject baseObject = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -253,6 +261,8 @@ namespace AlwaysFaithful.Prototype
             faceRenderer.sharedMaterial = NewOverlayMaterial(new Color(.76f, .72f, .55f));
             faceRenderer.sortingOrder = 62;
             Destroy(face.GetComponent<Collider>());
+            unit.BindRenderers(baseRenderer, faceRenderer);
+            unit.Present(unitState);
 
             GameObject symbolObject = new GameObject("Unit Label");
             symbolObject.transform.SetParent(counterRoot.transform, false);
@@ -280,7 +290,7 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 return;
             }
-            if (unit.IsSelected || movePlanning || counterMenuOpen || reachable.Count != 0)
+            if (unitState.IsSelected || movePlanning || counterMenuOpen || reachable.Count != 0)
             {
                 Debug.LogError("ALWAYS_FAITHFUL_SMOKE_FAILED prototype did not start neutral");
                 Application.Quit(1);
@@ -300,7 +310,7 @@ namespace AlwaysFaithful.Prototype
                 return;
             }
             BeginMovePlanning();
-            if (reachable.Count < 2 || MovementPlanner.FindPath(board, unit.Position, unit.Position, PlatoonMovementPoints).Count != 1)
+            if (reachable.Count < 2 || MovementPlanner.FindPath(board, unitState.Position, unitState.Position, unitState.RemainingActionPoints).Count != 1)
             {
                 Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED movement reachable={reachable.Count}");
                 Application.Quit(1);
@@ -321,7 +331,13 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 return;
             }
-            Debug.Log($"ALWAYS_FAITHFUL_SMOKE_OK cells={cells.Count}, land={landCellCount}, water={waterCellCount}, maximumElevation={maximumLandElevation:0}m, topNormalY={hexTopNormalY:0.000}, reachable={reachable.Count}, pathMarkers={pathMarkers.Count}, unit={unit.UnitName}, hex={unit.Position}, scale={MapHexKilometres:0.#}km");
+            if (!ValidateAuthoritativeState(out string stateFailure))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SMOKE_FAILED authoritative state {stateFailure}");
+                Application.Quit(1);
+                return;
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_SMOKE_OK cells={cells.Count}, land={landCellCount}, water={waterCellCount}, maximumElevation={maximumLandElevation:0}m, topNormalY={hexTopNormalY:0.000}, reachable={reachable.Count}, pathMarkers={pathMarkers.Count}, unit={unitState.DisplayName}, hex={unitState.Position}, ap={unitState.RemainingActionPoints}/{unitState.MaximumActionPoints}, turn={turnState.TurnNumber}, scale={MapHexKilometres:0.#}km");
             Application.Quit(0);
         }
 
@@ -354,8 +370,8 @@ namespace AlwaysFaithful.Prototype
             // Do not let hover bookkeeping clear the committed route while its
             // movement coroutine is animating the counter.
             if (mapCamera == null || unitMoving) return;
-            Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
-            if (counterMenuOpen && counterMenuRect.Contains(guiPointer)) return;
+            Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
+            if (endTurnRect.Contains(guiPointer) || counterMenuOpen && counterMenuRect.Contains(guiPointer)) return;
             bool leftClick = Input.GetMouseButtonDown(0);
             bool rightClick = Input.GetMouseButtonDown(1);
             Ray ray = mapCamera.ScreenPointToRay(Input.mousePosition);
@@ -379,8 +395,8 @@ namespace AlwaysFaithful.Prototype
                 }
                 if (rightClick)
                 {
-                    string target = pointedUnit != null ? unit.UnitName : nextHover.Coord.ToString();
-                    Debug.Log($"ALWAYS_FAITHFUL_RMB target={target} selected={unit.IsSelected}");
+                    string target = pointedUnit != null ? unitState.DisplayName : nextHover.Coord.ToString();
+                    Debug.Log($"ALWAYS_FAITHFUL_RMB target={target} selected={unitState.IsSelected}");
                     if (pointedUnit != null)
                     {
                         OpenCounterMenu(guiPointer);
@@ -529,10 +545,12 @@ namespace AlwaysFaithful.Prototype
 
         private bool TryIssueMove(HexCoord destination)
         {
-            if (unitMoving || !movePlanning || !unit.IsSelected || !reachable.ContainsKey(destination)) return false;
-            List<HexCoord> path = MovementPlanner.FindPath(board, unit.Position, destination, PlatoonMovementPoints);
+            if (unitMoving || !movePlanning || !unitState.IsSelected || !reachable.TryGetValue(destination, out int moveCost)) return false;
+            List<HexCoord> path = MovementPlanner.FindPath(board, unitState.Position, destination, unitState.RemainingActionPoints);
             if (path.Count < 2) return false;
-            Debug.Log($"ALWAYS_FAITHFUL_MOVE_ACCEPTED from={unit.Position} to={destination} steps={path.Count - 1}");
+            if (!unitState.TryBeginMove(moveCost)) return false;
+            unit.Present(unitState);
+            Debug.Log($"ALWAYS_FAITHFUL_MOVE_ACCEPTED from={unitState.Position} to={destination} steps={path.Count - 1} cost={moveCost} ap={unitState.RemainingActionPoints}/{unitState.MaximumActionPoints}");
             StartCoroutine(MoveUnit(destination, path));
             return true;
         }
@@ -548,10 +566,11 @@ namespace AlwaysFaithful.Prototype
             ClearReachable();
             ClearPreviewPath();
             movePlanning = false;
-            unit.SetSelected(true);
+            unitState.IsSelected = true;
+            unit.Present(unitState);
             counterMenuRect = new Rect(
-                Mathf.Clamp(pointer.x, 8f, Screen.width - 190f),
-                Mathf.Clamp(pointer.y, 8f, Screen.height - 90f),
+                Mathf.Clamp(pointer.x, 8f, Screen.width / GetUiScale() - 190f),
+                Mathf.Clamp(pointer.y, 8f, Screen.height / GetUiScale() - 90f),
                 178f,
                 72f);
             counterMenuOpen = true;
@@ -559,9 +578,11 @@ namespace AlwaysFaithful.Prototype
 
         private void BeginMovePlanning()
         {
+            if (!unitState.CanMove) return;
             counterMenuOpen = false;
             movePlanning = true;
-            unit.SetSelected(true);
+            unitState.IsSelected = true;
+            unit.Present(unitState);
             RefreshReachable();
         }
 
@@ -569,9 +590,19 @@ namespace AlwaysFaithful.Prototype
         {
             counterMenuOpen = false;
             movePlanning = false;
-            unit.SetSelected(false);
+            unitState.IsSelected = false;
+            unit.Present(unitState);
             ClearReachable();
             ClearPreviewPath();
+        }
+
+        private void EndTurn()
+        {
+            if (unitMoving) return;
+            CancelUnitInteraction();
+            turnState.EndTurn(unitState);
+            unit.Present(unitState);
+            Debug.Log($"ALWAYS_FAITHFUL_TURN_STARTED turn={turnState.TurnNumber} side={turnState.ActiveSide} ap={unitState.RemainingActionPoints}/{unitState.MaximumActionPoints}");
         }
 
         private void SelectCell(HexCellView cell)
@@ -589,10 +620,10 @@ namespace AlwaysFaithful.Prototype
         private void RefreshReachable()
         {
             ClearReachable();
-            foreach (KeyValuePair<HexCoord, int> pair in MovementPlanner.Reachable(board, unit.Position, PlatoonMovementPoints))
+            foreach (KeyValuePair<HexCoord, int> pair in MovementPlanner.Reachable(board, unitState.Position, unitState.RemainingActionPoints))
             {
                 reachable[pair.Key] = pair.Value;
-                if (!pair.Key.Equals(unit.Position) && cells.TryGetValue(pair.Key, out HexCellView cell)) cell.SetReachable(true);
+                if (!pair.Key.Equals(unitState.Position) && cells.TryGetValue(pair.Key, out HexCellView cell)) cell.SetReachable(true);
             }
         }
 
@@ -606,8 +637,8 @@ namespace AlwaysFaithful.Prototype
         private void PreviewMovementPath(HexCellView destination)
         {
             ClearPreviewPath();
-            if (destination == null || !unit.IsSelected || !reachable.ContainsKey(destination.Coord)) return;
-            DisplayMovementPath(MovementPlanner.FindPath(board, unit.Position, destination.Coord, PlatoonMovementPoints));
+            if (destination == null || !unitState.IsSelected || !reachable.ContainsKey(destination.Coord)) return;
+            DisplayMovementPath(MovementPlanner.FindPath(board, unitState.Position, destination.Coord, unitState.RemainingActionPoints));
         }
 
         private void DisplayMovementPath(IReadOnlyList<HexCoord> path)
@@ -654,14 +685,14 @@ namespace AlwaysFaithful.Prototype
                 }
                 unit.transform.position = end;
             }
-            unit.SetPosition(destination);
+            unitState.CompleteMove(destination);
+            unit.Present(unitState);
             UpdateOccupiedHexRing(destination);
             yield return new WaitForSeconds(.18f);
             ClearPreviewPath();
             unitMoving = false;
             movePlanning = false;
-            unit.SetSelected(false);
-            Debug.Log($"ALWAYS_FAITHFUL_MOVE_COMPLETED hex={unit.Position} world={unit.transform.position}");
+            Debug.Log($"ALWAYS_FAITHFUL_MOVE_COMPLETED hex={unitState.Position} ap={unitState.RemainingActionPoints}/{unitState.MaximumActionPoints} readiness={unitState.Readiness} world={unit.transform.position}");
         }
 
         private IEnumerator RunMovementRegression()
@@ -669,7 +700,7 @@ namespace AlwaysFaithful.Prototype
             // Exercise the same menu -> Move mode -> destination order path used
             // by the player, then prove model and rendered counter both changed.
             yield return null;
-            if (unit.IsSelected || movePlanning || counterMenuOpen || reachable.Count != 0)
+            if (unitState.IsSelected || movePlanning || counterMenuOpen || reachable.Count != 0)
             {
                 Debug.LogError("ALWAYS_FAITHFUL_MOVEMENT_REGRESSION_FAILED initial state was not neutral");
                 Application.Quit(1);
@@ -689,8 +720,9 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 yield break;
             }
-            HexCoord origin = unit.Position;
+            HexCoord origin = unitState.Position;
             Vector3 originWorld = unit.transform.position;
+            int startingActionPoints = unitState.RemainingActionPoints;
             HexCoord destination = origin;
             int greatestCost = -1;
             foreach (KeyValuePair<HexCoord, int> pair in reachable)
@@ -713,19 +745,64 @@ namespace AlwaysFaithful.Prototype
                 yield return null;
             }
             float travelled = Vector3.Distance(originWorld, unit.transform.position);
-            if (unitMoving || movePlanning || unit.IsSelected || !routePreserved || !unit.Position.Equals(destination) || travelled < .5f)
+            int expectedActionPoints = startingActionPoints - greatestCost;
+            if (unitMoving || movePlanning || unitState.IsSelected || !routePreserved || !unitState.Position.Equals(destination) ||
+                unitState.RemainingActionPoints != expectedActionPoints || !unit.Matches(unitState) || travelled < .5f)
             {
-                Debug.LogError($"ALWAYS_FAITHFUL_MOVEMENT_REGRESSION_FAILED completion moving={unitMoving} planning={movePlanning} selected={unit.IsSelected} routePreserved={routePreserved} origin={origin} actual={unit.Position} expected={destination} travelled={travelled:0.000}");
+                Debug.LogError($"ALWAYS_FAITHFUL_MOVEMENT_REGRESSION_FAILED completion moving={unitMoving} planning={movePlanning} selected={unitState.IsSelected} routePreserved={routePreserved} origin={origin} actual={unitState.Position} expected={destination} ap={unitState.RemainingActionPoints}/{expectedActionPoints} viewMatches={unit.Matches(unitState)} travelled={travelled:0.000}");
                 Application.Quit(1);
                 yield break;
             }
-            Debug.Log($"ALWAYS_FAITHFUL_MOVEMENT_REGRESSION_OK from={origin} to={destination} travelled={travelled:0.000}");
+            int previousTurn = turnState.TurnNumber;
+            EndTurn();
+            if (turnState.TurnNumber != previousTurn + 1 || unitState.RemainingActionPoints != unitState.MaximumActionPoints ||
+                unitState.Readiness != UnitReadiness.Available || unitState.IsSelected || !unit.Matches(unitState))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_MOVEMENT_REGRESSION_FAILED turn-reset turn={turnState.TurnNumber} ap={unitState.RemainingActionPoints} readiness={unitState.Readiness} viewMatches={unit.Matches(unitState)}");
+                Application.Quit(1);
+                yield break;
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_MOVEMENT_REGRESSION_OK from={origin} to={destination} cost={greatestCost} apAfterMove={expectedActionPoints} turn={turnState.TurnNumber} resetAp={unitState.RemainingActionPoints} travelled={travelled:0.000}");
             Application.Quit(0);
+        }
+
+        private bool ValidateAuthoritativeState(out string failure)
+        {
+            var probe = new TacticalUnitState("test-unit", "Test Unit", new HexCoord(2, 3), 4);
+            if (probe.TryBeginMove(0) || probe.TryBeginMove(5) || probe.RemainingActionPoints != 4)
+            {
+                failure = "illegal AP orders mutated state";
+                return false;
+            }
+            if (!probe.TryBeginMove(3) || probe.RemainingActionPoints != 1 || probe.Readiness != UnitReadiness.Moving)
+            {
+                failure = "legal order was not committed";
+                return false;
+            }
+            var destination = new HexCoord(4, 5);
+            probe.CompleteMove(destination);
+            if (!probe.Position.Equals(destination) || probe.Readiness != UnitReadiness.Available || probe.TryBeginMove(2))
+            {
+                failure = "completion or remaining-AP validation failed";
+                return false;
+            }
+            var turnProbe = new TacticalTurnState();
+            turnProbe.EndTurn(probe);
+            string serialized = JsonUtility.ToJson(probe);
+            TacticalUnitState restored = JsonUtility.FromJson<TacticalUnitState>(serialized);
+            if (turnProbe.TurnNumber != 2 || restored == null || restored.RemainingActionPoints != 4 ||
+                restored.Readiness != UnitReadiness.Available || !restored.Position.Equals(destination) || !unit.Matches(unitState))
+            {
+                failure = "turn reset, serialization, or view agreement failed";
+                return false;
+            }
+            failure = null;
+            return true;
         }
 
         private void DisplayCapturePath()
         {
-            HexCoord destination = unit.Position;
+            HexCoord destination = unitState.Position;
             int greatestCost = -1;
             foreach (KeyValuePair<HexCoord, int> pair in reachable)
             {
@@ -734,7 +811,7 @@ namespace AlwaysFaithful.Prototype
                 destination = pair.Key;
                 greatestCost = pair.Value;
             }
-            DisplayMovementPath(MovementPlanner.FindPath(board, unit.Position, destination, PlatoonMovementPoints));
+            DisplayMovementPath(MovementPlanner.FindPath(board, unitState.Position, destination, unitState.RemainingActionPoints));
         }
 
         private void CreatePathMarker(Vector3 position, bool destination)
@@ -804,33 +881,80 @@ namespace AlwaysFaithful.Prototype
         private void OnGUI()
         {
             EnsureStyles();
-            GUI.Box(new Rect(22f, 20f, 350f, 180f), GUIContent.none);
-            GUI.Label(new Rect(40f, 34f, 290f, 32f), "ALWAYS FAITHFUL", titleStyle);
-            GUI.Label(new Rect(40f, 66f, 290f, 24f), "TAIWAN 2030  •  WHOLE-ISLAND MAP", badgeStyle);
-            string selection = counterMenuOpen
-                ? "UNIT ORDERS  •  USMC Rifle Platoon\nChoose an order from the counter menu."
-                : movePlanning
-                ? "MOVE ORDER  •  USMC Rifle Platoon\nHex: " + unit.Position + "  •  4 AP  •  " + MapHexKilometres + " km/hex" +
-                  (hoveredCell != null && reachable.TryGetValue(hoveredCell.Coord, out int moveCost) && !hoveredCell.Coord.Equals(unit.Position)
-                      ? "\nLMB CONFIRM  •  Cost " + moveCost + " AP"
-                      : "\nHover a highlighted hex; LMB confirms")
-                : selectedCell != null
-                    ? CellInspectionText(selectedCell, "SELECTED")
-                    : hoveredCell != null
-                        ? CellInspectionText(hoveredCell, "MAP INSPECT")
-                        : "No unit selected.\nRMB the counter to open unit orders.\nHover any hex to inspect geography.";
-            GUI.Label(new Rect(40f, 98f, 314f, 88f), selection, bodyStyle);
+            float scale = GetUiScale();
+            GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+            float uiWidth = Screen.width / scale;
+            float uiHeight = Screen.height / scale;
 
-            GUI.Box(new Rect(Screen.width - 310f, Screen.height - 83f, 288f, 61f), GUIContent.none);
-            GUI.Label(new Rect(Screen.width - 294f, Screen.height - 70f, 256f, 45f), "RMB Unit Orders  •  LMB Confirm\nMMB/WASD Pan  •  Wheel Zoom  •  R Reset", bodyStyle);
+            GUI.Box(new Rect(20f, 18f, 370f, 224f), GUIContent.none);
+            GUI.Label(new Rect(38f, 30f, 235f, 30f), "ALWAYS FAITHFUL", titleStyle);
+            GUI.Label(new Rect(273f, 34f, 98f, 22f), $"TURN {turnState.TurnNumber}  •  USMC", badgeStyle);
+            GUI.Label(new Rect(38f, 61f, 320f, 20f), "TAIWAN 2030  •  WHOLE-ISLAND MAP", badgeStyle);
+            GUI.Label(new Rect(38f, 91f, 220f, 25f), unitState.DisplayName.ToUpperInvariant(), unitNameStyle);
+            stateStyle.normal.textColor = unitState.Readiness == UnitReadiness.Moving
+                ? new Color(.34f, .96f, .82f)
+                : unitState.Readiness == UnitReadiness.Spent
+                    ? new Color(.48f, .52f, .48f)
+                    : new Color(.96f, .73f, .20f);
+            GUI.Label(new Rect(275f, 93f, 94f, 21f), unitState.Readiness.ToString().ToUpperInvariant(), stateStyle);
+
+            HexCellView occupied = cells[unitState.Position];
+            GUI.Label(new Rect(38f, 120f, 325f, 22f), $"{unitState.Position}  •  {occupied.Terrain}  •  {occupied.ElevationMetres:0} m", bodyStyle);
+            GUI.Label(new Rect(38f, 145f, 74f, 22f), "ACTION", badgeStyle);
+            DrawActionPointPips(new Rect(105f, 145f, 168f, 20f));
+
+            string orderPrompt = counterMenuOpen
+                ? "Choose a unit order."
+                : movePlanning
+                    ? hoveredCell != null && reachable.TryGetValue(hoveredCell.Coord, out int moveCost) && !hoveredCell.Coord.Equals(unitState.Position)
+                        ? $"LMB confirm {hoveredCell.Coord}  •  Cost {moveCost} AP"
+                        : "Hover a highlighted destination."
+                    : unitState.CanMove
+                        ? "RMB counter for orders."
+                        : "Unit spent. End turn to restore AP.";
+            GUI.Label(new Rect(38f, 177f, 214f, 32f), orderPrompt, bodyStyle);
+            endTurnRect = new Rect(266f, 174f, 104f, 34f);
+            GUI.enabled = !unitMoving;
+            if (GUI.Button(endTurnRect, "END TURN", buttonStyle)) EndTurn();
+            GUI.enabled = true;
+
+            HexCellView inspected = selectedCell != null ? selectedCell : hoveredCell;
+            if (inspected != null && !movePlanning)
+            {
+                GUI.Box(new Rect(20f, 250f, 370f, 72f), GUIContent.none);
+                GUI.Label(new Rect(38f, 259f, 330f, 50f), CellInspectionText(inspected, selectedCell != null ? "SELECTED" : "MAP INSPECT"), bodyStyle);
+            }
+
+            GUI.Box(new Rect(uiWidth - 310f, uiHeight - 83f, 288f, 61f), GUIContent.none);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 70f, 256f, 45f), "RMB Unit Orders  •  LMB Confirm\nMMB/WASD Pan  •  Wheel Zoom  •  R Reset", bodyStyle);
 
             if (counterMenuOpen)
             {
                 GUI.Box(counterMenuRect, GUIContent.none);
                 GUI.Label(new Rect(counterMenuRect.x + 12f, counterMenuRect.y + 7f, 154f, 22f), "USMC RIFLE PLATOON", badgeStyle);
-                if (GUI.Button(new Rect(counterMenuRect.x + 10f, counterMenuRect.y + 34f, 158f, 28f), "MOVE  •  4 AP"))
+                GUI.enabled = unitState.CanMove;
+                string moveLabel = unitState.CanMove ? $"MOVE  •  {unitState.RemainingActionPoints} AP" : "MOVE  •  SPENT";
+                if (GUI.Button(new Rect(counterMenuRect.x + 10f, counterMenuRect.y + 34f, 158f, 28f), moveLabel, buttonStyle))
                     BeginMovePlanning();
+                GUI.enabled = true;
             }
+            GUI.matrix = Matrix4x4.identity;
+        }
+
+        private void DrawActionPointPips(Rect area)
+        {
+            const float gap = 5f;
+            float width = (area.width - gap * (unitState.MaximumActionPoints - 1)) / unitState.MaximumActionPoints;
+            for (int index = 0; index < unitState.MaximumActionPoints; index++)
+            {
+                Color previous = GUI.color;
+                GUI.color = index < unitState.RemainingActionPoints
+                    ? new Color(.96f, .73f, .20f, 1f)
+                    : new Color(.19f, .24f, .22f, 1f);
+                GUI.Box(new Rect(area.x + index * (width + gap), area.y, width, area.height), GUIContent.none);
+                GUI.color = previous;
+            }
+            GUI.Label(new Rect(area.x + area.width + 9f, area.y - 1f, 44f, 22f), $"{unitState.RemainingActionPoints}/{unitState.MaximumActionPoints}", bodyStyle);
         }
 
         private void EnsureStyles()
@@ -842,7 +966,14 @@ namespace AlwaysFaithful.Prototype
             bodyStyle.normal.textColor = new Color(.83f, .88f, .82f);
             badgeStyle = new GUIStyle(bodyStyle) { fontSize = 11, fontStyle = FontStyle.Bold };
             badgeStyle.normal.textColor = new Color(.34f, .78f, .73f);
+            unitNameStyle = new GUIStyle(bodyStyle) { fontSize = 15, fontStyle = FontStyle.Bold };
+            unitNameStyle.normal.textColor = new Color(.92f, .89f, .76f);
+            stateStyle = new GUIStyle(badgeStyle) { alignment = TextAnchor.MiddleRight };
+            stateStyle.normal.textColor = new Color(.96f, .73f, .20f);
+            buttonStyle = new GUIStyle(GUI.skin.button) { fontSize = 12, fontStyle = FontStyle.Bold };
         }
+
+        private static float GetUiScale() => Mathf.Clamp(Screen.height / 720f, .90f, 1.35f);
 
         private static Vector3 HexToWorld(HexCoord hex)
             => new Vector3(hex.Q * HexRadius * 1.5f, 0f, (hex.R + (hex.Q & 1) * .5f) * HexRadius * Mathf.Sqrt(3f));

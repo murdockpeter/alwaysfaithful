@@ -6,30 +6,62 @@ namespace AlwaysFaithful.Prototype
     public sealed class UnitCounterView : MonoBehaviour
     {
         private LineRenderer selectionRing;
+        private MeshRenderer baseRenderer;
+        private MeshRenderer faceRenderer;
 
-        public string UnitName { get; private set; }
-        public HexCoord Position { get; private set; }
-        public bool IsSelected { get; private set; }
+        public UnitReadiness PresentedReadiness { get; private set; }
+        public bool PresentedSelection { get; private set; }
 
-        public void Initialize(string unitName, HexCoord position)
+        public void Initialize(string displayName)
         {
-            UnitName = unitName;
-            Position = position;
-            name = unitName;
+            name = displayName;
             BuildSelectionRing();
-            SetSelected(false);
         }
 
-        public void SetSelected(bool selected)
+        public void BindRenderers(MeshRenderer counterBase, MeshRenderer counterFace)
         {
-            IsSelected = selected;
-            if (selectionRing != null) selectionRing.enabled = selected;
+            baseRenderer = counterBase;
+            faceRenderer = counterFace;
         }
 
-        public void SetPosition(HexCoord position)
+        public void Present(TacticalUnitState state)
         {
-            Position = position;
+            PresentedReadiness = state.Readiness;
+            PresentedSelection = state.IsSelected;
+            if (selectionRing != null)
+            {
+                selectionRing.enabled = state.IsSelected || state.Readiness == UnitReadiness.Moving;
+                Color ringColor = state.Readiness == UnitReadiness.Moving
+                    ? new Color(.34f, .96f, .82f, 1f)
+                    : new Color(.98f, .76f, .22f, 1f);
+                selectionRing.startColor = ringColor;
+                selectionRing.endColor = ringColor;
+            }
+
+            if (baseRenderer == null || faceRenderer == null) return;
+            Color baseColor;
+            Color faceColor;
+            switch (state.Readiness)
+            {
+                case UnitReadiness.Moving:
+                    baseColor = new Color(.08f, .38f, .35f);
+                    faceColor = new Color(.68f, .86f, .70f);
+                    break;
+                case UnitReadiness.Spent:
+                    baseColor = new Color(.10f, .13f, .12f);
+                    faceColor = new Color(.36f, .37f, .31f);
+                    break;
+                default:
+                    baseColor = state.IsSelected ? new Color(.34f, .28f, .10f) : new Color(.13f, .25f, .20f);
+                    faceColor = state.IsSelected ? new Color(.91f, .76f, .36f) : new Color(.76f, .72f, .55f);
+                    break;
+            }
+            baseRenderer.material.color = baseColor;
+            faceRenderer.material.color = faceColor;
         }
+
+        public bool Matches(TacticalUnitState state)
+            => PresentedReadiness == state.Readiness && PresentedSelection == state.IsSelected;
 
         private void BuildSelectionRing()
         {

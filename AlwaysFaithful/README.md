@@ -4,7 +4,9 @@ Standalone 2030 near-future USMC tactical game and tactical-resolution module fo
 
 ## Current prototype
 
-The prototype now presents the complete island of Taiwan as a 64×104 whole-island operational board (6,656 hexes at roughly 4 km spacing), using the same Natural Earth coastline and NOAA ETOPO 2022 pipeline as Sea of Uncertainty. One selectable USMC rifle-platoon counter exercises the order workflow. The platoon begins unselected. Opening its order menu and choosing Move reveals its legal four-AP movement area; hovering a legal destination previews the deterministic least-cost path, and left-clicking confirms the move.
+The prototype now presents the complete island of Taiwan as a 64×104 whole-island operational board (6,656 hexes at roughly 4 km spacing), using the same Natural Earth coastline and NOAA ETOPO 2022 pipeline as Sea of Uncertainty. One selectable USMC rifle-platoon counter exercises the order workflow. The platoon begins unselected. Opening its order menu and choosing Move reveals the area reachable with its remaining action points; hovering a legal destination previews the deterministic least-cost path, and left-clicking confirms the move. Terrain-weighted movement spends AP, the counter visibly enters a spent state at zero AP, and End Turn restores its allowance.
+
+Platoon position, AP, readiness, and selection now live in serializable gameplay state rather than in the counter renderer. The compact command card presents the current turn, unit state, occupied terrain, and four readable AP pips at every supported window height.
 
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
@@ -16,6 +18,7 @@ Controls:
 - Hover a highlighted destination to preview its least-cost path.
 - Left click a highlighted destination to confirm the move.
 - Left click another hex to inspect its terrain and movement cost.
+- Use **End Turn** on the unit card to advance the turn and restore the platoon's AP.
 - Mouse wheel zooms.
 - Middle-mouse drag or WASD pans.
 - R resets the camera.

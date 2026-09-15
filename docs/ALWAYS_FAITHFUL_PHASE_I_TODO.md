@@ -48,9 +48,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 2 — Authoritative unit/AP state
 
-- [ ] **Function:** move the platoon, AP, readiness, and selection state out of presentation objects into serializable domain state; spend AP on movement and add End Turn.
-- [ ] **Presentation:** replace prototype text with a compact Broken Front-inspired unit card, AP pips, terrain readout, and clear selected/available/spent counter states.
-- [ ] **Proof:** test AP spending, illegal orders, turn reset, state/view agreement, and selection/menu transitions.
+- [x] **Function:** move the platoon, AP, readiness, and selection state out of presentation objects into serializable domain state; spend AP on movement and add End Turn.
+- [x] **Presentation:** replace prototype text with a compact Broken Front-inspired unit card, AP pips, terrain readout, and clear selected/available/spent counter states.
+- [x] **Proof:** test AP spending, illegal orders, turn reset, state/view agreement, and selection/menu transitions.
 
 ### Pass 3 — Strategic-to-tactical battlefield extraction
 
