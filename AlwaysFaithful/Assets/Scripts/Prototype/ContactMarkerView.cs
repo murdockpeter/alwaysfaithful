@@ -8,6 +8,11 @@ namespace AlwaysFaithful.Prototype
         private MeshRenderer baseRenderer;
         private MeshRenderer faceRenderer;
         private TextMesh label;
+        private GameObject labelObject;
+        private GameObject formationDetail;
+        private GameObject contactGlyph;
+        private MeshRenderer contactGlyphRenderer;
+        private TacticalFormationView formationView;
         private LineRenderer uncertaintyRing;
         private Vector3 settledScale = Vector3.one;
 
@@ -16,35 +21,40 @@ namespace AlwaysFaithful.Prototype
         public int TransitionCount { get; private set; }
         public TacticalFireOutcome LastFireOutcome { get; private set; } = TacticalFireOutcome.Rejected;
         public int FireCueCount { get; private set; }
+        public bool DetailedFormationVisible => formationDetail != null && formationDetail.activeSelf;
+        public bool ContactGlyphVisible => contactGlyph != null && contactGlyph.activeSelf;
+        public int FormationElementCount => formationView != null ? formationView.ManeuverElementCount : 0;
 
-        public void Initialize()
+        public void Initialize(string echelon)
         {
             Shader overlay = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
-            GameObject counterBase = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            counterBase.transform.SetParent(transform, false);
-            counterBase.transform.localPosition = Vector3.up * .10f;
-            counterBase.transform.localScale = new Vector3(.62f, .08f, .62f);
-            baseRenderer = counterBase.GetComponent<MeshRenderer>();
-            baseRenderer.sharedMaterial = new Material(overlay);
-            Destroy(counterBase.GetComponent<Collider>());
+            formationDetail = new GameObject("Identified Formation Detail");
+            formationDetail.transform.SetParent(transform, false);
+            formationView = formationDetail.AddComponent<TacticalFormationView>();
+            formationView.Initialize(TacticalFormationAffiliation.Pla, "PLA", echelon);
+            baseRenderer = formationView.CommandDeckRenderer;
+            faceRenderer = formationView.DesignationRenderer;
 
-            GameObject face = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            face.transform.SetParent(transform, false);
-            face.transform.localPosition = Vector3.up * .21f;
-            face.transform.localScale = new Vector3(.82f, .07f, .60f);
-            faceRenderer = face.GetComponent<MeshRenderer>();
-            faceRenderer.sharedMaterial = new Material(overlay);
-            Destroy(face.GetComponent<Collider>());
+            contactGlyph = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            contactGlyph.name = "Uncertain Contact Diamond";
+            contactGlyph.layer = LayerMask.NameToLayer("Ignore Raycast");
+            contactGlyph.transform.SetParent(transform, false);
+            contactGlyph.transform.localPosition = Vector3.up * .16f;
+            contactGlyph.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
+            contactGlyph.transform.localScale = new Vector3(.48f, .08f, .48f);
+            contactGlyphRenderer = contactGlyph.GetComponent<MeshRenderer>();
+            contactGlyphRenderer.sharedMaterial = new Material(overlay);
+            Destroy(contactGlyph.GetComponent<Collider>());
 
-            GameObject text = new GameObject("Contact Label");
-            text.transform.SetParent(transform, false);
-            text.transform.localPosition = Vector3.up * .265f;
-            text.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            label = text.AddComponent<TextMesh>();
+            labelObject = new GameObject("Contact Label");
+            labelObject.transform.SetParent(transform, false);
+            labelObject.transform.localPosition = Vector3.up * .255f;
+            labelObject.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            label = labelObject.AddComponent<TextMesh>();
             label.alignment = TextAlignment.Center;
             label.anchor = TextAnchor.MiddleCenter;
             label.fontSize = 48;
-            label.characterSize = .085f;
+            label.characterSize = .10f;
 
             GameObject ring = new GameObject("Uncertainty Ring");
             ring.transform.SetParent(transform, false);
@@ -90,25 +100,33 @@ namespace AlwaysFaithful.Prototype
                 ringColor = new Color(1f, .69f, .19f, contact.IsStale ? .46f : .92f);
                 label.text = contact.IsStale ? "?\nLAST" : "?";
                 settledScale = Vector3.one * .86f;
+                formationDetail.SetActive(false);
+                contactGlyph.SetActive(true);
+                labelObject.SetActive(true);
             }
             else if (contact.State == TacticalVisibilityState.Identified)
             {
                 baseColor = new Color(.38f, .12f, .09f, .94f);
                 faceColor = new Color(.82f, .48f, .24f, .94f);
                 ringColor = new Color(1f, .56f, .20f, .94f);
-                label.text = "PLA\nUNIT";
                 settledScale = Vector3.one * .94f;
+                formationDetail.SetActive(true);
+                contactGlyph.SetActive(false);
+                labelObject.SetActive(false);
             }
             else
             {
                 baseColor = new Color(.38f, .07f, .06f, 1f);
                 faceColor = new Color(.79f, .33f, .25f, 1f);
                 ringColor = new Color(1f, .31f, .22f, 1f);
-                label.text = "PLA\nRIFLE";
                 settledScale = Vector3.one;
+                formationDetail.SetActive(true);
+                contactGlyph.SetActive(false);
+                labelObject.SetActive(false);
             }
             baseRenderer.material.color = baseColor;
             faceRenderer.material.color = faceColor;
+            contactGlyphRenderer.material.color = faceColor;
             label.color = new Color(.10f, .07f, .05f, 1f);
             uncertaintyRing.startColor = ringColor;
             uncertaintyRing.endColor = ringColor;

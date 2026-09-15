@@ -75,6 +75,7 @@ namespace AlwaysFaithful.Prototype
         private TacticalBattlefieldState tacticalBattlefield;
         private HexCellView hoveredLocalCell;
         private UnitCounterView tacticalUnit;
+        private TacticalFormationView tacticalFormationView;
         private TacticalUnitState tacticalUnitState;
         private LineRenderer tacticalRouteLine;
         private GameObject tacticalDestinationGhost;
@@ -791,40 +792,11 @@ namespace AlwaysFaithful.Prototype
             tacticalUnitState = new TacticalUnitState("usmc-rifle-platoon-1", "USMC Rifle Platoon", start, TacticalPlatoonActionPoints);
             tacticalWeapon = new TacticalWeaponState("m27-small-arms", "M27 Small Arms", 6);
             tacticalUnit.Initialize(tacticalUnitState.DisplayName);
-
-            GameObject baseObject = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            baseObject.name = "Tactical Counter Base";
-            baseObject.transform.SetParent(root.transform, false);
-            baseObject.transform.localPosition = Vector3.up * .10f;
-            baseObject.transform.localScale = new Vector3(.66f, .10f, .66f);
-            MeshRenderer baseRenderer = baseObject.GetComponent<MeshRenderer>();
-            baseRenderer.sharedMaterial = NewOverlayMaterial(new Color(.13f, .25f, .20f));
-            Destroy(baseObject.GetComponent<Collider>());
-
-            GameObject face = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            face.name = "Tactical Counter Face";
-            face.transform.SetParent(root.transform, false);
-            face.transform.localPosition = Vector3.up * .23f;
-            face.transform.localScale = new Vector3(.94f, .08f, .68f);
-            MeshRenderer faceRenderer = face.GetComponent<MeshRenderer>();
-            faceRenderer.sharedMaterial = NewOverlayMaterial(new Color(.76f, .72f, .55f));
-            Destroy(face.GetComponent<Collider>());
-            tacticalUnit.BindRenderers(baseRenderer, faceRenderer);
+            tacticalFormationView = root.AddComponent<TacticalFormationView>();
+            tacticalFormationView.Initialize(TacticalFormationAffiliation.Usmc, "USMC", "RIFLE PLT");
+            tacticalUnit.BindRenderers(tacticalFormationView.CommandDeckRenderer, tacticalFormationView.DesignationRenderer);
             tacticalUnit.Present(tacticalUnitState);
-
-            GameObject labelObject = new GameObject("Tactical Unit Label");
-            labelObject.transform.SetParent(root.transform, false);
-            labelObject.transform.localPosition = Vector3.up * .276f;
-            labelObject.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            labelObject.transform.localScale = Vector3.one * .22f;
-            TextMesh label = labelObject.AddComponent<TextMesh>();
-            label.text = "USMC\nRIFLE PLT";
-            label.alignment = TextAlignment.Center;
-            label.anchor = TextAnchor.MiddleCenter;
-            label.fontSize = 42;
-            label.characterSize = .10f;
-            label.color = new Color(.08f, .12f, .10f);
-            BuildInfantrySymbol(root.transform);
+            tacticalFormationView.Present(tacticalUnitState);
             localMovementBoard[start].OccupantId = tacticalUnitState.Id;
         }
 
@@ -913,7 +885,7 @@ namespace AlwaysFaithful.Prototype
                 markerObject.transform.SetParent(tacticalRoot.transform, false);
                 markerObject.transform.position = LocalCounterPosition(enemy.Position) + Vector3.up * .03f;
                 ContactMarkerView marker = markerObject.AddComponent<ContactMarkerView>();
-                marker.Initialize();
+                marker.Initialize(enemy.DisplayName.Contains("Support") ? "SUPPORT" : "RIFLE");
                 tacticalContactViews.Add(enemy.Id, marker);
             }
         }
@@ -2184,20 +2156,29 @@ namespace AlwaysFaithful.Prototype
                 maximumFog = Mathf.Max(maximumFog, cell.FogAmount);
             }
             int visibleMarkers = 0;
+            int detailedFormations = 0;
+            int uncertainGlyphs = 0;
             foreach (KeyValuePair<string, ContactMarkerView> pair in tacticalContactViews)
+            {
                 if (pair.Value.gameObject.activeSelf && pair.Value.TransitionCount > 0 &&
                     pair.Value.PresentedState == tacticalContacts[pair.Key].State) visibleMarkers++;
+                if (pair.Value.DetailedFormationVisible && !pair.Value.ContactGlyphVisible && pair.Value.FormationElementCount == 3) detailedFormations++;
+                if (pair.Value.ContactGlyphVisible && !pair.Value.DetailedFormationVisible) uncertainGlyphs++;
+            }
             var snapshot = new TacticalObservationSnapshot { Contacts = new List<TacticalContactState>(tacticalContacts.Values) };
             string serialized = JsonUtility.ToJson(snapshot);
             TacticalObservationSnapshot restored = JsonUtility.FromJson<TacticalObservationSnapshot>(serialized);
-            if (tacticalContacts.Count != 2 || tacticalContactViews.Count != 2 || visibleMarkers < 1 ||
+            if (tacticalContacts.Count != 2 || tacticalContactViews.Count != 2 || visibleMarkers < 1 || detailedFormations < 1 || uncertainGlyphs < 1 ||
+                tacticalFormationView == null || tacticalFormationView.ManeuverElementCount != 3 ||
+                !tacticalFormationView.HasRecognitionStripe || !tacticalFormationView.HasCommandNode ||
+                tacticalFormationView.Affiliation != TacticalFormationAffiliation.Usmc ||
                 minimumFog > .01f || maximumFog < .60f || restored == null || restored.Contacts.Count != tacticalContacts.Count)
             {
-                Debug.LogError($"ALWAYS_FAITHFUL_OBSERVATION_REGRESSION_FAILED presentation contacts={tacticalContacts.Count} views={tacticalContactViews.Count} visible={visibleMarkers} fog={minimumFog:0.00}-{maximumFog:0.00} restored={restored?.Contacts.Count}");
+                Debug.LogError($"ALWAYS_FAITHFUL_OBSERVATION_REGRESSION_FAILED presentation contacts={tacticalContacts.Count} views={tacticalContactViews.Count} visible={visibleMarkers} detailed={detailedFormations} uncertain={uncertainGlyphs} friendlyElements={tacticalFormationView?.ManeuverElementCount} fog={minimumFog:0.00}-{maximumFog:0.00} restored={restored?.Contacts.Count}");
                 Application.Quit(1);
                 yield break;
             }
-            Debug.Log($"ALWAYS_FAITHFUL_OBSERVATION_REGRESSION_OK contacts={tacticalContacts.Count} visible={visibleMarkers} fog={minimumFog:0.00}-{maximumFog:0.00} serialized={serialized.Length}");
+            Debug.Log($"ALWAYS_FAITHFUL_OBSERVATION_REGRESSION_OK contacts={tacticalContacts.Count} visible={visibleMarkers} detailed={detailedFormations} uncertain={uncertainGlyphs} friendlyElements={tacticalFormationView.ManeuverElementCount} fog={minimumFog:0.00}-{maximumFog:0.00} serialized={serialized.Length}");
             Application.Quit(0);
         }
 

@@ -18,6 +18,8 @@ Pass 6 adds an authoritative tactical observation picture. Every local hex recei
 
 Pass 7 activates that combat-information gate with a deterministic M27 small-arms action. Direct fire costs 2 AP and one of six abstract ammunition units. A pre-fire panel exposes the hit chance, expected effect, range, terrain, and LOS modifiers before confirmation; seeded resolution produces a miss, suppression, or hit event. The fire line, target reticle, restrained muzzle/impact cue, counter response, ammunition display, and persistent versioned event record all present the same authoritative result.
 
+Tactical units now use compact procedural formation models inspired by Sea of Uncertainty's counter language instead of flat blocks. The USMC rifle platoon and identified PLA formations combine three maneuver elements, a command node, affiliation-specific recognition stripe, designation plate, soft shadow, and selection halo. Uncertain enemy information remains a diamond contact rather than revealing formation geometry. The whole-island operational counter is intentionally unchanged in this first tactical-only art pass.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
