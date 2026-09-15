@@ -17,7 +17,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;
@@ -35,6 +35,7 @@ namespace AlwaysFaithful.Core
         public double North;
         public List<TacticalBattlefieldCell> Cells = new List<TacticalBattlefieldCell>();
         public List<TacticalMovementEvent> MovementEvents = new List<TacticalMovementEvent>();
+        public List<TacticalFireEvent> FireEvents = new List<TacticalFireEvent>();
 
         public bool Contains(double longitude, double latitude)
             => longitude >= West && longitude <= East && latitude >= South && latitude <= North;

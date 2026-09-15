@@ -14,6 +14,8 @@ namespace AlwaysFaithful.Prototype
         public TacticalVisibilityState PresentedState { get; private set; } = TacticalVisibilityState.Hidden;
         public bool PresentedStale { get; private set; }
         public int TransitionCount { get; private set; }
+        public TacticalFireOutcome LastFireOutcome { get; private set; } = TacticalFireOutcome.Rejected;
+        public int FireCueCount { get; private set; }
 
         public void Initialize()
         {
@@ -111,6 +113,16 @@ namespace AlwaysFaithful.Prototype
             uncertaintyRing.startColor = ringColor;
             uncertaintyRing.endColor = ringColor;
             uncertaintyRing.enabled = contact.State != TacticalVisibilityState.Observed;
+        }
+
+        public void CueFireOutcome(TacticalFireOutcome outcome)
+        {
+            LastFireOutcome = outcome;
+            FireCueCount++;
+            transform.localScale = settledScale * 1.22f;
+            if (outcome == TacticalFireOutcome.Hit) faceRenderer.material.color = new Color(1f, .24f, .14f, 1f);
+            else if (outcome == TacticalFireOutcome.Suppressed) faceRenderer.material.color = new Color(1f, .68f, .16f, 1f);
+            else faceRenderer.material.color = new Color(.62f, .66f, .61f, 1f);
         }
 
         private void Update()

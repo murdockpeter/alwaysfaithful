@@ -16,6 +16,8 @@ The tactical order menu also provides an inspect-only line-of-sight tool with a 
 
 Pass 6 adds an authoritative tactical observation picture. Every local hex receives terrain- and LOS-aware fog shading, while two opposing formations are represented according to what the USMC observer actually knows: hidden, uncertain contact, identified unit, or currently observed unit. Lost tracks persist for one turn at their last-known position before expiring. Contact records retain observer, range, LOS, turn, and stale-state data through JSON save/reload, and only a non-stale currently observed target passes the combat-information gate reserved for direct fire in Pass 7.
 
+Pass 7 activates that combat-information gate with a deterministic M27 small-arms action. Direct fire costs 2 AP and one of six abstract ammunition units. A pre-fire panel exposes the hit chance, expected effect, range, terrain, and LOS modifiers before confirmation; seeded resolution produces a miss, suppression, or hit event. The fire line, target reticle, restrained muzzle/impact cue, counter response, ammunition display, and persistent versioned event record all present the same authoritative result.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -29,7 +31,8 @@ Controls:
 - Select a land hex and choose **Open 250 m Map** to enter its local tactical battlefield.
 - On the tactical map, right click the platoon and choose **Move**; hover a destination and left click to confirm.
 - On the tactical map, right click the platoon and choose **Inspect LOS**, then hover hexes to inspect visibility.
-- Right click away from the unit or press **Escape** to cancel tactical movement or LOS inspection.
+- On the tactical map, right click the platoon and choose **Direct Fire**, hover a currently observed enemy, and left click to fire.
+- Right click away from the unit or press **Escape** to cancel tactical movement, LOS inspection, or fire targeting.
 - Use **Return to Island** to restore the operational map and its prior camera position.
 - Use **End Turn** on the unit card to advance the turn and restore the platoon's AP.
 - Mouse wheel zooms.

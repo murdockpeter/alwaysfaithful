@@ -90,6 +90,14 @@ namespace AlwaysFaithful.Prototype
         private TacticalLosResult tacticalLosResult;
         private GameObject tacticalLosTarget;
         private MeshRenderer tacticalLosTargetRenderer;
+        private TacticalWeaponState tacticalWeapon;
+        private bool tacticalFirePlanning;
+        private bool tacticalFireResolving;
+        private TacticalFirePreview tacticalFirePreview;
+        private TacticalUnitState tacticalFireTarget;
+        private LineRenderer tacticalFireLine;
+        private GameObject tacticalFireReticle;
+        private MeshRenderer tacticalFireReticleRenderer;
         private Vector3 overviewCameraFocus;
         private float overviewCameraDistance;
         private float localMinimumLandElevation;
@@ -104,6 +112,8 @@ namespace AlwaysFaithful.Prototype
         private bool automatedLosCapture;
         private bool automatedObservationRegression;
         private bool automatedObservationCapture;
+        private bool automatedFireRegression;
+        private bool automatedFireCapture;
         private int landCellCount;
         private int waterCellCount;
         private float maximumLandElevation;
@@ -150,6 +160,8 @@ namespace AlwaysFaithful.Prototype
             automatedLosCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--los-capture-path=", StringComparison.Ordinal));
             automatedObservationRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--observation-regression") >= 0;
             automatedObservationCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--observation-capture-path=", StringComparison.Ordinal));
+            automatedFireRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--fire-regression") >= 0;
+            automatedFireCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--fire-capture-path=", StringComparison.Ordinal));
             LoadGeography();
             BuildLightingAndCamera();
             overviewRoot = new GameObject("Taiwan Operational Map");
@@ -169,6 +181,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedTacticalMovementRegression) StartCoroutine(RunTacticalMovementRegression());
             if (automatedLosRegression) StartCoroutine(RunLosRegression());
             if (automatedObservationRegression) StartCoroutine(RunObservationRegression());
+            if (automatedFireRegression) StartCoroutine(RunFireRegression());
             if (automatedTacticalCapture)
             {
                 EnterTacticalMap(FindCoastalOperationalCell(), false);
@@ -189,12 +202,20 @@ namespace AlwaysFaithful.Prototype
                 FrameObservationContacts();
                 StartCoroutine(CaptureObservationScreenshotWhenRequested());
             }
+            if (automatedFireCapture)
+            {
+                EnterTacticalMap(FindHighReliefOperationalCell(), false);
+                FrameObservationContacts();
+                BeginTacticalFirePlanning();
+                PreviewTacticalFire(FindObservedEnemyCell());
+                StartCoroutine(CaptureFireScreenshotWhenRequested());
+            }
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
         private void Update()
         {
-            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || mapTransitionActive) return;
+            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || mapTransitionActive) return;
             UpdateCamera();
             if (tacticalMode) UpdateTacticalPointer();
             else UpdatePointer();
@@ -515,6 +536,29 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator CaptureFireScreenshotWhenRequested()
+        {
+            string argument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--fire-capture-path=", StringComparison.Ordinal));
+            if (argument == null) yield break;
+            string path = argument.Substring("--fire-capture-path=".Length);
+            yield return new WaitForSecondsRealtime(1f);
+            var target = new RenderTexture(1280, 720, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            mapCamera.targetTexture = target;
+            mapCamera.Render();
+            RenderTexture.active = target;
+            image.ReadPixels(new Rect(0f, 0f, target.width, target.height), 0, 0);
+            image.Apply();
+            File.WriteAllBytes(path, image.EncodeToPNG());
+            mapCamera.targetTexture = null;
+            RenderTexture.active = previous;
+            Destroy(target);
+            Destroy(image);
+            Debug.Log($"ALWAYS_FAITHFUL_FIRE_CAPTURED {path} valid={tacticalFirePreview?.IsValid} chance={tacticalFirePreview?.HitChance}");
+            Application.Quit(0);
+        }
+
         private void RequestTacticalMap(HexCellView parentCell)
         {
             if (parentCell == null || !parentCell.IsLand || mapTransitionActive) return;
@@ -576,7 +620,7 @@ namespace AlwaysFaithful.Prototype
 
         private void ReturnToIsland(bool animate)
         {
-            if (!tacticalMode || tacticalUnitMoving || mapTransitionActive && animate) return;
+            if (!tacticalMode || tacticalUnitMoving || tacticalFireResolving || mapTransitionActive && animate) return;
             if (animate)
             {
                 StartCoroutine(TransitionToOverview());
@@ -653,6 +697,7 @@ namespace AlwaysFaithful.Prototype
             BuildTacticalUnit();
             BuildTacticalMovementVisuals();
             BuildTacticalLosVisuals();
+            BuildTacticalFireVisuals();
             BuildTacticalContacts();
             RefreshTacticalObservation();
             tacticalOrderFeedback = "RMB platoon for tactical orders";
@@ -744,6 +789,7 @@ namespace AlwaysFaithful.Prototype
             collider.center = Vector3.up * .12f;
             tacticalUnit = root.AddComponent<UnitCounterView>();
             tacticalUnitState = new TacticalUnitState("usmc-rifle-platoon-1", "USMC Rifle Platoon", start, TacticalPlatoonActionPoints);
+            tacticalWeapon = new TacticalWeaponState("m27-small-arms", "M27 Small Arms", 6);
             tacticalUnit.Initialize(tacticalUnitState.DisplayName);
 
             GameObject baseObject = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -822,6 +868,30 @@ namespace AlwaysFaithful.Prototype
             tacticalLosTargetRenderer.sharedMaterial = NewOverlayMaterial(new Color(.25f, .92f, .79f, .48f));
             Destroy(tacticalLosTarget.GetComponent<Collider>());
             tacticalLosTarget.SetActive(false);
+        }
+
+        private void BuildTacticalFireVisuals()
+        {
+            GameObject lineObject = new GameObject("Direct Fire Tracer");
+            lineObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+            lineObject.transform.SetParent(tacticalRoot.transform, false);
+            tacticalFireLine = lineObject.AddComponent<LineRenderer>();
+            tacticalFireLine.useWorldSpace = true;
+            tacticalFireLine.positionCount = 2;
+            tacticalFireLine.widthMultiplier = .10f;
+            tacticalFireLine.numCapVertices = 7;
+            tacticalFireLine.material = NewOverlayMaterial(new Color(1f, .72f, .20f, .95f));
+            tacticalFireLine.enabled = false;
+
+            tacticalFireReticle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            tacticalFireReticle.name = "Direct Fire Target Reticle";
+            tacticalFireReticle.layer = LayerMask.NameToLayer("Ignore Raycast");
+            tacticalFireReticle.transform.SetParent(tacticalRoot.transform, false);
+            tacticalFireReticle.transform.localScale = new Vector3(.86f, .025f, .86f);
+            tacticalFireReticleRenderer = tacticalFireReticle.GetComponent<MeshRenderer>();
+            tacticalFireReticleRenderer.sharedMaterial = NewOverlayMaterial(new Color(1f, .52f, .14f, .58f));
+            Destroy(tacticalFireReticle.GetComponent<Collider>());
+            tacticalFireReticle.SetActive(false);
         }
 
         private void BuildTacticalContacts()
@@ -917,7 +987,7 @@ namespace AlwaysFaithful.Prototype
 
         private void UpdateTacticalPointer()
         {
-            if (tacticalUnitMoving) return;
+            if (tacticalUnitMoving || tacticalFireResolving) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
             if (returnToIslandRect.Contains(guiPointer) || tacticalMenuOpen && tacticalMenuRect.Contains(guiPointer) ||
                 new Rect(20f, 18f, 405f, 294f).Contains(guiPointer)) return;
@@ -936,7 +1006,7 @@ namespace AlwaysFaithful.Prototype
             }
             if (Input.GetMouseButtonDown(1))
             {
-                if (tacticalMovePlanning || tacticalLosPlanning)
+                if (tacticalMovePlanning || tacticalLosPlanning || tacticalFirePlanning)
                 {
                     CancelTacticalInteraction(true);
                     return;
@@ -953,6 +1023,11 @@ namespace AlwaysFaithful.Prototype
                 TryIssueTacticalMove(next.Coord);
                 return;
             }
+            if (Input.GetMouseButtonDown(0) && tacticalFirePlanning && next != null)
+            {
+                TryIssueTacticalFire(next.Coord);
+                return;
+            }
             if (next == hoveredLocalCell) return;
             if (hoveredLocalCell != null)
             {
@@ -963,6 +1038,7 @@ namespace AlwaysFaithful.Prototype
             if (hoveredLocalCell != null) hoveredLocalCell.SetHighlighted(true);
             PreviewTacticalRoute(hoveredLocalCell);
             PreviewTacticalLineOfSight(hoveredLocalCell);
+            PreviewTacticalFire(hoveredLocalCell);
         }
 
         private HexCellView PickLocalHexAtScreenPoint(Vector2 screenPoint)
@@ -991,8 +1067,8 @@ namespace AlwaysFaithful.Prototype
             tacticalUnit.Present(tacticalUnitState);
             tacticalMenuRect = new Rect(
                 Mathf.Clamp(pointer.x, 8f, Screen.width / GetUiScale() - 190f),
-                Mathf.Clamp(pointer.y, 8f, Screen.height / GetUiScale() - 124f),
-                178f, 106f);
+                Mathf.Clamp(pointer.y, 8f, Screen.height / GetUiScale() - 157f),
+                178f, 139f);
             tacticalMenuOpen = true;
             tacticalOrderFeedback = "Choose a tactical order.";
         }
@@ -1001,7 +1077,9 @@ namespace AlwaysFaithful.Prototype
         {
             if (!tacticalUnitState.CanMove) return;
             ClearTacticalLineOfSight();
+            ClearTacticalFirePreview();
             tacticalLosPlanning = false;
+            tacticalFirePlanning = false;
             tacticalMenuOpen = false;
             tacticalMovePlanning = true;
             tacticalUnitState.IsSelected = true;
@@ -1020,6 +1098,8 @@ namespace AlwaysFaithful.Prototype
         {
             tacticalMenuOpen = false;
             tacticalMovePlanning = false;
+            tacticalFirePlanning = false;
+            ClearTacticalFirePreview();
             ClearTacticalReachable();
             ClearTacticalPreview();
             tacticalLosPlanning = true;
@@ -1027,6 +1107,129 @@ namespace AlwaysFaithful.Prototype
             tacticalUnit.Present(tacticalUnitState);
             tacticalOrderFeedback = $"INSPECT LOS • {TacticalLineOfSight.MaximumInspectionRangeHexes} hex / {TacticalLineOfSight.MaximumInspectionRangeHexes * 250} m max";
             PreviewTacticalLineOfSight(hoveredLocalCell);
+        }
+
+        private void BeginTacticalFirePlanning()
+        {
+            if (!tacticalUnitState.CanMove || tacticalUnitState.RemainingActionPoints < TacticalDirectFire.ActionPointCost ||
+                tacticalWeapon.RemainingAmmunition <= 0) return;
+            tacticalMenuOpen = false;
+            tacticalMovePlanning = false;
+            tacticalLosPlanning = false;
+            ClearTacticalReachable();
+            ClearTacticalPreview();
+            ClearTacticalLineOfSight();
+            ClearTacticalFirePreview();
+            tacticalFirePlanning = true;
+            tacticalUnitState.IsSelected = true;
+            tacticalUnit.Present(tacticalUnitState);
+            tacticalOrderFeedback = $"DIRECT FIRE • {tacticalWeapon.RemainingAmmunition} AMMO • Hover observed target";
+            PreviewTacticalFire(hoveredLocalCell);
+        }
+
+        private void PreviewTacticalFire(HexCellView targetCell)
+        {
+            ClearTacticalFirePreview();
+            if (!tacticalFirePlanning || targetCell == null) return;
+            tacticalFireTarget = FindEnemyAt(targetCell.Coord);
+            TacticalContactState contact = null;
+            if (tacticalFireTarget != null) tacticalContacts.TryGetValue(tacticalFireTarget.Id, out contact);
+            tacticalFirePreview = TacticalDirectFire.Preview(localMovementBoard, tacticalUnitState.Id,
+                tacticalUnitState.Position, contact, targetCell.Coord, tacticalWeapon, tacticalUnitState.RemainingActionPoints);
+            tacticalFireReticle.SetActive(true);
+            tacticalFireReticle.transform.position = targetCell.transform.position + Vector3.up * (CellSurfaceOffset + .20f);
+            Color color = tacticalFirePreview.IsValid ? new Color(1f, .56f, .14f, .68f) : new Color(.92f, .17f, .13f, .62f);
+            tacticalFireReticleRenderer.material.color = color;
+            tacticalFireLine.enabled = true;
+            tacticalFireLine.startColor = tacticalFirePreview.IsValid ? new Color(1f, .82f, .31f, .95f) : color;
+            tacticalFireLine.endColor = color;
+            tacticalFireLine.SetPosition(0, localCells[tacticalUnitState.Position].transform.position + Vector3.up * (CellSurfaceOffset + .38f));
+            tacticalFireLine.SetPosition(1, targetCell.transform.position + Vector3.up * (CellSurfaceOffset + .38f));
+            tacticalOrderFeedback = tacticalFirePreview.IsValid
+                ? $"FIRE • {tacticalFirePreview.HitChance}% • LMB confirm"
+                : tacticalFirePreview.RejectionReason;
+        }
+
+        private bool TryIssueTacticalFire(HexCoord targetPosition)
+        {
+            if (!tacticalFirePlanning || tacticalFirePreview == null || !tacticalFirePreview.IsValid ||
+                !tacticalFirePreview.TargetPosition.Equals(targetPosition)) return false;
+            int sequence = tacticalEventSequence + 1;
+            int seed = TacticalDirectFire.CreateSeed(tacticalBattlefield.BattlefieldId, turnState.TurnNumber, sequence);
+            TacticalFireEvent fireEvent = TacticalDirectFire.Resolve(tacticalFirePreview, tacticalWeapon, seed);
+            if (fireEvent.Outcome == TacticalFireOutcome.Rejected || !tacticalUnitState.TrySpendActionPoints(TacticalDirectFire.ActionPointCost)) return false;
+            fireEvent.Sequence = ++tacticalEventSequence;
+            fireEvent.BattlefieldId = tacticalBattlefield.BattlefieldId;
+            fireEvent.Turn = turnState.TurnNumber;
+            tacticalBattlefield.FireEvents.Add(fireEvent);
+            tacticalFirePlanning = false;
+            tacticalUnitState.IsSelected = false;
+            tacticalUnit.Present(tacticalUnitState);
+            if (tacticalContactViews.TryGetValue(fireEvent.TargetId, out ContactMarkerView targetView)) targetView.CueFireOutcome(fireEvent.Outcome);
+            Debug.Log($"ALWAYS_FAITHFUL_FIRE_EVENT sequence={fireEvent.Sequence} seed={fireEvent.Seed} target={fireEvent.TargetId} hit={fireEvent.HitChance} effect={fireEvent.SuppressionChance} roll={fireEvent.Roll} outcome={fireEvent.Outcome} ammo={fireEvent.AmmunitionBefore}->{fireEvent.AmmunitionAfter}");
+            StartCoroutine(AnimateTacticalFire(fireEvent));
+            return true;
+        }
+
+        private IEnumerator AnimateTacticalFire(TacticalFireEvent fireEvent)
+        {
+            tacticalFireResolving = true;
+            GameObject muzzle = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            muzzle.name = "Muzzle Flash";
+            muzzle.transform.SetParent(tacticalRoot.transform, false);
+            muzzle.transform.position = tacticalFireLine.GetPosition(0);
+            muzzle.GetComponent<MeshRenderer>().sharedMaterial = NewOverlayMaterial(new Color(1f, .82f, .30f, .95f));
+            Destroy(muzzle.GetComponent<Collider>());
+            GameObject impact = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            impact.name = "Fire Impact";
+            impact.transform.SetParent(tacticalRoot.transform, false);
+            impact.transform.position = tacticalFireLine.GetPosition(1);
+            Color impactColor = fireEvent.Outcome == TacticalFireOutcome.Hit
+                ? new Color(1f, .20f, .12f, .95f)
+                : fireEvent.Outcome == TacticalFireOutcome.Suppressed ? new Color(1f, .62f, .14f, .92f) : new Color(.62f, .72f, .68f, .75f);
+            impact.GetComponent<MeshRenderer>().sharedMaterial = NewOverlayMaterial(impactColor);
+            Destroy(impact.GetComponent<Collider>());
+            for (float elapsed = 0f; elapsed < .46f; elapsed += Time.deltaTime)
+            {
+                float progress = Mathf.Clamp01(elapsed / .46f);
+                tacticalFireLine.widthMultiplier = Mathf.Lerp(.18f, .035f, progress);
+                muzzle.transform.localScale = Vector3.one * Mathf.Lerp(.28f, .03f, progress);
+                impact.transform.localScale = Vector3.one * Mathf.Lerp(.12f, .62f, progress);
+                yield return null;
+            }
+            Destroy(muzzle);
+            Destroy(impact);
+            tacticalFireLine.widthMultiplier = .10f;
+            tacticalFireLine.enabled = false;
+            tacticalFireReticle.SetActive(false);
+            tacticalFirePreview = null;
+            tacticalFireTarget = null;
+            tacticalOrderFeedback = $"{fireEvent.Outcome.ToString().ToUpperInvariant()} • ROLL {fireEvent.Roll} • H{fireEvent.HitChance}/E{fireEvent.SuppressionChance} • {tacticalWeapon.RemainingAmmunition} AMMO";
+            tacticalFireResolving = false;
+        }
+
+        private TacticalUnitState FindEnemyAt(HexCoord coord)
+        {
+            foreach (TacticalUnitState enemy in tacticalEnemyStates)
+                if (enemy.Position.Equals(coord)) return enemy;
+            return null;
+        }
+
+        private HexCellView FindObservedEnemyCell()
+        {
+            foreach (TacticalUnitState enemy in tacticalEnemyStates)
+                if (tacticalContacts.TryGetValue(enemy.Id, out TacticalContactState contact) && contact.CanAttack)
+                    return localCells[enemy.Position];
+            return null;
+        }
+
+        private void ClearTacticalFirePreview()
+        {
+            if (tacticalFireResolving) return;
+            if (tacticalFireLine != null) tacticalFireLine.enabled = false;
+            if (tacticalFireReticle != null) tacticalFireReticle.SetActive(false);
+            tacticalFirePreview = null;
+            tacticalFireTarget = null;
         }
 
         private void PreviewTacticalRoute(HexCellView destination)
@@ -1213,19 +1416,21 @@ namespace AlwaysFaithful.Prototype
 
         private void CancelTacticalInteraction(bool recordCancellation)
         {
-            if (tacticalUnitMoving) return;
+            if (tacticalUnitMoving || tacticalFireResolving) return;
             if (recordCancellation && tacticalMovePlanning)
                 RecordTacticalMovement(tacticalUnitState.Position, tacticalUnitState.Position, 0,
                     tacticalUnitState.RemainingActionPoints, tacticalUnitState.RemainingActionPoints,
                     "Cancelled", "Move planning cancelled", new List<HexCoord>());
             tacticalMovePlanning = false;
             tacticalLosPlanning = false;
+            tacticalFirePlanning = false;
             tacticalMenuOpen = false;
             tacticalUnitState.IsSelected = false;
             tacticalUnit.Present(tacticalUnitState);
             ClearTacticalReachable();
             ClearTacticalPreview();
             ClearTacticalLineOfSight();
+            ClearTacticalFirePreview();
             tacticalOrderFeedback = tacticalUnitState.CanMove ? "RMB platoon for orders" : "Unit spent • End turn";
         }
 
@@ -1535,7 +1740,7 @@ namespace AlwaysFaithful.Prototype
 
         private void EndTacticalTurn()
         {
-            if (tacticalUnitMoving) return;
+            if (tacticalUnitMoving || tacticalFireResolving) return;
             CancelTacticalInteraction(false);
             turnState.EndTurn(tacticalUnitState);
             unitState.BeginTurn();
@@ -1996,6 +2201,127 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator RunFireRegression()
+        {
+            yield return null;
+            if (!ValidateFireRules(out string failure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_FIRE_REGRESSION_FAILED rules " + failure);
+                Application.Quit(1);
+                yield break;
+            }
+            EnterTacticalMap(FindHighReliefOperationalCell(), false);
+            HexCellView target = FindObservedEnemyCell();
+            BeginTacticalFirePlanning();
+            PreviewTacticalFire(target);
+            if (target == null || !tacticalFirePlanning || tacticalFirePreview == null || !tacticalFirePreview.IsValid ||
+                !tacticalFireLine.enabled || !tacticalFireReticle.activeSelf)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_FIRE_REGRESSION_FAILED preview target={target != null} planning={tacticalFirePlanning} valid={tacticalFirePreview?.IsValid} line={tacticalFireLine.enabled} reticle={tacticalFireReticle.activeSelf}");
+                Application.Quit(1);
+                yield break;
+            }
+            string targetId = tacticalFirePreview.TargetId;
+            int ammunitionBefore = tacticalWeapon.RemainingAmmunition;
+            int actionPointsBefore = tacticalUnitState.RemainingActionPoints;
+            int eventsBefore = tacticalBattlefield.FireEvents.Count;
+            if (!TryIssueTacticalFire(target.Coord))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_FIRE_REGRESSION_FAILED fire rejected");
+                Application.Quit(1);
+                yield break;
+            }
+            float deadline = Time.realtimeSinceStartup + 2f;
+            do { yield return null; } while (tacticalFireResolving && Time.realtimeSinceStartup < deadline);
+            TacticalFireEvent fireEvent = tacticalBattlefield.FireEvents[tacticalBattlefield.FireEvents.Count - 1];
+            ContactMarkerView targetView = tacticalContactViews[targetId];
+            string serialized = JsonUtility.ToJson(tacticalBattlefield);
+            TacticalBattlefieldState restored = JsonUtility.FromJson<TacticalBattlefieldState>(serialized);
+            if (tacticalFireResolving || tacticalFirePlanning || tacticalFireLine.enabled || tacticalFireReticle.activeSelf ||
+                tacticalWeapon.RemainingAmmunition != ammunitionBefore - 1 ||
+                tacticalUnitState.RemainingActionPoints != actionPointsBefore - TacticalDirectFire.ActionPointCost ||
+                tacticalBattlefield.FireEvents.Count != eventsBefore + 1 || fireEvent.Outcome == TacticalFireOutcome.Rejected ||
+                targetView.FireCueCount != 1 || targetView.LastFireOutcome != fireEvent.Outcome ||
+                restored == null || restored.FireEvents.Count != 1 || restored.FireEvents[0].Seed != fireEvent.Seed)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_FIRE_REGRESSION_FAILED resolution resolving={tacticalFireResolving} ammo={tacticalWeapon.RemainingAmmunition}/{ammunitionBefore} ap={tacticalUnitState.RemainingActionPoints}/{actionPointsBefore} events={tacticalBattlefield.FireEvents.Count} cue={targetView.FireCueCount} restored={restored?.FireEvents.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_FIRE_REGRESSION_OK target={fireEvent.TargetId} seed={fireEvent.Seed} chance={fireEvent.HitChance} roll={fireEvent.Roll} outcome={fireEvent.Outcome} ammo={fireEvent.AmmunitionBefore}->{fireEvent.AmmunitionAfter} ap={actionPointsBefore}->{tacticalUnitState.RemainingActionPoints} modifiers={fireEvent.Modifiers.Count}");
+            Application.Quit(0);
+        }
+
+        private static bool ValidateFireRules(out string failure)
+        {
+            var flat = new Dictionary<HexCoord, TacticalMovementCell>();
+            for (int row = 0; row <= 10; row++)
+            {
+                var coord = new HexCoord(0, row);
+                flat[coord] = new TacticalMovementCell { Coord = coord, Terrain = TacticalTerrain.Open, ElevationMetres = 20f };
+            }
+            HexCoord origin = new HexCoord(0, 0);
+            HexCoord target = new HexCoord(0, 3);
+            var observed = new TacticalContactState
+            {
+                TargetId = "target", DisplayName = "Target", State = TacticalVisibilityState.Observed,
+                LastKnownPosition = target, LastObservedTurn = 1, ObserverId = "attacker"
+            };
+            var firstWeapon = new TacticalWeaponState("rifle", "Rifle", 6);
+            TacticalFirePreview preview = TacticalDirectFire.Preview(flat, "attacker", origin, observed, target, firstWeapon, 8);
+            int modifierTotal = 0;
+            foreach (TacticalFireModifier modifier in preview.Modifiers) modifierTotal += modifier.Value;
+            if (!preview.IsValid || preview.RangeHexes != 3 || preview.HitChance != 66 || preview.SuppressionChance != 86 || modifierTotal != preview.HitChance ||
+                preview.ExpectedEffect != "HIGH")
+            {
+                failure = "preview modifier accounting";
+                return false;
+            }
+            int seed = TacticalDirectFire.CreateSeed("fixture", 2, 4);
+            TacticalFireEvent first = TacticalDirectFire.Resolve(preview, firstWeapon, seed);
+            var secondWeapon = new TacticalWeaponState("rifle", "Rifle", 6);
+            TacticalFirePreview secondPreview = TacticalDirectFire.Preview(flat, "attacker", origin, observed, target, secondWeapon, 8);
+            TacticalFireEvent second = TacticalDirectFire.Resolve(secondPreview, secondWeapon, seed);
+            if (first.Roll != second.Roll || first.Outcome != second.Outcome || first.AmmunitionAfter != 5 ||
+                second.AmmunitionAfter != 5 || first.Outcome == TacticalFireOutcome.Rejected)
+            {
+                failure = "identical-seed replay or ammunition expenditure";
+                return false;
+            }
+
+            var rough = CopyMovementFixture(flat, 0, 3);
+            rough[target].Terrain = TacticalTerrain.Rough;
+            TacticalFirePreview roughPreview = TacticalDirectFire.Preview(rough, "attacker", origin, observed, target,
+                new TacticalWeaponState("rifle", "Rifle", 1), 8);
+            if (!roughPreview.IsValid || roughPreview.HitChance != 48 || roughPreview.Modifiers.Count != 3)
+            {
+                failure = "terrain modifier";
+                return false;
+            }
+
+            var identified = new TacticalContactState { TargetId = "target", State = TacticalVisibilityState.Identified, LastKnownPosition = target };
+            var illegalWeapon = new TacticalWeaponState("rifle", "Rifle", 2);
+            TacticalFirePreview illegal = TacticalDirectFire.Preview(flat, "attacker", origin, identified, target, illegalWeapon, 8);
+            TacticalFireEvent rejected = TacticalDirectFire.Resolve(illegal, illegalWeapon, seed);
+            var blocked = CopyMovementFixture(flat, 0, 4);
+            blocked[new HexCoord(0, 2)].ElevationMetres = 100f;
+            var blockedContact = new TacticalContactState { TargetId = "target", State = TacticalVisibilityState.Observed, LastKnownPosition = new HexCoord(0, 4) };
+            TacticalFirePreview blockedPreview = TacticalDirectFire.Preview(blocked, "attacker", origin, blockedContact,
+                blockedContact.LastKnownPosition, illegalWeapon, 8);
+            var empty = new TacticalWeaponState("rifle", "Rifle", 1) { RemainingAmmunition = 0 };
+            TacticalFirePreview emptyPreview = TacticalDirectFire.Preview(flat, "attacker", origin, observed, target, empty, 8);
+            var distantContact = new TacticalContactState { TargetId = "target", State = TacticalVisibilityState.Observed, LastKnownPosition = new HexCoord(0, 9) };
+            TacticalFirePreview distant = TacticalDirectFire.Preview(flat, "attacker", origin, distantContact, distantContact.LastKnownPosition, illegalWeapon, 8);
+            if (illegal.IsValid || rejected.Outcome != TacticalFireOutcome.Rejected || illegalWeapon.RemainingAmmunition != 2 ||
+                blockedPreview.IsValid || emptyPreview.IsValid || distant.IsValid)
+            {
+                failure = "illegal target, LOS, range, or empty-ammunition gate";
+                return false;
+            }
+            failure = null;
+            return true;
+        }
+
         private static bool ValidateObservationRules(out string failure)
         {
             var flat = new Dictionary<HexCoord, TacticalMovementCell>();
@@ -2382,11 +2708,12 @@ namespace AlwaysFaithful.Prototype
             GUI.Label(new Rect(286f, 166f, 101f, 22f), tacticalUnitState.Readiness.ToString().ToUpperInvariant(), stateStyle);
             GUI.Label(new Rect(38f, 195f, 70f, 22f), "ACTION", badgeStyle);
             DrawActionPointPips(new Rect(105f, 195f, 168f, 20f), tacticalUnitState);
+            GUI.Label(new Rect(324f, 195f, 72f, 22f), $"AMMO {tacticalWeapon.RemainingAmmunition}/{tacticalWeapon.MaximumAmmunition}", badgeStyle);
             GUI.Label(new Rect(38f, 224f, 348f, 26f), tacticalOrderFeedback, bodyStyle);
 
             Rect tacticalEndTurnRect = new Rect(137f, 259f, 104f, 34f);
             returnToIslandRect = new Rect(244f, 259f, 161f, 34f);
-            GUI.enabled = !mapTransitionActive && !tacticalUnitMoving;
+            GUI.enabled = !mapTransitionActive && !tacticalUnitMoving && !tacticalFireResolving;
             if (GUI.Button(tacticalEndTurnRect, "END TURN", buttonStyle)) EndTacticalTurn();
             if (GUI.Button(returnToIslandRect, "RETURN TO ISLAND", buttonStyle)) ReturnToIsland(true);
             GUI.enabled = true;
@@ -2409,10 +2736,11 @@ namespace AlwaysFaithful.Prototype
 
             if (hoveredLocalCell != null)
             {
-                float height = tacticalLosPlanning && tacticalLosResult != null ? 124f : 76f;
+                float height = tacticalFirePlanning && tacticalFirePreview != null ? 166f : tacticalLosPlanning && tacticalLosResult != null ? 124f : 76f;
                 GUI.Box(new Rect(20f, 321f, 405f, height), GUIContent.none);
-                string inspection = CellInspectionText(hoveredLocalCell, tacticalLosPlanning ? "LOS TARGET" : "LOCAL INSPECT");
+                string inspection = CellInspectionText(hoveredLocalCell, tacticalFirePlanning ? "DIRECT FIRE TARGET" : tacticalLosPlanning ? "LOS TARGET" : "LOCAL INSPECT");
                 if (tacticalLosPlanning && tacticalLosResult != null) inspection += "\n" + TacticalLosBreakdown(tacticalLosResult);
+                if (tacticalFirePlanning && tacticalFirePreview != null) inspection += "\n" + TacticalFireBreakdown(tacticalFirePreview);
                 GUI.Label(new Rect(38f, 331f, 360f, height - 16f), inspection, bodyStyle);
             }
             if (tacticalMovePlanning)
@@ -2431,9 +2759,14 @@ namespace AlwaysFaithful.Prototype
                 GUI.enabled = true;
                 if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 67f, 158f, 28f), "INSPECT LOS", buttonStyle))
                     BeginTacticalLosPlanning();
+                GUI.enabled = tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalDirectFire.ActionPointCost && tacticalWeapon.RemainingAmmunition > 0;
+                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 100f, 158f, 28f),
+                        tacticalWeapon.RemainingAmmunition > 0 ? $"DIRECT FIRE • {tacticalWeapon.RemainingAmmunition}" : "DIRECT FIRE • EMPTY", buttonStyle))
+                    BeginTacticalFirePlanning();
+                GUI.enabled = true;
             }
             GUI.Box(new Rect(uiWidth - 310f, uiHeight - 83f, 288f, 61f), GUIContent.none);
-            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 70f, 256f, 45f), "RMB Unit Orders  •  LMB Confirm\nInspect LOS  •  RMB/Escape Cancel", bodyStyle);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 70f, 256f, 45f), "RMB Orders  •  LMB Confirm\nMove / LOS / Fire  •  RMB/Escape Cancel", bodyStyle);
         }
 
         private static string TacticalLosBreakdown(TacticalLosResult result)
@@ -2442,6 +2775,19 @@ namespace AlwaysFaithful.Prototype
             string text = $"{result.State.ToString().ToUpperInvariant()} • {result.RangeHexes * 250} m";
             int count = Mathf.Min(2, result.Modifiers.Count);
             for (int index = 0; index < count; index++) text += "\n" + result.Modifiers[index];
+            return text;
+        }
+
+        private static string TacticalFireBreakdown(TacticalFirePreview preview)
+        {
+            if (!preview.IsValid) return "ILLEGAL • " + preview.RejectionReason;
+            string text = $"{preview.HitChance}% HIT • {preview.SuppressionChance}% EFFECT • {preview.ExpectedEffect}";
+            int count = Mathf.Min(3, preview.Modifiers.Count);
+            for (int index = 0; index < count; index++)
+            {
+                TacticalFireModifier modifier = preview.Modifiers[index];
+                text += $"\n{modifier.Label}: {(modifier.Value >= 0 ? "+" : string.Empty)}{modifier.Value}";
+            }
             return text;
         }
 

@@ -40,6 +40,15 @@ namespace AlwaysFaithful.Core
             return true;
         }
 
+        public bool TrySpendActionPoints(int actionPointCost)
+        {
+            if (!CanMove || actionPointCost <= 0 || actionPointCost > RemainingActionPoints) return false;
+            RemainingActionPoints -= actionPointCost;
+            Readiness = RemainingActionPoints > 0 ? UnitReadiness.Available : UnitReadiness.Spent;
+            IsSelected = false;
+            return true;
+        }
+
         public void CompleteMove(HexCoord destination)
         {
             Position = destination;

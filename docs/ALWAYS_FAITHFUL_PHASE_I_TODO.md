@@ -78,9 +78,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 7 — Direct fire
 
-- [ ] **Function:** add one deterministic small-arms fire action with range, terrain, LOS, target state, ammunition abstraction, and seeded outcome events.
-- [ ] **Presentation:** add target preview, expected-effect panel, fire line, restrained muzzle/impact effects, and readable hit/miss/suppression feedback.
-- [ ] **Proof:** test identical-seed replay, modifier accounting, illegal targets, ammunition expenditure, and event/view synchronization.
+- [x] **Function:** add one deterministic small-arms fire action with range, terrain, LOS, target state, ammunition abstraction, and seeded outcome events.
+- [x] **Presentation:** add target preview, expected-effect panel, fire line, restrained muzzle/impact effects, and readable hit/miss/suppression feedback.
+- [x] **Proof:** test identical-seed replay, modifier accounting, illegal targets, ammunition expenditure, and event/view synchronization.
 
 ### Pass 8 — Suppression, cohesion, and recovery
 
