@@ -72,9 +72,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 6 — Spotting and fog of war
 
-- [ ] **Function:** add hidden, contact, identified, and currently observed states with deterministic observer checks.
-- [ ] **Presentation:** add terrain-aware fog shading, uncertain contact markers, reveal/loss transitions, and observer-source feedback.
-- [ ] **Proof:** test state transitions, stale contacts, save/reload visibility, and prohibition of attacks on illegal information states.
+- [x] **Function:** add hidden, contact, identified, and currently observed states with deterministic observer checks.
+- [x] **Presentation:** add terrain-aware fog shading, uncertain contact markers, reveal/loss transitions, and observer-source feedback.
+- [x] **Proof:** test state transitions, stale contacts, save/reload visibility, and prohibition of attacks on illegal information states.
 
 ### Pass 7 — Direct fire
 

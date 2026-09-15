@@ -14,6 +14,8 @@ The USMC rifle platoon deploys onto each local map with eight tactical AP. Local
 
 The tactical order menu also provides an inspect-only line-of-sight tool with a 12-hex (3 km) limit. It traces a deterministic hex line between observer and target, compares the interpolated sightline against measured elevation and rough-terrain obstruction, and reports clear, obscured, blocked, out-of-range, and map-edge results without committing an attack. Teal, amber, and red line segments and intervening-hex washes make the visibility transition readable directly on the terrain, while the inspection card lists the range and decisive modifiers.
 
+Pass 6 adds an authoritative tactical observation picture. Every local hex receives terrain- and LOS-aware fog shading, while two opposing formations are represented according to what the USMC observer actually knows: hidden, uncertain contact, identified unit, or currently observed unit. Lost tracks persist for one turn at their last-known position before expiring. Contact records retain observer, range, LOS, turn, and stale-state data through JSON save/reload, and only a non-stale currently observed target passes the combat-information gate reserved for direct fire in Pass 7.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:

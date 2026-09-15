@@ -14,6 +14,7 @@ namespace AlwaysFaithful.Prototype
         private bool path;
         private bool invalid;
         private TacticalLosState lineOfSight;
+        private float fogAmount;
 
         public HexCoord Coord { get; private set; }
         public bool IsLand { get; private set; }
@@ -21,6 +22,7 @@ namespace AlwaysFaithful.Prototype
         public double Longitude { get; private set; }
         public double Latitude { get; private set; }
         public TacticalTerrain Terrain { get; private set; }
+        public float FogAmount => fogAmount;
 
         public void Initialize(HexCoord coord, TacticalTerrain terrain, float elevationMetres, double longitude, double latitude, MeshRenderer renderer, Color color)
         {
@@ -72,10 +74,16 @@ namespace AlwaysFaithful.Prototype
             RefreshColor();
         }
 
+        public void SetFog(float amount)
+        {
+            fogAmount = Mathf.Clamp01(amount);
+            RefreshColor();
+        }
+
         private void RefreshColor()
         {
             if (meshRenderer == null) return;
-            Color color = baseColor;
+            Color color = Color.Lerp(baseColor, new Color(.025f, .055f, .064f), fogAmount);
             if (reachable) color = Color.Lerp(color, new Color(.20f, .64f, .55f), .38f);
             if (path) color = Color.Lerp(color, new Color(1f, .69f, .16f), .78f);
             if (hovered) color = Color.Lerp(color, Color.white, .28f);

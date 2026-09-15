@@ -40,6 +40,9 @@ namespace AlwaysFaithful.Prototype
         private readonly List<HexCoord> tacticalPreviewPath = new List<HexCoord>();
         private readonly List<LineRenderer> tacticalLosSegments = new List<LineRenderer>();
         private readonly List<HexCoord> tacticalLosCells = new List<HexCoord>();
+        private readonly List<TacticalUnitState> tacticalEnemyStates = new List<TacticalUnitState>();
+        private readonly Dictionary<string, TacticalContactState> tacticalContacts = new Dictionary<string, TacticalContactState>();
+        private readonly Dictionary<string, ContactMarkerView> tacticalContactViews = new Dictionary<string, ContactMarkerView>();
         private Camera mapCamera;
         private GameObject overviewRoot;
         private GameObject tacticalRoot;
@@ -99,6 +102,8 @@ namespace AlwaysFaithful.Prototype
         private bool automatedTacticalMovementRegression;
         private bool automatedLosRegression;
         private bool automatedLosCapture;
+        private bool automatedObservationRegression;
+        private bool automatedObservationCapture;
         private int landCellCount;
         private int waterCellCount;
         private float maximumLandElevation;
@@ -143,6 +148,8 @@ namespace AlwaysFaithful.Prototype
             automatedTacticalMovementRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--tactical-movement-regression") >= 0;
             automatedLosRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--los-regression") >= 0;
             automatedLosCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--los-capture-path=", StringComparison.Ordinal));
+            automatedObservationRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--observation-regression") >= 0;
+            automatedObservationCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--observation-capture-path=", StringComparison.Ordinal));
             LoadGeography();
             BuildLightingAndCamera();
             overviewRoot = new GameObject("Taiwan Operational Map");
@@ -161,6 +168,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedTacticalRegression) StartCoroutine(RunTacticalRegression());
             if (automatedTacticalMovementRegression) StartCoroutine(RunTacticalMovementRegression());
             if (automatedLosRegression) StartCoroutine(RunLosRegression());
+            if (automatedObservationRegression) StartCoroutine(RunObservationRegression());
             if (automatedTacticalCapture)
             {
                 EnterTacticalMap(FindCoastalOperationalCell(), false);
@@ -175,12 +183,18 @@ namespace AlwaysFaithful.Prototype
                 PreviewTacticalLineOfSight(FindLosCaptureTarget());
                 StartCoroutine(CaptureLosScreenshotWhenRequested());
             }
+            if (automatedObservationCapture)
+            {
+                EnterTacticalMap(FindHighReliefOperationalCell(), false);
+                FrameObservationContacts();
+                StartCoroutine(CaptureObservationScreenshotWhenRequested());
+            }
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
         private void Update()
         {
-            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedTacticalCapture || automatedLosCapture || mapTransitionActive) return;
+            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || mapTransitionActive) return;
             UpdateCamera();
             if (tacticalMode) UpdateTacticalPointer();
             else UpdatePointer();
@@ -478,6 +492,29 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator CaptureObservationScreenshotWhenRequested()
+        {
+            string argument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--observation-capture-path=", StringComparison.Ordinal));
+            if (argument == null) yield break;
+            string path = argument.Substring("--observation-capture-path=".Length);
+            yield return new WaitForSecondsRealtime(1f);
+            var target = new RenderTexture(1280, 720, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            mapCamera.targetTexture = target;
+            mapCamera.Render();
+            RenderTexture.active = target;
+            image.ReadPixels(new Rect(0f, 0f, target.width, target.height), 0, 0);
+            image.Apply();
+            File.WriteAllBytes(path, image.EncodeToPNG());
+            mapCamera.targetTexture = null;
+            RenderTexture.active = previous;
+            Destroy(target);
+            Destroy(image);
+            Debug.Log($"ALWAYS_FAITHFUL_OBSERVATION_CAPTURED {path} contacts={tacticalContacts.Count}");
+            Application.Quit(0);
+        }
+
         private void RequestTacticalMap(HexCellView parentCell)
         {
             if (parentCell == null || !parentCell.IsLand || mapTransitionActive) return;
@@ -616,6 +653,8 @@ namespace AlwaysFaithful.Prototype
             BuildTacticalUnit();
             BuildTacticalMovementVisuals();
             BuildTacticalLosVisuals();
+            BuildTacticalContacts();
+            RefreshTacticalObservation();
             tacticalOrderFeedback = "RMB platoon for tactical orders";
             Debug.Log($"Built tactical battlefield {tacticalBattlefield.BattlefieldId}: {localCells.Count} cells at {tacticalBattlefield.CellSizeMetres} m, relief {localMinimumLandElevation:0}-{localMaximumLandElevation:0} m.");
         }
@@ -783,6 +822,97 @@ namespace AlwaysFaithful.Prototype
             tacticalLosTargetRenderer.sharedMaterial = NewOverlayMaterial(new Color(.25f, .92f, .79f, .48f));
             Destroy(tacticalLosTarget.GetComponent<Collider>());
             tacticalLosTarget.SetActive(false);
+        }
+
+        private void BuildTacticalContacts()
+        {
+            tacticalEnemyStates.Clear();
+            tacticalContacts.Clear();
+            tacticalContactViews.Clear();
+            var occupied = new HashSet<HexCoord> { tacticalUnitState.Position };
+            HexCoord riflePosition = FindObservationDeployment(TacticalVisibilityState.Observed, occupied);
+            occupied.Add(riflePosition);
+            HexCoord supportPosition = FindObservationDeployment(TacticalVisibilityState.Contact, occupied);
+            TacticalUnitState rifle = new TacticalUnitState("pla-rifle-squad-1", "PLA Rifle Squad", riflePosition, 4);
+            TacticalUnitState support = new TacticalUnitState("pla-support-team-1", "PLA Support Team", supportPosition, 4);
+            tacticalEnemyStates.Add(rifle);
+            tacticalEnemyStates.Add(support);
+            foreach (TacticalUnitState enemy in tacticalEnemyStates)
+            {
+                GameObject markerObject = new GameObject("Contact " + enemy.Id);
+                markerObject.transform.SetParent(tacticalRoot.transform, false);
+                markerObject.transform.position = LocalCounterPosition(enemy.Position) + Vector3.up * .03f;
+                ContactMarkerView marker = markerObject.AddComponent<ContactMarkerView>();
+                marker.Initialize();
+                tacticalContactViews.Add(enemy.Id, marker);
+            }
+        }
+
+        private HexCoord FindObservationDeployment(TacticalVisibilityState desired, HashSet<HexCoord> excluded)
+        {
+            HexCoord best = tacticalUnitState.Position;
+            int bestScore = int.MinValue;
+            foreach (KeyValuePair<HexCoord, TacticalMovementCell> pair in localMovementBoard)
+            {
+                if (!pair.Value.IsPassable || excluded.Contains(pair.Key)) continue;
+                TacticalContactState report = TacticalObservation.Check(localMovementBoard, tacticalUnitState.Id,
+                    tacticalUnitState.Position, "probe", "Probe", pair.Key, turnState.TurnNumber);
+                int stateDelta = Math.Abs((int)report.State - (int)desired);
+                int preferredRange = desired == TacticalVisibilityState.Observed ? 3 : 9;
+                int score = (stateDelta == 0 ? 10000 : 0) - stateDelta * 1000 - Math.Abs(report.RangeHexes - preferredRange) * 10;
+                if (report.State != TacticalVisibilityState.Hidden) score += 500;
+                int edgeClearance = Math.Min(Math.Min(pair.Key.Q, tacticalBattlefield.Width - 1 - pair.Key.Q),
+                    Math.Min(pair.Key.R, tacticalBattlefield.Height - 1 - pair.Key.R));
+                score += edgeClearance * 5;
+                if (score <= bestScore) continue;
+                best = pair.Key;
+                bestScore = score;
+            }
+            return best;
+        }
+
+        private void RefreshTacticalObservation()
+        {
+            if (tacticalUnitState == null) return;
+            foreach (KeyValuePair<HexCoord, HexCellView> pair in localCells)
+            {
+                TacticalLosResult los = TacticalLineOfSight.Inspect(localMovementBoard, tacticalUnitState.Position, pair.Key);
+                float fog;
+                if (pair.Key.Equals(tacticalUnitState.Position)) fog = 0f;
+                else if (!los.IsValid) fog = .66f;
+                else if (los.State == TacticalLosState.Blocked) fog = .56f;
+                else if (los.State == TacticalLosState.Obscured) fog = .34f;
+                else fog = los.RangeHexes <= TacticalObservation.ClearObservationRangeHexes ? .06f : .23f;
+                pair.Value.SetFog(fog);
+            }
+
+            foreach (TacticalUnitState enemy in tacticalEnemyStates)
+            {
+                tacticalContacts.TryGetValue(enemy.Id, out TacticalContactState previous);
+                TacticalContactState report = TacticalObservation.Check(localMovementBoard, tacticalUnitState.Id,
+                    tacticalUnitState.Position, enemy.Id, enemy.DisplayName, enemy.Position, turnState.TurnNumber, previous);
+                tacticalContacts[enemy.Id] = report;
+                ContactMarkerView marker = tacticalContactViews[enemy.Id];
+                marker.transform.position = LocalCounterPosition(report.LastKnownPosition) + Vector3.up * .03f;
+                marker.Present(report);
+                Debug.Log($"ALWAYS_FAITHFUL_CONTACT target={report.TargetId} state={report.State} stale={report.IsStale} position={report.LastKnownPosition} range={report.RangeHexes} observer={report.ObserverId}");
+            }
+        }
+
+        private void FrameObservationContacts()
+        {
+            Vector3 total = tacticalUnit.transform.position;
+            int count = 1;
+            foreach (ContactMarkerView marker in tacticalContactViews.Values)
+            {
+                if (!marker.gameObject.activeSelf) continue;
+                total += marker.transform.position;
+                count++;
+            }
+            cameraFocus = total / count;
+            cameraFocus.y = 0f;
+            cameraDistance = 30f;
+            ApplyCamera();
         }
 
         private void UpdateTacticalPointer()
@@ -1073,6 +1203,7 @@ namespace AlwaysFaithful.Prototype
             tacticalUnit.Present(tacticalUnitState);
             RecordTacticalMovement(origin, destination, route.ActionPointCost, actionPointsBefore,
                 tacticalUnitState.RemainingActionPoints, "Completed", "Terrain and slope cost applied", route.Path);
+            RefreshTacticalObservation();
             tacticalOrderFeedback = $"MOVE COMPLETE • {tacticalUnitState.RemainingActionPoints} AP REMAIN";
             yield return new WaitForSeconds(.30f);
             ClearTacticalPreview();
@@ -1410,6 +1541,7 @@ namespace AlwaysFaithful.Prototype
             unitState.BeginTurn();
             unit.Present(unitState);
             tacticalUnit.Present(tacticalUnitState);
+            RefreshTacticalObservation();
             tacticalOrderFeedback = "NEW TURN • AP RESTORED";
             Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_TURN_STARTED turn={turnState.TurnNumber} ap={tacticalUnitState.RemainingActionPoints}/{tacticalUnitState.MaximumActionPoints}");
         }
@@ -1829,6 +1961,93 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator RunObservationRegression()
+        {
+            yield return null;
+            if (!ValidateObservationRules(out string failure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_OBSERVATION_REGRESSION_FAILED rules " + failure);
+                Application.Quit(1);
+                yield break;
+            }
+            EnterTacticalMap(FindHighReliefOperationalCell(), false);
+            float minimumFog = 1f;
+            float maximumFog = 0f;
+            foreach (HexCellView cell in localCells.Values)
+            {
+                minimumFog = Mathf.Min(minimumFog, cell.FogAmount);
+                maximumFog = Mathf.Max(maximumFog, cell.FogAmount);
+            }
+            int visibleMarkers = 0;
+            foreach (KeyValuePair<string, ContactMarkerView> pair in tacticalContactViews)
+                if (pair.Value.gameObject.activeSelf && pair.Value.TransitionCount > 0 &&
+                    pair.Value.PresentedState == tacticalContacts[pair.Key].State) visibleMarkers++;
+            var snapshot = new TacticalObservationSnapshot { Contacts = new List<TacticalContactState>(tacticalContacts.Values) };
+            string serialized = JsonUtility.ToJson(snapshot);
+            TacticalObservationSnapshot restored = JsonUtility.FromJson<TacticalObservationSnapshot>(serialized);
+            if (tacticalContacts.Count != 2 || tacticalContactViews.Count != 2 || visibleMarkers < 1 ||
+                minimumFog > .01f || maximumFog < .60f || restored == null || restored.Contacts.Count != tacticalContacts.Count)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_OBSERVATION_REGRESSION_FAILED presentation contacts={tacticalContacts.Count} views={tacticalContactViews.Count} visible={visibleMarkers} fog={minimumFog:0.00}-{maximumFog:0.00} restored={restored?.Contacts.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_OBSERVATION_REGRESSION_OK contacts={tacticalContacts.Count} visible={visibleMarkers} fog={minimumFog:0.00}-{maximumFog:0.00} serialized={serialized.Length}");
+            Application.Quit(0);
+        }
+
+        private static bool ValidateObservationRules(out string failure)
+        {
+            var flat = new Dictionary<HexCoord, TacticalMovementCell>();
+            for (int row = 0; row <= 12; row++)
+            {
+                var coord = new HexCoord(0, row);
+                flat[coord] = new TacticalMovementCell { Coord = coord, Terrain = TacticalTerrain.Open, ElevationMetres = 20f };
+            }
+            HexCoord origin = new HexCoord(0, 0);
+            TacticalContactState observed = TacticalObservation.Check(flat, "observer", origin, "target", "Target", new HexCoord(0, 3), 1);
+            TacticalContactState identified = TacticalObservation.Check(flat, "observer", origin, "target", "Target", new HexCoord(0, 10), 1);
+            var rough = CopyMovementFixture(flat, 0, 9);
+            rough[new HexCoord(0, 2)].Terrain = TacticalTerrain.Rough;
+            rough[new HexCoord(0, 2)].ElevationMetres = 0f;
+            TacticalContactState contact = TacticalObservation.Check(rough, "observer", origin, "target", "Target", new HexCoord(0, 8), 1);
+            var concealed = CopyMovementFixture(flat, 0, 10);
+            concealed[new HexCoord(0, 10)].Terrain = TacticalTerrain.Highland;
+            TacticalContactState terrainContact = TacticalObservation.Check(concealed, "observer", origin, "target", "Target", new HexCoord(0, 10), 1);
+            if (observed.State != TacticalVisibilityState.Observed || !observed.CanAttack ||
+                identified.State != TacticalVisibilityState.Identified || identified.CanAttack ||
+                contact.State != TacticalVisibilityState.Contact || contact.CanAttack ||
+                terrainContact.State != TacticalVisibilityState.Contact)
+            {
+                failure = "deterministic visibility bands or attack gate";
+                return false;
+            }
+
+            var blocked = CopyMovementFixture(flat, 0, 6);
+            blocked[new HexCoord(0, 2)].ElevationMetres = 100f;
+            TacticalContactState stale = TacticalObservation.Check(blocked, "observer", origin, "target", "Target", new HexCoord(0, 6), 2, observed);
+            TacticalContactState expired = TacticalObservation.Check(blocked, "observer", origin, "target", "Target", new HexCoord(0, 6), 3, stale);
+            if (stale.State != TacticalVisibilityState.Contact || !stale.IsStale || stale.LastObservedTurn != 1 || stale.CanAttack ||
+                expired.State != TacticalVisibilityState.Hidden || expired.IsStale ||
+                TacticalObservation.CanAttack(observed, new HexCoord(0, 4)) || !TacticalObservation.CanAttack(observed, observed.LastKnownPosition))
+            {
+                failure = "stale-contact transition or reported-position attack gate";
+                return false;
+            }
+
+            var snapshot = new TacticalObservationSnapshot { Contacts = new List<TacticalContactState> { observed, identified, contact, stale } };
+            TacticalObservationSnapshot restored = JsonUtility.FromJson<TacticalObservationSnapshot>(JsonUtility.ToJson(snapshot));
+            if (restored == null || restored.SchemaVersion != 1 || restored.Contacts.Count != 4 ||
+                restored.Contacts[3].State != TacticalVisibilityState.Contact || !restored.Contacts[3].IsStale ||
+                restored.Contacts[3].ObserverId != "observer")
+            {
+                failure = "visibility save/reload";
+                return false;
+            }
+            failure = null;
+            return true;
+        }
+
         private static bool ValidateLosRules(out string failure)
         {
             var flat = new Dictionary<HexCoord, TacticalMovementCell>();
@@ -2171,6 +2390,22 @@ namespace AlwaysFaithful.Prototype
             if (GUI.Button(tacticalEndTurnRect, "END TURN", buttonStyle)) EndTacticalTurn();
             if (GUI.Button(returnToIslandRect, "RETURN TO ISLAND", buttonStyle)) ReturnToIsland(true);
             GUI.enabled = true;
+
+            Rect intelligenceRect = new Rect(uiWidth - 355f, 18f, 335f, 116f + tacticalContacts.Count * 25f);
+            GUI.Box(intelligenceRect, GUIContent.none);
+            GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 11f, 290f, 22f), "TACTICAL INTELLIGENCE", badgeStyle);
+            GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 36f, 300f, 38f),
+                "OBSERVER • USMC RIFLE PLATOON\nLOS + TERRAIN SENSOR PICTURE", bodyStyle);
+            int contactLine = 0;
+            foreach (TacticalUnitState enemy in tacticalEnemyStates)
+            {
+                if (!tacticalContacts.TryGetValue(enemy.Id, out TacticalContactState contact)) continue;
+                string stale = contact.IsStale ? " • LAST KNOWN" : string.Empty;
+                string range = contact.State == TacticalVisibilityState.Hidden ? "NO TRACK" : $"{contact.RangeHexes * 250} M";
+                GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 78f + contactLine * 25f, 300f, 23f),
+                    $"{contact.State.ToString().ToUpperInvariant()}{stale}  •  {range}", bodyStyle);
+                contactLine++;
+            }
 
             if (hoveredLocalCell != null)
             {
