@@ -122,9 +122,15 @@ namespace AlwaysFaithful.Prototype
         private bool automatedSuppressionCapture;
         private bool automatedReactionRegression;
         private bool automatedReactionCapture;
+        private bool automatedEnemyTurnRegression;
+        private bool automatedEnemyTurnCapture;
         private bool tacticalReactionActive;
         private bool tacticalReactionHalted;
         private string tacticalReactionBannerText;
+        private bool tacticalEnemyTurnActive;
+        private bool fastEnemyAnimation;
+        private string tacticalEnemyActivityText;
+        private int tacticalHiddenEnemyActions;
         private int landCellCount;
         private int waterCellCount;
         private float maximumLandElevation;
@@ -177,6 +183,9 @@ namespace AlwaysFaithful.Prototype
             automatedSuppressionCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--suppression-capture-path=", StringComparison.Ordinal));
             automatedReactionRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--reaction-regression") >= 0;
             automatedReactionCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--reaction-capture-path=", StringComparison.Ordinal));
+            automatedEnemyTurnRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--enemy-turn-regression") >= 0;
+            automatedEnemyTurnCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--enemy-turn-capture-path=", StringComparison.Ordinal));
+            fastEnemyAnimation = Array.IndexOf(Environment.GetCommandLineArgs(), "--fast-enemy") >= 0;
             LoadGeography();
             BuildLightingAndCamera();
             overviewRoot = new GameObject("Taiwan Operational Map");
@@ -199,6 +208,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedFireRegression) StartCoroutine(RunFireRegression());
             if (automatedSuppressionRegression) StartCoroutine(RunSuppressionRegression());
             if (automatedReactionRegression) StartCoroutine(RunReactionRegression());
+            if (automatedEnemyTurnRegression) StartCoroutine(RunEnemyTurnRegression());
             if (automatedTacticalCapture)
             {
                 EnterTacticalMap(FindCoastalOperationalCell(), false);
@@ -259,12 +269,19 @@ namespace AlwaysFaithful.Prototype
                 ApplyCamera();
                 StartCoroutine(CaptureReactionScreenshotWhenRequested());
             }
+            if (automatedEnemyTurnCapture)
+            {
+                EnterTacticalMap(FindHighReliefOperationalCell(), false);
+                fastEnemyAnimation = false;
+                EndTacticalTurn();
+                StartCoroutine(CaptureEnemyTurnScreenshotWhenRequested());
+            }
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
         private void Update()
         {
-            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || mapTransitionActive) return;
+            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedEnemyTurnRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || automatedEnemyTurnCapture || mapTransitionActive) return;
             UpdateCamera();
             if (tacticalMode) UpdateTacticalPointer();
             else UpdatePointer();
@@ -657,6 +674,29 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator CaptureEnemyTurnScreenshotWhenRequested()
+        {
+            string argument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--enemy-turn-capture-path=", StringComparison.Ordinal));
+            if (argument == null) yield break;
+            string path = argument.Substring("--enemy-turn-capture-path=".Length);
+            yield return new WaitForSecondsRealtime(.85f);
+            var target = new RenderTexture(1280, 720, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            mapCamera.targetTexture = target;
+            mapCamera.Render();
+            RenderTexture.active = target;
+            image.ReadPixels(new Rect(0f, 0f, target.width, target.height), 0, 0);
+            image.Apply();
+            File.WriteAllBytes(path, image.EncodeToPNG());
+            mapCamera.targetTexture = null;
+            RenderTexture.active = previous;
+            Destroy(target);
+            Destroy(image);
+            Debug.Log($"ALWAYS_FAITHFUL_ENEMY_TURN_CAPTURED {path} active={tacticalEnemyTurnActive} activity={tacticalEnemyActivityText}");
+            Application.Quit(0);
+        }
+
         private void RequestTacticalMap(HexCellView parentCell)
         {
             if (parentCell == null || !parentCell.IsLand || mapTransitionActive) return;
@@ -719,7 +759,7 @@ namespace AlwaysFaithful.Prototype
 
         private void ReturnToIsland(bool animate)
         {
-            if (!tacticalMode || tacticalUnitMoving || tacticalFireResolving || mapTransitionActive && animate) return;
+            if (!tacticalMode || tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || mapTransitionActive && animate) return;
             if (animate)
             {
                 tacticalAudio.Play(TacticalSound.MapTransition);
@@ -981,6 +1021,7 @@ namespace AlwaysFaithful.Prototype
             tacticalEnemyStates.Add(support);
             foreach (TacticalUnitState enemy in tacticalEnemyStates)
             {
+                localMovementBoard[enemy.Position].OccupantId = enemy.Id;
                 GameObject markerObject = new GameObject("Contact " + enemy.Id);
                 markerObject.transform.SetParent(tacticalRoot.transform, false);
                 markerObject.transform.position = LocalCounterPosition(enemy.Position) + Vector3.up * .03f;
@@ -1074,7 +1115,7 @@ namespace AlwaysFaithful.Prototype
 
         private void UpdateTacticalPointer()
         {
-            if (tacticalUnitMoving || tacticalFireResolving) return;
+            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
             if (returnToIslandRect.Contains(guiPointer) || tacticalMenuOpen && tacticalMenuRect.Contains(guiPointer) ||
                 new Rect(20f, 18f, 405f, 294f).Contains(guiPointer)) return;
@@ -1753,12 +1794,16 @@ namespace AlwaysFaithful.Prototype
 
         private void RecordTacticalMovement(HexCoord origin, HexCoord destination, int cost, int before, int after,
             string outcome, string detail, IReadOnlyList<HexCoord> path)
+            => RecordTacticalMovement(tacticalUnitState.Id, origin, destination, cost, before, after, outcome, detail, path);
+
+        private void RecordTacticalMovement(string unitId, HexCoord origin, HexCoord destination, int cost, int before, int after,
+            string outcome, string detail, IReadOnlyList<HexCoord> path)
         {
             var movementEvent = new TacticalMovementEvent
             {
                 Sequence = ++tacticalEventSequence,
                 BattlefieldId = tacticalBattlefield.BattlefieldId,
-                UnitId = tacticalUnitState.Id,
+                UnitId = unitId,
                 Origin = origin,
                 Destination = destination,
                 ActionPointCost = cost,
@@ -2023,19 +2068,189 @@ namespace AlwaysFaithful.Prototype
 
         private void EndTacticalTurn()
         {
-            if (tacticalUnitMoving || tacticalFireResolving) return;
+            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive) return;
             CancelTacticalInteraction(false);
+            tacticalAudio.Play(TacticalSound.EndTurn);
+            StartCoroutine(RunEnemyTurn());
+        }
+
+        private IEnumerator RunEnemyTurn()
+        {
+            tacticalEnemyTurnActive = true;
+            tacticalHiddenEnemyActions = 0;
+            turnState.ActiveSide = "PLA";
+            tacticalEnemyActivityText = "PLA PHASE • ASSESSING BATTLESPACE";
+            tacticalOrderFeedback = "ENEMY TURN • ORDERS LOCKED";
+            Debug.Log($"ALWAYS_FAITHFUL_ENEMY_TURN_STARTED turn={turnState.TurnNumber}");
+            yield return EnemyDelay(.55f);
+
+            int orders = 0;
+            foreach (TacticalUnitState enemy in tacticalEnemyStates)
+            {
+                if (orders++ >= TacticalEnemyTurn.MaximumOrdersPerTurn) break;
+                enemy.BeginTurn();
+                int seed = TacticalDirectFire.CreateSeed(tacticalBattlefield.BattlefieldId, turnState.TurnNumber,
+                    tacticalEventSequence + orders);
+                TacticalWeaponState weapon = tacticalEnemyWeapons[enemy.Id];
+                TacticalAiOrder order = TacticalEnemyTurn.PlanOrder(localMovementBoard, enemy, weapon,
+                    tacticalUnitState.Position, tacticalUnitState, turnState.TurnNumber, seed);
+                if (!TacticalEnemyTurn.ValidateOrder(localMovementBoard, order, enemy, weapon,
+                        tacticalUnitState, turnState.TurnNumber, out string rejection))
+                {
+                    Debug.LogWarning($"ALWAYS_FAITHFUL_ENEMY_ORDER_REJECTED unit={enemy.Id} kind={order.Kind} reason={rejection}");
+                    order = new TacticalAiOrder { UnitId = enemy.Id, Kind = TacticalAiOrderKind.Hold,
+                        Origin = enemy.Position, Destination = enemy.Position, Seed = seed, Intent = rejection };
+                }
+
+                bool visible = tacticalContacts.TryGetValue(enemy.Id, out TacticalContactState known) &&
+                    known.State != TacticalVisibilityState.Hidden && !known.IsStale;
+                tacticalEnemyActivityText = visible
+                    ? $"PLA PHASE • {enemy.DisplayName.ToUpperInvariant()} • {order.Kind.ToString().ToUpperInvariant()}"
+                    : "PLA PHASE • HIDDEN ACTIVITY";
+                if (!visible) tacticalHiddenEnemyActions++;
+                if (visible)
+                {
+                    cameraFocus = LocalCounterPosition(enemy.Position);
+                    cameraDistance = Mathf.Min(cameraDistance, 18f);
+                    ApplyCamera();
+                }
+                yield return EnemyDelay(.30f);
+                yield return ExecuteEnemyOrder(enemy, weapon, order, visible);
+                RecordEnemyAction(enemy, order, visible);
+                RefreshTacticalObservation();
+                yield return EnemyDelay(.34f);
+            }
+
+            tacticalEnemyActivityText = tacticalHiddenEnemyActions > 0
+                ? $"PLA PHASE COMPLETE • {tacticalHiddenEnemyActions} HIDDEN ACTION{(tacticalHiddenEnemyActions == 1 ? string.Empty : "S")} RESOLVED"
+                : "PLA PHASE COMPLETE • ALL ACTIONS OBSERVED";
+            yield return EnemyDelay(.62f);
+            turnState.ActiveSide = "USMC";
             turnState.EndTurn(tacticalUnitState);
             unitState.BeginTurn();
             unit.Present(unitState);
             tacticalUnit.Present(tacticalUnitState);
             tacticalFormationView.Present(tacticalUnitState);
-            foreach (TacticalUnitState enemy in tacticalEnemyStates) enemy.ApplySuppressionPoints(-TacticalSuppression.PassiveRecoveryAmount);
             RefreshTacticalObservation();
-            tacticalOrderFeedback = "NEW TURN • AP RESTORED";
+            tacticalOrderFeedback = "USMC PHASE • AP RESTORED";
+            tacticalEnemyTurnActive = false;
+            tacticalEnemyActivityText = null;
             tacticalAudio.Play(TacticalSound.EndTurn);
-            Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_TURN_STARTED turn={turnState.TurnNumber} ap={tacticalUnitState.RemainingActionPoints}/{tacticalUnitState.MaximumActionPoints}");
+            Debug.Log($"ALWAYS_FAITHFUL_ENEMY_TURN_COMPLETED turn={turnState.TurnNumber - 1} actions={orders} hidden={tacticalHiddenEnemyActions} next={turnState.ActiveSide} newTurn={turnState.TurnNumber}");
         }
+
+        private IEnumerator ExecuteEnemyOrder(TacticalUnitState enemy, TacticalWeaponState weapon,
+            TacticalAiOrder order, bool visible)
+        {
+            switch (order.Kind)
+            {
+                case TacticalAiOrderKind.Recover:
+                    TacticalSuppressionEvent rally = TacticalSuppression.ApplyRally(enemy);
+                    if (rally != null)
+                    {
+                        rally.Sequence = ++tacticalEventSequence;
+                        rally.BattlefieldId = tacticalBattlefield.BattlefieldId;
+                        rally.Turn = turnState.TurnNumber;
+                        tacticalBattlefield.SuppressionEvents.Add(rally);
+                        tacticalAudio.Play(TacticalSound.Rally);
+                    }
+                    break;
+                case TacticalAiOrderKind.Fire:
+                    yield return ExecuteEnemyFire(enemy, weapon, order, visible);
+                    break;
+                case TacticalAiOrderKind.Move:
+                    yield return ExecuteEnemyMove(enemy, order, visible);
+                    break;
+                case TacticalAiOrderKind.Observe:
+                    TacticalObservation.Check(localMovementBoard, enemy.Id, enemy.Position,
+                        tacticalUnitState.Id, tacticalUnitState.DisplayName, tacticalUnitState.Position, turnState.TurnNumber);
+                    break;
+            }
+        }
+
+        private IEnumerator ExecuteEnemyMove(TacticalUnitState enemy, TacticalAiOrder order, bool visible)
+        {
+            int before = enemy.RemainingActionPoints;
+            if (!enemy.TryBeginMove(order.ActionPointCost)) yield break;
+            HexCoord origin = enemy.Position;
+            ContactMarkerView marker = tacticalContactViews[enemy.Id];
+            for (int index = 1; index < order.Path.Count; index++)
+            {
+                if (!visible) continue;
+                Vector3 start = marker.transform.position;
+                Vector3 end = LocalCounterPosition(order.Path[index]) + Vector3.up * .03f;
+                float duration = fastEnemyAnimation ? .035f : .18f;
+                for (float elapsed = 0f; elapsed < duration; elapsed += Time.unscaledDeltaTime)
+                {
+                    marker.transform.position = Vector3.Lerp(start, end, Mathf.SmoothStep(0f, 1f, elapsed / duration));
+                    yield return null;
+                }
+                marker.transform.position = end;
+            }
+            localMovementBoard[origin].OccupantId = null;
+            localMovementBoard[order.Destination].OccupantId = enemy.Id;
+            enemy.CompleteMove(order.Destination);
+            RecordTacticalMovement(enemy.Id, origin, order.Destination, order.ActionPointCost, before,
+                enemy.RemainingActionPoints, "Completed", "AI objective movement", order.Path);
+        }
+
+        private IEnumerator ExecuteEnemyFire(TacticalUnitState enemy, TacticalWeaponState weapon,
+            TacticalAiOrder order, bool visible)
+        {
+            TacticalContactState target = TacticalObservation.Check(localMovementBoard, enemy.Id, enemy.Position,
+                tacticalUnitState.Id, tacticalUnitState.DisplayName, tacticalUnitState.Position, turnState.TurnNumber);
+            TacticalFirePreview preview = TacticalDirectFire.Preview(localMovementBoard, enemy.Id, enemy.Position,
+                target, tacticalUnitState.Position, weapon, enemy.RemainingActionPoints);
+            TacticalFireEvent fire = TacticalDirectFire.Resolve(preview, weapon, order.Seed);
+            if (fire.Outcome == TacticalFireOutcome.Rejected || !enemy.TrySpendActionPoints(TacticalDirectFire.ActionPointCost)) yield break;
+            fire.Sequence = ++tacticalEventSequence;
+            fire.BattlefieldId = tacticalBattlefield.BattlefieldId;
+            fire.Turn = turnState.TurnNumber;
+            tacticalBattlefield.FireEvents.Add(fire);
+            TacticalSuppressionEvent suppression = TacticalSuppression.ApplyFireOutcome(tacticalUnitState, fire.Outcome);
+            if (suppression != null)
+            {
+                suppression.Sequence = ++tacticalEventSequence;
+                suppression.BattlefieldId = tacticalBattlefield.BattlefieldId;
+                suppression.Turn = turnState.TurnNumber;
+                tacticalBattlefield.SuppressionEvents.Add(suppression);
+            }
+            tacticalUnit.Present(tacticalUnitState);
+            tacticalFormationView.Present(tacticalUnitState);
+            tacticalUnit.CueIncomingFire(fire.Outcome);
+            tacticalFireLine.enabled = true;
+            tacticalFireLine.startColor = visible ? new Color(1f, .36f, .20f, .96f) : new Color(1f, .58f, .20f, .72f);
+            tacticalFireLine.endColor = tacticalFireLine.startColor;
+            tacticalFireLine.SetPosition(0, localCells[enemy.Position].transform.position + Vector3.up * (CellSurfaceOffset + .38f));
+            tacticalFireLine.SetPosition(1, localCells[tacticalUnitState.Position].transform.position + Vector3.up * (CellSurfaceOffset + .38f));
+            tacticalAudio.Play(fire.Outcome == TacticalFireOutcome.Hit ? TacticalSound.FireHit
+                : fire.Outcome == TacticalFireOutcome.Suppressed ? TacticalSound.FireSuppressed : TacticalSound.FireMiss);
+            yield return EnemyDelay(.42f);
+            tacticalFireLine.enabled = false;
+            Debug.Log($"ALWAYS_FAITHFUL_ENEMY_FIRE unit={enemy.Id} seed={fire.Seed} roll={fire.Roll} outcome={fire.Outcome}");
+        }
+
+        private void RecordEnemyAction(TacticalUnitState enemy, TacticalAiOrder order, bool visible)
+        {
+            var action = new TacticalEnemyActionEvent
+            {
+                Sequence = ++tacticalEventSequence,
+                BattlefieldId = tacticalBattlefield.BattlefieldId,
+                Turn = turnState.TurnNumber,
+                UnitId = enemy.Id,
+                Kind = order.Kind,
+                Origin = order.Origin,
+                Destination = order.Destination,
+                TargetId = order.TargetId,
+                WasVisible = visible,
+                Summary = visible ? $"{enemy.DisplayName}: {order.Kind}" : "Hidden enemy activity"
+            };
+            tacticalBattlefield.EnemyActionEvents.Add(action);
+            Debug.Log($"ALWAYS_FAITHFUL_ENEMY_ACTION sequence={action.Sequence} unit={action.UnitId} kind={action.Kind} visible={action.WasVisible} from={action.Origin} to={action.Destination}");
+        }
+
+        private object EnemyDelay(float normalSeconds)
+            => new WaitForSecondsRealtime(fastEnemyAnimation ? Mathf.Min(.04f, normalSeconds) : normalSeconds);
 
         private void SelectCell(HexCellView cell)
         {
@@ -2341,7 +2556,9 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
 
-            EndTacticalTurn();
+            tacticalUnitState.BeginTurn();
+            tacticalUnit.Present(tacticalUnitState);
+            tacticalFormationView.Present(tacticalUnitState);
             BeginTacticalMovePlanning();
             HexCoord water = destination;
             foreach (KeyValuePair<HexCoord, TacticalMovementCell> pair in localMovementBoard)
@@ -2713,7 +2930,8 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
 
-            EndTacticalTurn();
+            tacticalUnitState.BeginTurn();
+            enemy.BeginTurn();
             if (tacticalUnitState.SuppressionPoints != 40 || tacticalUnitState.CombatStatus != TacticalCombatStatus.Suppressed ||
                 enemy.SuppressionPoints != Mathf.Max(0, expectedPoints - TacticalSuppression.PassiveRecoveryAmount))
             {
@@ -2735,6 +2953,131 @@ namespace AlwaysFaithful.Prototype
             }
             Debug.Log($"ALWAYS_FAITHFUL_SUPPRESSION_REGRESSION_OK enemyPoints={enemy.SuppressionPoints} enemyStatus={enemy.CombatStatus} unitPoints={tacticalUnitState.SuppressionPoints} unitStatus={tacticalUnitState.CombatStatus} events={tacticalBattlefield.SuppressionEvents.Count}");
             Application.Quit(0);
+        }
+
+        private IEnumerator RunEnemyTurnRegression()
+        {
+            yield return null;
+            if (!ValidateEnemyTurnRules(out string failure, out long elapsedMilliseconds))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_ENEMY_TURN_REGRESSION_FAILED rules={failure} elapsedMs={elapsedMilliseconds}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            EnterTacticalMap(FindHighReliefOperationalCell(), false);
+            fastEnemyAnimation = true;
+            int startingTurn = turnState.TurnNumber;
+            int actionsBefore = tacticalBattlefield.EnemyActionEvents.Count;
+            EndTacticalTurn();
+            float deadline = Time.realtimeSinceStartup + 5f;
+            do { yield return null; } while (tacticalEnemyTurnActive && Time.realtimeSinceStartup < deadline);
+            string serialized = JsonUtility.ToJson(tacticalBattlefield);
+            TacticalBattlefieldState restored = JsonUtility.FromJson<TacticalBattlefieldState>(serialized);
+            if (tacticalEnemyTurnActive || turnState.ActiveSide != "USMC" || turnState.TurnNumber != startingTurn + 1 ||
+                tacticalBattlefield.EnemyActionEvents.Count != actionsBefore + tacticalEnemyStates.Count ||
+                tacticalUnitState.RemainingActionPoints != tacticalUnitState.MaximumActionPoints ||
+                restored == null || restored.EnemyActionEvents.Count != tacticalEnemyStates.Count)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_ENEMY_TURN_REGRESSION_FAILED presentation active={tacticalEnemyTurnActive} side={turnState.ActiveSide} turn={turnState.TurnNumber}/{startingTurn + 1} actions={tacticalBattlefield.EnemyActionEvents.Count - actionsBefore} restored={restored?.EnemyActionEvents.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_ENEMY_TURN_REGRESSION_OK actions={tacticalEnemyStates.Count} hidden={tacticalHiddenEnemyActions} turn={startingTurn}->{turnState.TurnNumber} side={turnState.ActiveSide} planningMs={elapsedMilliseconds} schema={restored.SchemaVersion}");
+            Application.Quit(0);
+        }
+
+        private static bool ValidateEnemyTurnRules(out string failure, out long elapsedMilliseconds)
+        {
+            Dictionary<HexCoord, TacticalMovementCell> board = BuildEnemyTurnFixture(16);
+            var mover = new TacticalUnitState("enemy", "Enemy", new HexCoord(0, 0), 4);
+            var opponent = new TacticalUnitState("friendly", "Friendly", new HexCoord(15, 0), 8);
+            board[mover.Position].OccupantId = mover.Id;
+            board[opponent.Position].OccupantId = opponent.Id;
+            var weapon = new TacticalWeaponState("enemy-rifle", "Rifle", 6);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            TacticalAiOrder first = TacticalEnemyTurn.PlanOrder(board, mover, weapon, opponent.Position, opponent, 1, 404);
+            TacticalAiOrder replay = TacticalEnemyTurn.PlanOrder(board, mover, weapon, opponent.Position, opponent, 1, 404);
+            for (int index = 0; index < 100; index++)
+                TacticalEnemyTurn.PlanOrder(board, mover, weapon, opponent.Position, opponent, 1, 404 + index);
+            watch.Stop();
+            elapsedMilliseconds = watch.ElapsedMilliseconds;
+            if (first.Kind != TacticalAiOrderKind.Move || JsonUtility.ToJson(first) != JsonUtility.ToJson(replay) ||
+                HexCoord.Distance(first.Destination, opponent.Position) >= HexCoord.Distance(mover.Position, opponent.Position) ||
+                !TacticalEnemyTurn.ValidateOrder(board, first, mover, weapon, opponent, 1, out _))
+            {
+                failure = "objective movement or fixed-seed replay";
+                return false;
+            }
+
+            TacticalAiOrder illegal = new TacticalAiOrder
+            {
+                UnitId = mover.Id,
+                Kind = TacticalAiOrderKind.Move,
+                Origin = mover.Position,
+                Destination = opponent.Position,
+                ActionPointCost = 1
+            };
+            if (TacticalEnemyTurn.ValidateOrder(board, illegal, mover, weapon, opponent, 1, out _))
+            {
+                failure = "illegal AI order accepted";
+                return false;
+            }
+
+            var recovering = new TacticalUnitState("recover", "Recovering", new HexCoord(1, 0), 4);
+            recovering.ApplySuppressionPoints(TacticalSuppression.DisruptedThreshold);
+            TacticalAiOrder recovery = TacticalEnemyTurn.PlanOrder(board, recovering, weapon,
+                opponent.Position, opponent, 1, 11);
+            if (recovery.Kind != TacticalAiOrderKind.Recover)
+            {
+                failure = "recovery priority";
+                return false;
+            }
+
+            var firer = new TacticalUnitState("firer", "Firer", new HexCoord(13, 0), 4);
+            TacticalAiOrder fire = TacticalEnemyTurn.PlanOrder(board, firer, weapon,
+                opponent.Position, opponent, 1, 12);
+            if (fire.Kind != TacticalAiOrderKind.Fire ||
+                !TacticalEnemyTurn.ValidateOrder(board, fire, firer, weapon, opponent, 1, out _))
+            {
+                failure = "legal direct-fire selection";
+                return false;
+            }
+
+            var observer = new TacticalUnitState("observer", "Observer", new HexCoord(6, 0), 4);
+            TacticalAiOrder observe = TacticalEnemyTurn.PlanOrder(board, observer, weapon,
+                observer.Position, opponent, 1, 13);
+            if (observe.Kind != TacticalAiOrderKind.Observe)
+            {
+                failure = "observation fallback";
+                return false;
+            }
+            if (elapsedMilliseconds > TacticalEnemyTurn.PlanningBudgetMilliseconds)
+            {
+                failure = $"planning budget exceeded ({elapsedMilliseconds} ms)";
+                return false;
+            }
+            failure = null;
+            return true;
+        }
+
+        private static Dictionary<HexCoord, TacticalMovementCell> BuildEnemyTurnFixture(int width)
+        {
+            var board = new Dictionary<HexCoord, TacticalMovementCell>();
+            for (int q = 0; q < width; q++)
+            {
+                for (int r = -2; r <= 2; r++)
+                {
+                    var coord = new HexCoord(q, r);
+                    board[coord] = new TacticalMovementCell
+                    {
+                        Coord = coord,
+                        Terrain = q % 5 == 2 && r == 1 ? TacticalTerrain.Rough : TacticalTerrain.Open,
+                        ElevationMetres = 20f
+                    };
+                }
+            }
+            return board;
         }
 
         private static bool ValidateFireRules(out string failure)
@@ -3353,7 +3696,7 @@ namespace AlwaysFaithful.Prototype
         {
             GUI.Box(new Rect(20f, 18f, 405f, 294f), GUIContent.none);
             GUI.Label(new Rect(38f, 30f, 250f, 30f), "ALWAYS FAITHFUL", titleStyle);
-            GUI.Label(new Rect(287f, 34f, 118f, 22f), "TACTICAL LAYER", badgeStyle);
+            GUI.Label(new Rect(270f, 34f, 135f, 22f), $"TURN {turnState.TurnNumber} • {turnState.ActiveSide}", badgeStyle);
             GUI.Label(new Rect(38f, 63f, 350f, 24f), "LOCAL BATTLEFIELD  •  250 M HEXES", badgeStyle);
             GUI.Label(new Rect(38f, 94f, 340f, 25f), tacticalBattlefield.BattlefieldId, unitNameStyle);
             GUI.Label(new Rect(38f, 121f, 350f, 36f),
@@ -3379,12 +3722,12 @@ namespace AlwaysFaithful.Prototype
 
             Rect tacticalEndTurnRect = new Rect(137f, 259f, 104f, 34f);
             returnToIslandRect = new Rect(244f, 259f, 161f, 34f);
-            GUI.enabled = !mapTransitionActive && !tacticalUnitMoving && !tacticalFireResolving;
+            GUI.enabled = !mapTransitionActive && !tacticalUnitMoving && !tacticalFireResolving && !tacticalEnemyTurnActive;
             if (GUI.Button(tacticalEndTurnRect, "END TURN", buttonStyle)) EndTacticalTurn();
             if (GUI.Button(returnToIslandRect, "RETURN TO ISLAND", buttonStyle)) ReturnToIsland(true);
             GUI.enabled = true;
 
-            Rect intelligenceRect = new Rect(uiWidth - 355f, 18f, 335f, 116f + tacticalContacts.Count * 25f);
+            Rect intelligenceRect = new Rect(uiWidth - 355f, 18f, 335f, 151f + tacticalContacts.Count * 25f);
             GUI.Box(intelligenceRect, GUIContent.none);
             GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 11f, 290f, 22f), "TACTICAL INTELLIGENCE", badgeStyle);
             GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 36f, 300f, 38f),
@@ -3402,12 +3745,21 @@ namespace AlwaysFaithful.Prototype
                     $"{contact.State.ToString().ToUpperInvariant()}{stale}  •  {range}{status}", bodyStyle);
                 contactLine++;
             }
+            Rect speedRect = new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 82f + tacticalContacts.Count * 25f, 300f, 28f);
+            if (GUI.Button(speedRect, fastEnemyAnimation ? "ENEMY SPEED • FAST" : "ENEMY SPEED • CINEMATIC", buttonStyle))
+                fastEnemyAnimation = !fastEnemyAnimation;
 
             if (tacticalReactionActive && !string.IsNullOrEmpty(tacticalReactionBannerText))
             {
                 Rect bannerRect = new Rect(uiWidth / 2f - 210f, 26f, 420f, 40f);
                 GUI.Box(bannerRect, GUIContent.none);
                 GUI.Label(bannerRect, tacticalReactionBannerText, reactionBannerStyle);
+            }
+            else if (tacticalEnemyTurnActive && !string.IsNullOrEmpty(tacticalEnemyActivityText))
+            {
+                Rect bannerRect = new Rect(uiWidth / 2f - 240f, 26f, 480f, 44f);
+                GUI.Box(bannerRect, GUIContent.none);
+                GUI.Label(bannerRect, tacticalEnemyActivityText, reactionBannerStyle);
             }
 
             if (hoveredLocalCell != null)

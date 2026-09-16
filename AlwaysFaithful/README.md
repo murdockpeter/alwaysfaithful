@@ -26,6 +26,8 @@ Every player action now has a rudimentary audio cue. Short tones are synthesized
 
 Pass 9 lets the enemy shoot back while the platoon is moving. Every eligible PLA formation now carries its own small-arms weapon, and each move checks the hexes the platoon actually steps into for an enemy that is still able to fire and has an unblocked, in-range line of sight; the nearest eligible reactor (ties broken by unit ID) takes exactly one snap-shot reaction per move, resolved with the same deterministic small-arms model as deliberate fire but at a shorter range and an accuracy penalty. A miss lets the platoon complete its route; a suppressing or damaging hit halts it at the exposed hex and applies the same cumulative suppression as Pass 8. The interruption pauses the route animation, pans and tightens the camera on the firer, raises an on-screen reaction-fire banner, flashes the reactor's marker and the platoon's own counter, and logs a persistent, replayable reaction event alongside the movement record it cut short.
 
+Pass 10 closes the turn loop with a deterministic, objective-aware PLA turn. Ending the tactical turn hands control to every opposing formation in a fixed order; each one plans through the same legal-command interface the player uses, prioritizing recovery when disrupted, deliberate fire when a target is currently observed, objective-seeking movement along the cheapest legal route when neither applies, and an inspect-only observation update otherwise, with every candidate order re-validated against current board state before it executes. Visible enemy actions pan and tighten the camera on the acting unit and animate at normal speed; actions the platoon cannot currently observe resolve instantly behind a "hidden activity" summary, and a cinematic/fast toggle lets a player skip ahead once the pattern is familiar. A turn banner tracks phase and side, every AI action is logged as a persistent, replayable event alongside the existing movement, fire, suppression, and reaction records, and a fixed-seed planner replay, illegal-order rejection, and a hard planning-time budget are all covered by headless regression.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -43,6 +45,7 @@ Controls:
 - On the tactical map, right click the platoon and choose **Rally** to spend 1 AP recovering suppression once the unit is Suppressed, Disrupted, or Reduced.
 - Right click away from the unit or press **Escape** to cancel tactical movement, LOS inspection, or fire targeting.
 - Moving within an alert enemy's range and line of sight can trigger a reaction shot that pauses and may halt the move partway.
+- On the tactical map, use **End Turn** to hand control to the PLA; watch the phase banner and camera focus for each visible action, or toggle **Enemy Speed** between cinematic and fast pacing.
 - Use **Return to Island** to restore the operational map and its prior camera position.
 - Use **End Turn** on the unit card to advance the turn and restore the platoon's AP.
 - Mouse wheel zooms.

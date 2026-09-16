@@ -96,9 +96,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 10 — Enemy turn and scenario loop
 
-- [ ] **Function:** add a deterministic objective-aware opponent capable of movement, observation, fire, and recovery through the same legal-command interface as the player.
-- [ ] **Presentation:** add enemy-activity pacing, visible-action focus, hidden-action summaries, turn transition treatment, and optional fast animation.
-- [ ] **Proof:** run headless battles, reject illegal AI orders, verify fixed-seed replay, and enforce a maximum turn-processing time.
+- [x] **Function:** add a deterministic objective-aware opponent capable of movement, observation, fire, and recovery through the same legal-command interface as the player.
+- [x] **Presentation:** add enemy-activity pacing, visible-action focus, hidden-action summaries, turn transition treatment, and optional fast animation.
+- [x] **Proof:** run headless battles, reject illegal AI orders, verify fixed-seed replay, and enforce a maximum turn-processing time.
 
 ### Pass 11 — Objectives, victory, and after-action review
 
