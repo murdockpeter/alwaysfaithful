@@ -12,12 +12,14 @@ namespace AlwaysFaithful.Core
         public double Latitude;
         public float ElevationMetres;
         public TacticalTerrain Terrain;
+        public TacticalCover Cover;
+        public bool IsBuiltUp;
     }
 
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 5;
+        public const int CurrentSchemaVersion = 6;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;
@@ -115,6 +117,7 @@ namespace AlwaysFaithful.Core
                     battlefield.North = Math.Max(battlefield.North, latitude + latitudeStep * .5d);
                 }
             }
+            GenerateCoverAndBuiltUp(battlefield);
             return battlefield;
         }
 
@@ -123,6 +126,106 @@ namespace AlwaysFaithful.Core
             if (!isLand) return TacticalTerrain.Water;
             if (metres >= 550f) return TacticalTerrain.Highland;
             return metres >= 160f ? TacticalTerrain.Rough : TacticalTerrain.Open;
+        }
+
+        // Cover density and built-up clusters are derived deterministically from
+        // BattlefieldId (via TacticalDirectFire.CreateSeed) plus each cell's own
+        // local coordinate, so re-extracting the same operational hex always
+        // reproduces an identical layout.
+        public const int BuiltUpShoreBandHexes = 3;
+        private const int ClusterSeedChancePerMille = 100;
+        private const int ClusterRadiusSmallWeightPerMille = 700;
+        private const int BuiltUpMediumWeightPerMille = 450;
+
+        private static void GenerateCoverAndBuiltUp(TacticalBattlefieldState battlefield)
+        {
+            var byCoord = new Dictionary<HexCoord, TacticalBattlefieldCell>();
+            var waterCoords = new List<HexCoord>();
+            foreach (TacticalBattlefieldCell cell in battlefield.Cells)
+            {
+                byCoord[cell.LocalCoord] = cell;
+                if (cell.Terrain == TacticalTerrain.Water) waterCoords.Add(cell.LocalCoord);
+            }
+
+            int coverSeed = TacticalDirectFire.CreateSeed(battlefield.BattlefieldId, 0, 1);
+            int clusterSeedSeed = TacticalDirectFire.CreateSeed(battlefield.BattlefieldId, 0, 2);
+            int clusterRadiusSeed = TacticalDirectFire.CreateSeed(battlefield.BattlefieldId, 0, 3);
+            int builtUpTierSeed = TacticalDirectFire.CreateSeed(battlefield.BattlefieldId, 0, 4);
+
+            foreach (TacticalBattlefieldCell cell in battlefield.Cells)
+            {
+                if (cell.Terrain == TacticalTerrain.Water) continue;
+                cell.Cover = RollCoverLevel(cell.Terrain, CoverRoll(coverSeed, cell.LocalCoord));
+            }
+
+            foreach (TacticalBattlefieldCell center in battlefield.Cells)
+            {
+                if (center.IsBuiltUp || center.Terrain == TacticalTerrain.Water || center.Terrain == TacticalTerrain.Highland) continue;
+                if (ShoreDistanceHexes(center.LocalCoord, waterCoords) > BuiltUpShoreBandHexes) continue;
+                if (CoverRoll(clusterSeedSeed, center.LocalCoord) >= ClusterSeedChancePerMille) continue;
+
+                int radius = CoverRoll(clusterRadiusSeed, center.LocalCoord) < ClusterRadiusSmallWeightPerMille ? 1 : 2;
+                foreach (TacticalBattlefieldCell candidate in battlefield.Cells)
+                {
+                    if (candidate.IsBuiltUp || candidate.Terrain == TacticalTerrain.Water || candidate.Terrain == TacticalTerrain.Highland) continue;
+                    if (HexCoord.Distance(center.LocalCoord, candidate.LocalCoord) > radius) continue;
+                    // A cluster's growth radius can reach farther from shore than
+                    // its seed cell alone, so every member is re-checked against
+                    // the same shore band rather than trusting the center's check.
+                    if (ShoreDistanceHexes(candidate.LocalCoord, waterCoords) > BuiltUpShoreBandHexes) continue;
+                    candidate.IsBuiltUp = true;
+                    candidate.Cover = CoverRoll(builtUpTierSeed, candidate.LocalCoord) < BuiltUpMediumWeightPerMille
+                        ? TacticalCover.Medium
+                        : TacticalCover.Heavy;
+                }
+            }
+        }
+
+        private static int ShoreDistanceHexes(HexCoord coord, List<HexCoord> waterCoords)
+        {
+            int nearest = int.MaxValue;
+            foreach (HexCoord water in waterCoords)
+                nearest = Math.Min(nearest, HexCoord.Distance(coord, water));
+            return nearest;
+        }
+
+        // Weighted per-mille tables: rougher terrain skews toward heavier natural
+        // cover, matching the same vegetation-density reasoning already used for
+        // Rough terrain's LOS obstruction.
+        private static TacticalCover RollCoverLevel(TacticalTerrain terrain, int roll)
+        {
+            switch (terrain)
+            {
+                case TacticalTerrain.Rough:
+                    if (roll < 200) return TacticalCover.None;
+                    if (roll < 550) return TacticalCover.Light;
+                    if (roll < 870) return TacticalCover.Medium;
+                    return TacticalCover.Heavy;
+                case TacticalTerrain.Highland:
+                    if (roll < 450) return TacticalCover.None;
+                    if (roll < 780) return TacticalCover.Light;
+                    if (roll < 950) return TacticalCover.Medium;
+                    return TacticalCover.Heavy;
+                default:
+                    if (roll < 550) return TacticalCover.None;
+                    if (roll < 850) return TacticalCover.Light;
+                    if (roll < 970) return TacticalCover.Medium;
+                    return TacticalCover.Heavy;
+            }
+        }
+
+        // Mirrors TacticalEnemyTurn.TieBreak's spatial-hash-prime + xorshift idiom,
+        // widened to a 0-999 per-mille roll instead of a %7 tie-break jitter.
+        private static int CoverRoll(int seed, HexCoord coord)
+        {
+            unchecked
+            {
+                uint value = (uint)seed ^ ((uint)coord.Q * 73856093u) ^ ((uint)coord.R * 19349663u);
+                value ^= value << 13;
+                value ^= value >> 17;
+                value ^= value << 5;
+                return (int)(value % 1000u);
+            }
         }
     }
 }

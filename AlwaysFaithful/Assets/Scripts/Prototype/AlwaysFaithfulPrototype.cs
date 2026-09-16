@@ -124,6 +124,7 @@ namespace AlwaysFaithful.Prototype
         private bool automatedReactionCapture;
         private bool automatedEnemyTurnRegression;
         private bool automatedEnemyTurnCapture;
+        private bool automatedCoverRegression;
         private bool tacticalReactionActive;
         private bool tacticalReactionHalted;
         private string tacticalReactionBannerText;
@@ -185,6 +186,7 @@ namespace AlwaysFaithful.Prototype
             automatedReactionCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--reaction-capture-path=", StringComparison.Ordinal));
             automatedEnemyTurnRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--enemy-turn-regression") >= 0;
             automatedEnemyTurnCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--enemy-turn-capture-path=", StringComparison.Ordinal));
+            automatedCoverRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--cover-regression") >= 0;
             fastEnemyAnimation = Array.IndexOf(Environment.GetCommandLineArgs(), "--fast-enemy") >= 0;
             LoadGeography();
             BuildLightingAndCamera();
@@ -209,6 +211,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedSuppressionRegression) StartCoroutine(RunSuppressionRegression());
             if (automatedReactionRegression) StartCoroutine(RunReactionRegression());
             if (automatedEnemyTurnRegression) StartCoroutine(RunEnemyTurnRegression());
+            if (automatedCoverRegression) StartCoroutine(RunCoverRegression());
             if (automatedTacticalCapture)
             {
                 EnterTacticalMap(FindCoastalOperationalCell(), false);
@@ -281,7 +284,7 @@ namespace AlwaysFaithful.Prototype
 
         private void Update()
         {
-            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedEnemyTurnRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || automatedEnemyTurnCapture || mapTransitionActive) return;
+            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedEnemyTurnRegression || automatedCoverRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || automatedEnemyTurnCapture || mapTransitionActive) return;
             UpdateCamera();
             if (tacticalMode) UpdateTacticalPointer();
             else UpdatePointer();
@@ -806,6 +809,7 @@ namespace AlwaysFaithful.Prototype
 
             Mesh sharedMesh = CreateHexMesh(HexRadius * .985f, .12f);
             Material sharedMaterial = NewMaterial(Color.white);
+            Shader overlayShader = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
             foreach (TacticalBattlefieldCell source in tacticalBattlefield.Cells)
             {
                 Vector3 position = LocalHexToWorld(source.LocalCoord);
@@ -821,15 +825,18 @@ namespace AlwaysFaithful.Prototype
                 renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
                 Color color = source.Terrain == TacticalTerrain.Water ? WaterColor(source.ElevationMetres) : LocalLandColor(source.ElevationMetres);
+                color = CoverTint(color, source.Cover);
                 HexCellView view = cellObject.AddComponent<HexCellView>();
-                view.Initialize(source.LocalCoord, source.Terrain, source.ElevationMetres, source.Longitude, source.Latitude, renderer, color);
+                view.Initialize(source.LocalCoord, source.Terrain, source.ElevationMetres, source.Longitude, source.Latitude, renderer, color, source.Cover, source.IsBuiltUp);
                 localCells.Add(source.LocalCoord, view);
                 localMovementBoard.Add(source.LocalCoord, new TacticalMovementCell
                 {
                     Coord = source.LocalCoord,
                     Terrain = source.Terrain,
-                    ElevationMetres = source.ElevationMetres
+                    ElevationMetres = source.ElevationMetres,
+                    Cover = source.Cover
                 });
+                TacticalCoverView.Build(cellObject.transform, source.LocalCoord, source.Cover, source.IsBuiltUp, overlayShader);
             }
             BuildTacticalTable();
             BuildTacticalShoreline();
@@ -2687,6 +2694,16 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
             EnterTacticalMap(FindHighReliefOperationalCell(), false);
+            // This check proves the presentation pipeline can render every contact
+            // state (detailed vs. uncertain) on a fixed scenario; it predates cover
+            // and is intentionally independent of it. FindObservationDeployment
+            // already chose enemy spawn hexes using cover-aware LOS, so cover must
+            // be neutralized and deployment re-run, not just LOS re-evaluated in
+            // place, or the enemy can still be stuck on a now-stale, cover-chosen
+            // hex that happens to be genuinely terrain-hidden once cover is gone.
+            foreach (TacticalMovementCell cell in localMovementBoard.Values) cell.Cover = TacticalCover.None;
+            BuildTacticalContacts();
+            RefreshTacticalObservation();
             float minimumFog = 1f;
             float maximumFog = 0f;
             foreach (HexCellView cell in localCells.Values)
@@ -3077,6 +3094,123 @@ namespace AlwaysFaithful.Prototype
                     };
                 }
             }
+            return board;
+        }
+
+        private IEnumerator RunCoverRegression()
+        {
+            yield return null;
+            if (!ValidateCoverRules(out string ruleFailure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_COVER_REGRESSION_FAILED rules=" + ruleFailure);
+                Application.Quit(1);
+                yield break;
+            }
+
+            HexCellView parent = FindCoastalOperationalCell();
+            TacticalBattlefieldState battlefield = TacticalBattlefieldExtractor.Extract(
+                parent.Coord, parent.Longitude, parent.Latitude,
+                (longitude, latitude) => elevation.SampleMetres(longitude, latitude),
+                (longitude, latitude) => coastline.ContainsLand(longitude, latitude));
+
+            var coversSeen = new HashSet<TacticalCover>();
+            var waterCoords = new List<HexCoord>();
+            foreach (TacticalBattlefieldCell cell in battlefield.Cells)
+                if (cell.Terrain == TacticalTerrain.Water) waterCoords.Add(cell.LocalCoord);
+            int builtUpCount = 0;
+            foreach (TacticalBattlefieldCell cell in battlefield.Cells)
+            {
+                coversSeen.Add(cell.Cover);
+                if (!cell.IsBuiltUp) continue;
+                builtUpCount++;
+                int shoreDistance = int.MaxValue;
+                foreach (HexCoord water in waterCoords)
+                    shoreDistance = Math.Min(shoreDistance, HexCoord.Distance(cell.LocalCoord, water));
+                if (shoreDistance > TacticalBattlefieldExtractor.BuiltUpShoreBandHexes)
+                {
+                    Debug.LogError($"ALWAYS_FAITHFUL_COVER_REGRESSION_FAILED built-up cell {cell.LocalCoord} is {shoreDistance} hexes from shore, beyond the {TacticalBattlefieldExtractor.BuiltUpShoreBandHexes}-hex band");
+                    Application.Quit(1);
+                    yield break;
+                }
+            }
+            if (coversSeen.Count < 4)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_COVER_REGRESSION_FAILED only {coversSeen.Count}/4 cover levels appeared on {battlefield.BattlefieldId}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            Debug.Log($"ALWAYS_FAITHFUL_COVER_REGRESSION_OK battlefield={battlefield.BattlefieldId} coverLevels={coversSeen.Count} builtUp={builtUpCount}");
+            Application.Quit(0);
+        }
+
+        private static bool ValidateCoverRules(out string failure)
+        {
+            Dictionary<HexCoord, TacticalMovementCell> board = BuildCoverFixture(8);
+            var attackerPosition = new HexCoord(2, 0);
+            var noneTargetPosition = new HexCoord(4, 0);
+            var heavyTargetPosition = new HexCoord(0, 0);
+            board[heavyTargetPosition].Cover = TacticalCover.Heavy;
+            var weapon = new TacticalWeaponState("cover-test-rifle", "Rifle", 6);
+
+            var noneContact = new TacticalContactState { TargetId = "none-target", State = TacticalVisibilityState.Observed, LastKnownPosition = noneTargetPosition };
+            var heavyContact = new TacticalContactState { TargetId = "heavy-target", State = TacticalVisibilityState.Observed, LastKnownPosition = heavyTargetPosition };
+            TacticalFirePreview noneFire = TacticalDirectFire.Preview(board, "attacker", attackerPosition, noneContact, noneTargetPosition, weapon, 8);
+            TacticalFirePreview heavyFire = TacticalDirectFire.Preview(board, "attacker", attackerPosition, heavyContact, heavyTargetPosition, weapon, 8);
+            if (!noneFire.IsValid || !heavyFire.IsValid || heavyFire.HitChance != noneFire.HitChance + TacticalDirectFire.HeavyCoverHitPenalty)
+            {
+                failure = $"direct fire cover penalty none={noneFire.HitChance} heavy={heavyFire.HitChance}";
+                return false;
+            }
+
+            var reactor = new TacticalUnitState("reactor", "Reactor", attackerPosition, 4);
+            TacticalLosResult losToNone = TacticalLineOfSight.Inspect(board, attackerPosition, noneTargetPosition, TacticalReactionFire.ReactionRangeHexes);
+            TacticalLosResult losToHeavy = TacticalLineOfSight.Inspect(board, attackerPosition, heavyTargetPosition, TacticalReactionFire.ReactionRangeHexes);
+            TacticalFirePreview noneReaction = TacticalReactionFire.Preview(board, reactor, weapon, noneTargetPosition, losToNone);
+            TacticalFirePreview heavyReaction = TacticalReactionFire.Preview(board, reactor, weapon, heavyTargetPosition, losToHeavy);
+            if (!noneReaction.IsValid || !heavyReaction.IsValid || heavyReaction.HitChance != noneReaction.HitChance + TacticalDirectFire.HeavyCoverHitPenalty)
+            {
+                failure = $"reaction fire cover penalty none={noneReaction.HitChance} heavy={heavyReaction.HitChance}";
+                return false;
+            }
+
+            var losObserver = new HexCoord(2, 0);
+            var losTarget = new HexCoord(4, 0);
+            List<HexCoord> line = TacticalLineOfSight.Trace(losObserver, losTarget);
+            if (line.Count < 3)
+            {
+                failure = "LOS fixture too short for an intervening cell";
+                return false;
+            }
+            HexCoord intervening = line[1];
+            TacticalLosResult beforeCover = TacticalLineOfSight.Inspect(board, losObserver, losTarget);
+            if (!beforeCover.IsValid || beforeCover.State != TacticalLosState.Clear)
+            {
+                failure = "LOS baseline was not clear before adding cover";
+                return false;
+            }
+            board[intervening].Cover = TacticalCover.Light;
+            TacticalLosResult afterCover = TacticalLineOfSight.Inspect(board, losObserver, losTarget);
+            board[intervening].Cover = TacticalCover.None;
+            if (!afterCover.IsValid || afterCover.State == TacticalLosState.Clear)
+            {
+                failure = "intervening cover alone did not degrade an otherwise-clear sightline";
+                return false;
+            }
+
+            failure = null;
+            return true;
+        }
+
+        private static Dictionary<HexCoord, TacticalMovementCell> BuildCoverFixture(int width)
+        {
+            var board = new Dictionary<HexCoord, TacticalMovementCell>();
+            for (int q = 0; q < width; q++)
+                for (int r = -2; r <= 2; r++)
+                {
+                    var coord = new HexCoord(q, r);
+                    board[coord] = new TacticalMovementCell { Coord = coord, Terrain = TacticalTerrain.Open, ElevationMetres = 20f };
+                }
             return board;
         }
 
@@ -3478,7 +3612,8 @@ namespace AlwaysFaithful.Prototype
                 TacticalBattlefieldCell a = first.Cells[index];
                 TacticalBattlefieldCell b = second.Cells[index];
                 if (a.Id != b.Id || !a.LocalCoord.Equals(b.LocalCoord) || a.Longitude != b.Longitude ||
-                    a.Latitude != b.Latitude || a.ElevationMetres != b.ElevationMetres || a.Terrain != b.Terrain)
+                    a.Latitude != b.Latitude || a.ElevationMetres != b.ElevationMetres || a.Terrain != b.Terrain ||
+                    a.Cover != b.Cover || a.IsBuiltUp != b.IsBuiltUp)
                 {
                     failure = "cell mismatch at " + index;
                     return false;
@@ -3765,7 +3900,9 @@ namespace AlwaysFaithful.Prototype
             if (hoveredLocalCell != null)
             {
                 bool showTargetStatus = tacticalFirePlanning && tacticalFireTarget != null && tacticalFireTarget.CombatStatus != TacticalCombatStatus.Ready;
-                float height = tacticalFirePlanning && tacticalFirePreview != null ? (showTargetStatus ? 180f : 166f) : tacticalLosPlanning && tacticalLosResult != null ? 124f : 76f;
+                // +28 over the pre-cover baseline: one line for the cell's own
+                // "Cover X" fragment, one for the extra fire/LOS modifier cap below.
+                float height = tacticalFirePlanning && tacticalFirePreview != null ? (showTargetStatus ? 208f : 194f) : tacticalLosPlanning && tacticalLosResult != null ? 152f : 104f;
                 GUI.Box(new Rect(20f, 321f, 405f, height), GUIContent.none);
                 string inspection = CellInspectionText(hoveredLocalCell, tacticalFirePlanning ? "DIRECT FIRE TARGET" : tacticalLosPlanning ? "LOS TARGET" : "LOCAL INSPECT");
                 if (tacticalLosPlanning && tacticalLosResult != null) inspection += "\n" + TacticalLosBreakdown(tacticalLosResult);
@@ -3818,7 +3955,7 @@ namespace AlwaysFaithful.Prototype
         {
             if (!result.IsValid) return result.RejectionReason;
             string text = $"{result.State.ToString().ToUpperInvariant()} • {result.RangeHexes * 250} m";
-            int count = Mathf.Min(2, result.Modifiers.Count);
+            int count = Mathf.Min(3, result.Modifiers.Count);
             for (int index = 0; index < count; index++) text += "\n" + result.Modifiers[index];
             return text;
         }
@@ -3827,7 +3964,7 @@ namespace AlwaysFaithful.Prototype
         {
             if (!preview.IsValid) return "ILLEGAL • " + preview.RejectionReason;
             string text = $"{preview.HitChance}% HIT • {preview.SuppressionChance}% EFFECT • {preview.ExpectedEffect}";
-            int count = Mathf.Min(3, preview.Modifiers.Count);
+            int count = Mathf.Min(4, preview.Modifiers.Count);
             for (int index = 0; index < count; index++)
             {
                 TacticalFireModifier modifier = preview.Modifiers[index];
@@ -3967,6 +4104,19 @@ namespace AlwaysFaithful.Prototype
             return Color.Lerp(color, color * .69f, contour * .34f);
         }
 
+        // Gives cover-bearing hexes a subtle color signal even before the
+        // discrete cover props (TacticalCoverView) are visible up close.
+        private static Color CoverTint(Color color, TacticalCover cover)
+        {
+            switch (cover)
+            {
+                case TacticalCover.Light: return Color.Lerp(color, new Color(.24f, .32f, .18f), .12f);
+                case TacticalCover.Medium: return Color.Lerp(color, new Color(.20f, .28f, .16f), .24f);
+                case TacticalCover.Heavy: return Color.Lerp(color, new Color(.16f, .24f, .14f), .36f);
+                default: return color;
+            }
+        }
+
         private static Color WaterColor(float metres)
         {
             float depth = Mathf.Max(0f, -metres);
@@ -3999,7 +4149,10 @@ namespace AlwaysFaithful.Prototype
         private static string CellInspectionText(HexCellView cell, string heading)
         {
             string vertical = cell.IsLand ? $"Elevation {cell.ElevationMetres:0} m" : $"Depth {Mathf.Max(0f, -cell.ElevationMetres):0} m";
-            return $"{heading}  •  Hex {cell.Coord}\n{cell.Latitude:0.0000}°N  •  {cell.Longitude:0.0000}°E\n{cell.Terrain}  •  {vertical}  •  Move {MovementCostLabel(cell.Terrain)}";
+            string text = $"{heading}  •  Hex {cell.Coord}\n{cell.Latitude:0.0000}°N  •  {cell.Longitude:0.0000}°E\n{cell.Terrain}  •  {vertical}  •  Move {MovementCostLabel(cell.Terrain)}";
+            if (cell.Cover != TacticalCover.None)
+                text += $"\nCover {cell.Cover}{(cell.IsBuiltUp ? "  •  Built-up" : string.Empty)}";
+            return text;
         }
 
         private void BuildPathLine()

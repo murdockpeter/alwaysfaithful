@@ -78,6 +78,22 @@ namespace AlwaysFaithful.Core
         public const int MaximumRangeHexes = 8;
         public const int ActionPointCost = 2;
         public const int BaseHitChance = 72;
+        public const int LightCoverHitPenalty = -8;
+        public const int MediumCoverHitPenalty = -18;
+        public const int HeavyCoverHitPenalty = -32;
+
+        // Shared by TacticalReactionFire.Preview, which duplicates this method's
+        // modifier stack rather than calling into it directly.
+        public static int CoverHitPenalty(TacticalCover cover)
+        {
+            switch (cover)
+            {
+                case TacticalCover.Light: return LightCoverHitPenalty;
+                case TacticalCover.Medium: return MediumCoverHitPenalty;
+                case TacticalCover.Heavy: return HeavyCoverHitPenalty;
+                default: return 0;
+            }
+        }
 
         public static TacticalFirePreview Preview(
             IReadOnlyDictionary<HexCoord, TacticalMovementCell> board,
@@ -121,6 +137,12 @@ namespace AlwaysFaithful.Core
             {
                 chance -= 10;
                 preview.Modifiers.Add(new TacticalFireModifier { Label = "Target in highland", Value = -10 });
+            }
+            if (targetCell.Cover != TacticalCover.None)
+            {
+                int coverPenalty = CoverHitPenalty(targetCell.Cover);
+                chance += coverPenalty;
+                preview.Modifiers.Add(new TacticalFireModifier { Label = $"Target under {targetCell.Cover.ToString().ToLowerInvariant()} cover", Value = coverPenalty });
             }
             if (los.State == TacticalLosState.Obscured)
             {

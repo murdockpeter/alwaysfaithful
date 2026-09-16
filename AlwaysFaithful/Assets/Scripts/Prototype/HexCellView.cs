@@ -22,9 +22,12 @@ namespace AlwaysFaithful.Prototype
         public double Longitude { get; private set; }
         public double Latitude { get; private set; }
         public TacticalTerrain Terrain { get; private set; }
+        public TacticalCover Cover { get; private set; }
+        public bool IsBuiltUp { get; private set; }
         public float FogAmount => fogAmount;
 
-        public void Initialize(HexCoord coord, TacticalTerrain terrain, float elevationMetres, double longitude, double latitude, MeshRenderer renderer, Color color)
+        public void Initialize(HexCoord coord, TacticalTerrain terrain, float elevationMetres, double longitude, double latitude, MeshRenderer renderer, Color color,
+            TacticalCover cover = TacticalCover.None, bool isBuiltUp = false)
         {
             Coord = coord;
             Terrain = terrain;
@@ -32,6 +35,8 @@ namespace AlwaysFaithful.Prototype
             ElevationMetres = elevationMetres;
             Longitude = longitude;
             Latitude = latitude;
+            Cover = cover;
+            IsBuiltUp = isBuiltUp;
             meshRenderer = renderer;
             properties = new MaterialPropertyBlock();
             baseColor = color;

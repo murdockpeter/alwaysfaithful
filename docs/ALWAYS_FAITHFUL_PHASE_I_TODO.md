@@ -100,13 +100,19 @@ Complete these in order unless a discovered dependency requires a documented reo
 - [x] **Presentation:** add enemy-activity pacing, visible-action focus, hidden-action summaries, turn transition treatment, and optional fast animation.
 - [x] **Proof:** run headless battles, reject illegal AI orders, verify fixed-seed replay, and enforce a maximum turn-processing time.
 
-### Pass 11 — Objectives, victory, and after-action review
+### Pass 11 — Tactical terrain richness: cover and built-up areas
+
+- [x] **Function:** add a per-hex Light/Medium/Heavy cover attribute (probabilistic by terrain type) that is movement-cost-neutral but meaningfully reduces hit/suppression chance and adds LOS obscuration/obstruction, plus deterministic small/medium built-up clusters near shorelines.
+- [x] **Presentation:** add procedural vegetation-clump and built-up structure props on the tactical map, a cover color tint, and cover/built-up reporting in hex inspection and fire/LOS breakdowns.
+- [x] **Proof:** verify deterministic cover/built-up generation, shore-proximity enforcement for built-up clusters, and cover's effect on direct fire, reaction fire, and line of sight.
+
+### Pass 12 — Objectives, victory, and after-action review
 
 - [ ] **Function:** add attack/defend setup, objective control, turn limit, losses, victory calculation, and a structured battle-event history.
 - [ ] **Presentation:** add objective markers, setup boundaries, turn/side banner, victory progress, final result screen, and an inspectable chronological action log.
 - [ ] **Proof:** test every victory branch, ties, timeout, objective ownership, casualty totals, and result reconstruction from events.
 
-### Pass 12 — Sea of Uncertainty round trip
+### Pass 13 — Sea of Uncertainty round trip
 
 - [ ] **Function:** define versioned `BattleRequest` and `BattleResult` schemas; import theater location, forces, posture, seed, and objective; atomically export outcome exactly once.
 - [ ] **Presentation:** add campaign handoff/loading treatment, strategic-context briefing, imported-force provenance, return-to-campaign confirmation, and graceful validation errors.

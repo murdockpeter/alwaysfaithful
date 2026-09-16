@@ -110,6 +110,12 @@ namespace AlwaysFaithful.Core
                 chance -= 10;
                 preview.Modifiers.Add(new TacticalFireModifier { Label = "Target in highland", Value = -10 });
             }
+            if (targetCell.Cover != TacticalCover.None)
+            {
+                int coverPenalty = TacticalDirectFire.CoverHitPenalty(targetCell.Cover);
+                chance += coverPenalty;
+                preview.Modifiers.Add(new TacticalFireModifier { Label = $"Target under {targetCell.Cover.ToString().ToLowerInvariant()} cover", Value = coverPenalty });
+            }
             if (los.State == TacticalLosState.Obscured)
             {
                 chance -= 15;

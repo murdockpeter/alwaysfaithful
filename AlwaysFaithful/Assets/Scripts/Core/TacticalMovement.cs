@@ -9,6 +9,7 @@ namespace AlwaysFaithful.Core
         public HexCoord Coord;
         public TacticalTerrain Terrain;
         public float ElevationMetres;
+        public TacticalCover Cover;
         public string OccupantId;
 
         public bool IsPassable => Terrain != TacticalTerrain.Water;

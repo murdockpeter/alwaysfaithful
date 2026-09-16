@@ -10,6 +10,14 @@ namespace AlwaysFaithful.Core
         Highland
     }
 
+    public enum TacticalCover
+    {
+        None,
+        Light,
+        Medium,
+        Heavy
+    }
+
     [Serializable]
     public sealed class TacticalCell
     {

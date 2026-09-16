@@ -79,8 +79,11 @@ namespace AlwaysFaithful.Core
                 if (index > 0 && index < line.Count - 1)
                 {
                     // Highland already contributes its measured terrain elevation.
-                    // Rough adds an abstract vegetation/surface-obstruction height.
+                    // Rough adds an abstract vegetation/surface-obstruction height,
+                    // and cover (vegetation clumps or built-up structures) adds its
+                    // own obstruction on top, additive since both can occupy a cell.
                     float terrainHeight = cell.Terrain == TacticalTerrain.Rough ? 8f : 0f;
+                    terrainHeight += CoverHeightMetres(cell.Cover);
                     obstruction += terrainHeight;
                     float clearance = sightline - obstruction;
                     result.MinimumClearanceMetres = Math.Min(result.MinimumClearanceMetres, clearance);
@@ -92,11 +95,11 @@ namespace AlwaysFaithful.Core
                         detail = $"Terrain crest blocks by {-clearance:0} m";
                         result.Modifiers.Add($"Blocked at {coord}: {-clearance:0} m above sightline");
                     }
-                    else if (!blocked && cell.Terrain == TacticalTerrain.Rough)
+                    else if (!blocked && (cell.Terrain == TacticalTerrain.Rough || cell.Cover != TacticalCover.None))
                     {
                         obscured = true;
                         result.State = TacticalLosState.Obscured;
-                        detail = cell.Terrain + " intervening terrain";
+                        detail = cell.Terrain == TacticalTerrain.Rough ? cell.Terrain + " intervening terrain" : cell.Cover + " cover intervening";
                         if (!result.Modifiers.Contains("Intervening terrain: obscured")) result.Modifiers.Add("Intervening terrain: obscured");
                     }
                 }
@@ -114,7 +117,22 @@ namespace AlwaysFaithful.Core
             if (result.MinimumClearanceMetres == float.MaxValue) result.MinimumClearanceMetres = 0f;
             if (targetCell.Terrain == TacticalTerrain.Rough || targetCell.Terrain == TacticalTerrain.Highland)
                 result.Modifiers.Add("Target terrain: " + targetCell.Terrain);
+            if (targetCell.Cover != TacticalCover.None)
+                result.Modifiers.Add("Target cover: " + targetCell.Cover);
             return result;
+        }
+
+        // None/Light/Medium/Heavy obstruction contributed by cover, additive with
+        // any terrain-based obstruction on the same intervening cell.
+        public static float CoverHeightMetres(TacticalCover cover)
+        {
+            switch (cover)
+            {
+                case TacticalCover.Light: return 2f;
+                case TacticalCover.Medium: return 5f;
+                case TacticalCover.Heavy: return 9f;
+                default: return 0f;
+            }
         }
 
         public static List<HexCoord> Trace(HexCoord start, HexCoord end)
