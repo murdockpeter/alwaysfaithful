@@ -43,6 +43,7 @@ namespace AlwaysFaithful.Prototype
         private readonly List<TacticalUnitState> tacticalEnemyStates = new List<TacticalUnitState>();
         private readonly Dictionary<string, TacticalContactState> tacticalContacts = new Dictionary<string, TacticalContactState>();
         private readonly Dictionary<string, ContactMarkerView> tacticalContactViews = new Dictionary<string, ContactMarkerView>();
+        private readonly Dictionary<string, TacticalWeaponState> tacticalEnemyWeapons = new Dictionary<string, TacticalWeaponState>();
         private Camera mapCamera;
         private TacticalAudio tacticalAudio;
         private GameObject overviewRoot;
@@ -62,6 +63,7 @@ namespace AlwaysFaithful.Prototype
         private GUIStyle unitNameStyle;
         private GUIStyle stateStyle;
         private GUIStyle buttonStyle;
+        private GUIStyle reactionBannerStyle;
         private LineRenderer pathLine;
         private LineRenderer occupiedHexRing;
         private bool unitMoving;
@@ -118,6 +120,11 @@ namespace AlwaysFaithful.Prototype
         private bool automatedFireCapture;
         private bool automatedSuppressionRegression;
         private bool automatedSuppressionCapture;
+        private bool automatedReactionRegression;
+        private bool automatedReactionCapture;
+        private bool tacticalReactionActive;
+        private bool tacticalReactionHalted;
+        private string tacticalReactionBannerText;
         private int landCellCount;
         private int waterCellCount;
         private float maximumLandElevation;
@@ -168,6 +175,8 @@ namespace AlwaysFaithful.Prototype
             automatedFireCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--fire-capture-path=", StringComparison.Ordinal));
             automatedSuppressionRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--suppression-regression") >= 0;
             automatedSuppressionCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--suppression-capture-path=", StringComparison.Ordinal));
+            automatedReactionRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--reaction-regression") >= 0;
+            automatedReactionCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--reaction-capture-path=", StringComparison.Ordinal));
             LoadGeography();
             BuildLightingAndCamera();
             overviewRoot = new GameObject("Taiwan Operational Map");
@@ -189,6 +198,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedObservationRegression) StartCoroutine(RunObservationRegression());
             if (automatedFireRegression) StartCoroutine(RunFireRegression());
             if (automatedSuppressionRegression) StartCoroutine(RunSuppressionRegression());
+            if (automatedReactionRegression) StartCoroutine(RunReactionRegression());
             if (automatedTacticalCapture)
             {
                 EnterTacticalMap(FindCoastalOperationalCell(), false);
@@ -230,12 +240,31 @@ namespace AlwaysFaithful.Prototype
                 OpenTacticalMenu(new Vector2(Screen.width * .5f, Screen.height * .5f) / GetUiScale());
                 StartCoroutine(CaptureSuppressionScreenshotWhenRequested());
             }
+            if (automatedReactionCapture)
+            {
+                EnterTacticalMap(FindHighReliefOperationalCell(), false);
+                FrameObservationContacts();
+                TacticalUnitState reactor = tacticalEnemyStates[0];
+                tacticalReactionActive = true;
+                tacticalReactionBannerText = $"⚠ REACTION FIRE • {reactor.DisplayName.ToUpperInvariant()}";
+                tacticalFireLine.enabled = true;
+                tacticalFireLine.startColor = new Color(1f, .82f, .31f, .95f);
+                tacticalFireLine.endColor = new Color(1f, .56f, .14f, .68f);
+                tacticalFireLine.SetPosition(0, localCells[reactor.Position].transform.position + Vector3.up * (CellSurfaceOffset + .38f));
+                tacticalFireLine.SetPosition(1, localCells[tacticalUnitState.Position].transform.position + Vector3.up * (CellSurfaceOffset + .38f));
+                tacticalContactViews[reactor.Id].CueReactionSource();
+                tacticalUnit.CueIncomingFire(TacticalFireOutcome.Suppressed);
+                cameraFocus = Vector3.Lerp(tacticalContactViews[reactor.Id].transform.position, tacticalUnit.transform.position, .5f);
+                cameraDistance = 13f;
+                ApplyCamera();
+                StartCoroutine(CaptureReactionScreenshotWhenRequested());
+            }
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
         private void Update()
         {
-            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || mapTransitionActive) return;
+            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || mapTransitionActive) return;
             UpdateCamera();
             if (tacticalMode) UpdateTacticalPointer();
             else UpdatePointer();
@@ -605,6 +634,29 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator CaptureReactionScreenshotWhenRequested()
+        {
+            string argument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--reaction-capture-path=", StringComparison.Ordinal));
+            if (argument == null) yield break;
+            string path = argument.Substring("--reaction-capture-path=".Length);
+            yield return new WaitForSecondsRealtime(1f);
+            var target = new RenderTexture(1280, 720, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            mapCamera.targetTexture = target;
+            mapCamera.Render();
+            RenderTexture.active = target;
+            image.ReadPixels(new Rect(0f, 0f, target.width, target.height), 0, 0);
+            image.Apply();
+            File.WriteAllBytes(path, image.EncodeToPNG());
+            mapCamera.targetTexture = null;
+            RenderTexture.active = previous;
+            Destroy(target);
+            Destroy(image);
+            Debug.Log($"ALWAYS_FAITHFUL_REACTION_CAPTURED {path} reactor={tacticalEnemyStates[0].Id}");
+            Application.Quit(0);
+        }
+
         private void RequestTacticalMap(HexCellView parentCell)
         {
             if (parentCell == null || !parentCell.IsLand || mapTransitionActive) return;
@@ -918,6 +970,7 @@ namespace AlwaysFaithful.Prototype
             tacticalEnemyStates.Clear();
             tacticalContacts.Clear();
             tacticalContactViews.Clear();
+            tacticalEnemyWeapons.Clear();
             var occupied = new HashSet<HexCoord> { tacticalUnitState.Position };
             HexCoord riflePosition = FindObservationDeployment(TacticalVisibilityState.Observed, occupied);
             occupied.Add(riflePosition);
@@ -934,7 +987,15 @@ namespace AlwaysFaithful.Prototype
                 ContactMarkerView marker = markerObject.AddComponent<ContactMarkerView>();
                 marker.Initialize(enemy.DisplayName.Contains("Support") ? "SUPPORT" : "RIFLE");
                 tacticalContactViews.Add(enemy.Id, marker);
+                tacticalEnemyWeapons.Add(enemy.Id, new TacticalWeaponState(enemy.Id + "-weapon", "Squad Small Arms", 6));
             }
+        }
+
+        private IEnumerable<TacticalReactionCandidate> TacticalReactionCandidates()
+        {
+            foreach (TacticalUnitState enemy in tacticalEnemyStates)
+                if (tacticalEnemyWeapons.TryGetValue(enemy.Id, out TacticalWeaponState weapon))
+                    yield return new TacticalReactionCandidate(enemy, weapon);
         }
 
         private HexCoord FindObservationDeployment(TacticalVisibilityState desired, HashSet<HexCoord> excluded)
@@ -1448,10 +1509,13 @@ namespace AlwaysFaithful.Prototype
             tacticalLosPlanning = false;
             tacticalMenuOpen = false;
             tacticalOrderFeedback = $"MOVING • {route.ActionPointCost} AP";
+            bool reactionTriggered = false;
+            int reachedIndex = route.Path.Count - 1;
             for (int index = 1; index < route.Path.Count; index++)
             {
+                HexCoord stepCoord = route.Path[index];
                 Vector3 start = tacticalUnit.transform.position;
-                Vector3 end = LocalCounterPosition(route.Path[index]);
+                Vector3 end = LocalCounterPosition(stepCoord);
                 Vector3 direction = end - start;
                 if (direction.sqrMagnitude > .01f) tacticalUnit.transform.rotation = Quaternion.Euler(0f, Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg, 0f);
                 for (float elapsed = 0f; elapsed < .22f; elapsed += Time.deltaTime)
@@ -1463,20 +1527,166 @@ namespace AlwaysFaithful.Prototype
                     yield return null;
                 }
                 tacticalUnit.transform.position = end;
+
+                if (!reactionTriggered)
+                {
+                    TacticalReactionCandidate? candidate = TacticalReactionFire.SelectReactor(
+                        localMovementBoard, TacticalReactionCandidates(), stepCoord, out TacticalLosResult los);
+                    if (candidate.HasValue)
+                    {
+                        reactionTriggered = true;
+                        yield return ResolveTacticalReaction(candidate.Value.Unit, candidate.Value.Weapon, stepCoord, los);
+                        if (tacticalReactionHalted)
+                        {
+                            reachedIndex = index;
+                            break;
+                        }
+                    }
+                }
             }
+            HexCoord finalPosition = route.Path[reachedIndex];
+            bool completed = reachedIndex == route.Path.Count - 1;
             localMovementBoard[origin].OccupantId = null;
-            localMovementBoard[destination].OccupantId = tacticalUnitState.Id;
-            tacticalUnitState.CompleteMove(destination);
+            localMovementBoard[finalPosition].OccupantId = tacticalUnitState.Id;
+            tacticalUnitState.CompleteMove(finalPosition);
             tacticalUnit.transform.rotation = Quaternion.identity;
             tacticalUnit.Present(tacticalUnitState);
-            RecordTacticalMovement(origin, destination, route.ActionPointCost, actionPointsBefore,
-                tacticalUnitState.RemainingActionPoints, "Completed", "Terrain and slope cost applied", route.Path);
+            RecordTacticalMovement(origin, finalPosition, route.ActionPointCost, actionPointsBefore,
+                tacticalUnitState.RemainingActionPoints, completed ? "Completed" : "Interrupted",
+                completed ? "Terrain and slope cost applied" : "Halted by reaction fire", route.Path.GetRange(0, reachedIndex + 1));
             RefreshTacticalObservation();
-            tacticalOrderFeedback = $"MOVE COMPLETE • {tacticalUnitState.RemainingActionPoints} AP REMAIN";
+            tacticalOrderFeedback = completed
+                ? $"MOVE COMPLETE • {tacticalUnitState.RemainingActionPoints} AP REMAIN"
+                : $"MOVE HALTED • REACTION FIRE • {tacticalUnitState.RemainingActionPoints} AP REMAIN";
             yield return new WaitForSeconds(.30f);
             ClearTacticalPreview();
             ClearTacticalLineOfSight();
             tacticalUnitMoving = false;
+        }
+
+        private IEnumerator ResolveTacticalReaction(TacticalUnitState reactor, TacticalWeaponState reactorWeapon, HexCoord triggerPosition, TacticalLosResult los)
+        {
+            tacticalReactionActive = true;
+            tacticalAudio.Play(TacticalSound.Interrupt);
+            tacticalReactionBannerText = $"⚠ REACTION FIRE • {reactor.DisplayName.ToUpperInvariant()}";
+            Vector3 savedFocus = cameraFocus;
+            float savedDistance = cameraDistance;
+            Vector3 reactorFocus = LocalCounterPosition(reactor.Position);
+            float panElapsed = 0f;
+            while (panElapsed < .35f)
+            {
+                panElapsed += Time.unscaledDeltaTime;
+                float progress = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(panElapsed / .35f));
+                cameraFocus = Vector3.Lerp(savedFocus, reactorFocus, progress);
+                cameraDistance = Mathf.Lerp(savedDistance, Mathf.Min(savedDistance, 16f), progress);
+                ApplyCamera();
+                yield return null;
+            }
+
+            int sequence = tacticalEventSequence + 1;
+            int seed = TacticalDirectFire.CreateSeed(tacticalBattlefield.BattlefieldId, turnState.TurnNumber, sequence);
+            TacticalFirePreview preview = TacticalReactionFire.Preview(localMovementBoard, reactor, reactorWeapon, triggerPosition, los);
+            TacticalFireEvent fireEvent = TacticalDirectFire.Resolve(preview, reactorWeapon, seed);
+            fireEvent.Sequence = ++tacticalEventSequence;
+            fireEvent.BattlefieldId = tacticalBattlefield.BattlefieldId;
+            fireEvent.Turn = turnState.TurnNumber;
+
+            tacticalFireLine.enabled = true;
+            tacticalFireLine.startColor = new Color(1f, .82f, .31f, .95f);
+            tacticalFireLine.endColor = new Color(1f, .56f, .14f, .68f);
+            tacticalFireLine.SetPosition(0, localCells[reactor.Position].transform.position + Vector3.up * (CellSurfaceOffset + .38f));
+            tacticalFireLine.SetPosition(1, localCells[triggerPosition].transform.position + Vector3.up * (CellSurfaceOffset + .38f));
+            tacticalContactViews.TryGetValue(reactor.Id, out ContactMarkerView reactorView);
+            yield return AnimateTacticalReaction(fireEvent, reactorView);
+
+            TacticalSuppressionEvent suppressionEvent = TacticalSuppression.ApplyFireOutcome(tacticalUnitState, fireEvent.Outcome);
+            var reactionEvent = new TacticalReactionEvent
+            {
+                Sequence = ++tacticalEventSequence,
+                BattlefieldId = tacticalBattlefield.BattlefieldId,
+                Turn = turnState.TurnNumber,
+                Seed = seed,
+                ReactorId = reactor.Id,
+                MoverId = tacticalUnitState.Id,
+                ReactorPosition = reactor.Position,
+                TriggerPosition = triggerPosition,
+                RangeHexes = fireEvent.RangeHexes,
+                HitChance = fireEvent.HitChance,
+                SuppressionChance = fireEvent.SuppressionChance,
+                Roll = fireEvent.Roll,
+                Outcome = fireEvent.Outcome,
+                Resolution = TacticalReactionFire.ResolutionFor(fireEvent.Outcome),
+                AmmunitionBefore = fireEvent.AmmunitionBefore,
+                AmmunitionAfter = fireEvent.AmmunitionAfter,
+                Modifiers = fireEvent.Modifiers
+            };
+            tacticalBattlefield.ReactionEvents.Add(reactionEvent);
+            if (suppressionEvent != null)
+            {
+                suppressionEvent.Sequence = ++tacticalEventSequence;
+                suppressionEvent.BattlefieldId = tacticalBattlefield.BattlefieldId;
+                suppressionEvent.Turn = turnState.TurnNumber;
+                tacticalBattlefield.SuppressionEvents.Add(suppressionEvent);
+            }
+            tacticalUnit.Present(tacticalUnitState);
+            tacticalFormationView.Present(tacticalUnitState);
+            Debug.Log($"ALWAYS_FAITHFUL_REACTION_EVENT sequence={reactionEvent.Sequence} reactor={reactionEvent.ReactorId} mover={reactionEvent.MoverId} seed={reactionEvent.Seed} hit={reactionEvent.HitChance} roll={reactionEvent.Roll} outcome={reactionEvent.Outcome} resolution={reactionEvent.Resolution}");
+
+            panElapsed = 0f;
+            Vector3 fromFocus = cameraFocus;
+            float fromDistance = cameraDistance;
+            while (panElapsed < .35f)
+            {
+                panElapsed += Time.unscaledDeltaTime;
+                float progress = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(panElapsed / .35f));
+                cameraFocus = Vector3.Lerp(fromFocus, savedFocus, progress);
+                cameraDistance = Mathf.Lerp(fromDistance, savedDistance, progress);
+                ApplyCamera();
+                yield return null;
+            }
+            cameraFocus = savedFocus;
+            cameraDistance = savedDistance;
+            ApplyCamera();
+            tacticalReactionBannerText = null;
+            tacticalReactionActive = false;
+            tacticalReactionHalted = fireEvent.Outcome != TacticalFireOutcome.Miss;
+        }
+
+        private IEnumerator AnimateTacticalReaction(TacticalFireEvent reactionEvent, ContactMarkerView reactorView)
+        {
+            tacticalFireResolving = true;
+            reactorView?.CueReactionSource();
+            GameObject muzzle = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            muzzle.name = "Reaction Muzzle Flash";
+            muzzle.transform.SetParent(tacticalRoot.transform, false);
+            muzzle.transform.position = tacticalFireLine.GetPosition(0);
+            muzzle.GetComponent<MeshRenderer>().sharedMaterial = NewOverlayMaterial(new Color(1f, .82f, .30f, .95f));
+            Destroy(muzzle.GetComponent<Collider>());
+            GameObject impact = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            impact.name = "Reaction Impact";
+            impact.transform.SetParent(tacticalRoot.transform, false);
+            impact.transform.position = tacticalFireLine.GetPosition(1);
+            Color impactColor = reactionEvent.Outcome == TacticalFireOutcome.Hit
+                ? new Color(1f, .20f, .12f, .95f)
+                : reactionEvent.Outcome == TacticalFireOutcome.Suppressed ? new Color(1f, .62f, .14f, .92f) : new Color(.62f, .72f, .68f, .75f);
+            impact.GetComponent<MeshRenderer>().sharedMaterial = NewOverlayMaterial(impactColor);
+            Destroy(impact.GetComponent<Collider>());
+            tacticalAudio.Play(reactionEvent.Outcome == TacticalFireOutcome.Hit ? TacticalSound.FireHit
+                : reactionEvent.Outcome == TacticalFireOutcome.Suppressed ? TacticalSound.FireSuppressed : TacticalSound.FireMiss);
+            tacticalUnit.CueIncomingFire(reactionEvent.Outcome);
+            for (float elapsed = 0f; elapsed < .46f; elapsed += Time.deltaTime)
+            {
+                float progress = Mathf.Clamp01(elapsed / .46f);
+                tacticalFireLine.widthMultiplier = Mathf.Lerp(.18f, .035f, progress);
+                muzzle.transform.localScale = Vector3.one * Mathf.Lerp(.28f, .03f, progress);
+                impact.transform.localScale = Vector3.one * Mathf.Lerp(.12f, .62f, progress);
+                yield return null;
+            }
+            Destroy(muzzle);
+            Destroy(impact);
+            tacticalFireLine.widthMultiplier = .10f;
+            tacticalFireLine.enabled = false;
+            tacticalFireResolving = false;
         }
 
         private void CancelTacticalInteraction(bool recordCancellation)
@@ -2113,14 +2323,20 @@ namespace AlwaysFaithful.Prototype
                 routePreserved &= tacticalRouteLine.enabled && tacticalPreviewPath.Count > 1 && tacticalDestinationGhost.activeSelf;
                 yield return null;
             }
+            // A reaction shot from an eligible enemy along the route (Pass 9) can legitimately
+            // halt the unit short of its intended destination, so both outcomes are accepted here;
+            // the dedicated reaction regression proves the interruption mechanics themselves.
             TacticalMovementEvent completed = tacticalBattlefield.MovementEvents[tacticalBattlefield.MovementEvents.Count - 1];
-            if (tacticalUnitMoving || !routePreserved || !tacticalUnitState.Position.Equals(destination) ||
+            HexCoord finalPosition = completed.Path.Count > 0 ? completed.Path[completed.Path.Count - 1] : origin;
+            bool reachedFullDestination = finalPosition.Equals(destination);
+            if (tacticalUnitMoving || !routePreserved || !tacticalUnitState.Position.Equals(finalPosition) ||
                 tacticalUnitState.RemainingActionPoints != actionPointsBefore - expectedCost ||
-                localMovementBoard[origin].OccupantId != null || localMovementBoard[destination].OccupantId != tacticalUnitState.Id ||
-                completed.Outcome != "Completed" || completed.ActionPointCost != expectedCost || !tacticalUnit.Matches(tacticalUnitState) ||
-                Vector3.Distance(originWorld, tacticalUnit.transform.position) < .5f)
+                localMovementBoard[origin].OccupantId != null || localMovementBoard[finalPosition].OccupantId != tacticalUnitState.Id ||
+                (completed.Outcome != "Completed" && completed.Outcome != "Interrupted") || completed.ActionPointCost != expectedCost ||
+                !tacticalUnit.Matches(tacticalUnitState) ||
+                (reachedFullDestination && Vector3.Distance(originWorld, tacticalUnit.transform.position) < .5f))
             {
-                Debug.LogError($"ALWAYS_FAITHFUL_TACTICAL_MOVEMENT_REGRESSION_FAILED completion route={routePreserved} actual={tacticalUnitState.Position} expected={destination} ap={tacticalUnitState.RemainingActionPoints} event={completed.Outcome}");
+                Debug.LogError($"ALWAYS_FAITHFUL_TACTICAL_MOVEMENT_REGRESSION_FAILED completion route={routePreserved} actual={tacticalUnitState.Position} expected={destination} final={finalPosition} ap={tacticalUnitState.RemainingActionPoints} event={completed.Outcome}");
                 Application.Quit(1);
                 yield break;
             }
@@ -2141,13 +2357,14 @@ namespace AlwaysFaithful.Prototype
             }
             CancelTacticalInteraction(false);
             string serialized = JsonUtility.ToJson(tacticalBattlefield);
-            if (string.IsNullOrEmpty(serialized) || !serialized.Contains("Completed") || !serialized.Contains("Cancelled") || !serialized.Contains("Rejected"))
+            if (string.IsNullOrEmpty(serialized) || !(serialized.Contains("Completed") || serialized.Contains("Interrupted")) ||
+                !serialized.Contains("Cancelled") || !serialized.Contains("Rejected"))
             {
                 Debug.LogError("ALWAYS_FAITHFUL_TACTICAL_MOVEMENT_REGRESSION_FAILED event serialization");
                 Application.Quit(1);
                 yield break;
             }
-            Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_MOVEMENT_REGRESSION_OK from={origin} to={destination} cost={expectedCost} events={tacticalBattlefield.MovementEvents.Count} ap={tacticalUnitState.RemainingActionPoints}/{tacticalUnitState.MaximumActionPoints} routePreserved={routePreserved}");
+            Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_MOVEMENT_REGRESSION_OK from={origin} to={finalPosition} cost={expectedCost} outcome={completed.Outcome} events={tacticalBattlefield.MovementEvents.Count} ap={tacticalUnitState.RemainingActionPoints}/{tacticalUnitState.MaximumActionPoints} routePreserved={routePreserved}");
             Application.Quit(0);
         }
 
@@ -2335,6 +2552,98 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
             Debug.Log($"ALWAYS_FAITHFUL_FIRE_REGRESSION_OK target={fireEvent.TargetId} seed={fireEvent.Seed} chance={fireEvent.HitChance} roll={fireEvent.Roll} outcome={fireEvent.Outcome} ammo={fireEvent.AmmunitionBefore}->{fireEvent.AmmunitionAfter} ap={actionPointsBefore}->{tacticalUnitState.RemainingActionPoints} modifiers={fireEvent.Modifiers.Count}");
+            Application.Quit(0);
+        }
+
+        private IEnumerator RunReactionRegression()
+        {
+            yield return null;
+            if (!ValidateReactionRules(out string ruleFailure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_REACTION_REGRESSION_FAILED rules " + ruleFailure);
+                Application.Quit(1);
+                yield break;
+            }
+            EnterTacticalMap(FindHighReliefOperationalCell(), false);
+            HexCoord enemyPosition = tacticalEnemyStates[0].Position;
+            string reactorId = tacticalEnemyStates[0].Id;
+            OpenTacticalMenu(new Vector2(640f, 360f));
+            BeginTacticalMovePlanning();
+            if (!tacticalMovePlanning || tacticalReachable.Count < 2)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_REACTION_REGRESSION_FAILED planning transition");
+                Application.Quit(1);
+                yield break;
+            }
+            HexCoord origin = tacticalUnitState.Position;
+            HexCoord destination = origin;
+            int expectedCost = -1;
+            int bestDistance = int.MaxValue;
+            foreach (KeyValuePair<HexCoord, int> pair in tacticalReachable)
+            {
+                if (pair.Key.Equals(origin)) continue;
+                int distance = HexCoord.Distance(pair.Key, enemyPosition);
+                if (distance > bestDistance) continue;
+                bestDistance = distance;
+                destination = pair.Key;
+                expectedCost = pair.Value;
+            }
+            if (destination.Equals(origin))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_REACTION_REGRESSION_FAILED no reachable destination near enemy");
+                Application.Quit(1);
+                yield break;
+            }
+            int eventsBefore = tacticalBattlefield.ReactionEvents.Count;
+            int actionPointsBefore = tacticalUnitState.RemainingActionPoints;
+            int ammunitionBefore = tacticalEnemyWeapons[reactorId].RemainingAmmunition;
+            if (!TryIssueTacticalMove(destination))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_REACTION_REGRESSION_FAILED order destination={destination}");
+                Application.Quit(1);
+                yield break;
+            }
+            float deadline = Time.realtimeSinceStartup + 12f;
+            while (tacticalUnitMoving && Time.realtimeSinceStartup < deadline) yield return null;
+            if (tacticalUnitMoving)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_REACTION_REGRESSION_FAILED move did not resolve in time");
+                Application.Quit(1);
+                yield break;
+            }
+            int eventsAfter = tacticalBattlefield.ReactionEvents.Count;
+            if (eventsAfter != eventsBefore + 1)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_REACTION_REGRESSION_FAILED expected exactly one reaction event, delta={eventsAfter - eventsBefore}");
+                Application.Quit(1);
+                yield break;
+            }
+            TacticalReactionEvent reactionEvent = tacticalBattlefield.ReactionEvents[tacticalBattlefield.ReactionEvents.Count - 1];
+            bool halted = reactionEvent.Outcome != TacticalFireOutcome.Miss;
+            HexCoord expectedPosition = halted ? reactionEvent.TriggerPosition : destination;
+            TacticalWeaponState reactorWeapon = tacticalEnemyWeapons[reactionEvent.ReactorId];
+            if (reactionEvent.Outcome == TacticalFireOutcome.Rejected || reactionEvent.ReactorId != reactorId ||
+                reactionEvent.Resolution != (halted ? "Halted" : "Resumed") ||
+                !tacticalUnitState.Position.Equals(expectedPosition) ||
+                tacticalUnitState.RemainingActionPoints != actionPointsBefore - expectedCost ||
+                reactorWeapon.RemainingAmmunition != ammunitionBefore - 1)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_REACTION_REGRESSION_FAILED resolution outcome={reactionEvent.Outcome} position={tacticalUnitState.Position} expected={expectedPosition} ap={tacticalUnitState.RemainingActionPoints} ammo={reactorWeapon.RemainingAmmunition}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            string serialized = JsonUtility.ToJson(tacticalBattlefield);
+            TacticalBattlefieldState restored = JsonUtility.FromJson<TacticalBattlefieldState>(serialized);
+            if (restored == null || restored.SchemaVersion != TacticalBattlefieldState.CurrentSchemaVersion ||
+                restored.ReactionEvents.Count != eventsAfter ||
+                restored.ReactionEvents[restored.ReactionEvents.Count - 1].Seed != reactionEvent.Seed)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_REACTION_REGRESSION_FAILED persistence restored={restored?.ReactionEvents.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+            Debug.Log($"ALWAYS_FAITHFUL_REACTION_REGRESSION_OK reactor={reactionEvent.ReactorId} range={reactionEvent.RangeHexes} hit={reactionEvent.HitChance} roll={reactionEvent.Roll} outcome={reactionEvent.Outcome} resolution={reactionEvent.Resolution} position={tacticalUnitState.Position} ammo={reactorWeapon.RemainingAmmunition}");
             Application.Quit(0);
         }
 
@@ -2562,6 +2871,111 @@ namespace AlwaysFaithful.Prototype
                 restoredUnit == null || restoredUnit.SuppressionPoints != probe.SuppressionPoints || restoredUnit.CombatStatus != probe.CombatStatus)
             {
                 failure = "suppression state serialization";
+                return false;
+            }
+            failure = null;
+            return true;
+        }
+
+        private static bool ValidateReactionRules(out string failure)
+        {
+            var flat = new Dictionary<HexCoord, TacticalMovementCell>();
+            for (int row = 0; row <= 10; row++)
+            {
+                var coord = new HexCoord(0, row);
+                flat[coord] = new TacticalMovementCell { Coord = coord, Terrain = TacticalTerrain.Open, ElevationMetres = 20f };
+            }
+            HexCoord reactorPosition = new HexCoord(0, 0);
+            HexCoord moverPosition = new HexCoord(0, 3);
+            var reactor = new TacticalUnitState("reactor-1", "Reactor One", reactorPosition, 4);
+            var weapon = new TacticalWeaponState("rifle", "Rifle", 6);
+            var soleCandidate = new List<TacticalReactionCandidate> { new TacticalReactionCandidate(reactor, weapon) };
+
+            TacticalReactionCandidate? selected = TacticalReactionFire.SelectReactor(flat, soleCandidate, moverPosition, out TacticalLosResult los);
+            if (!selected.HasValue || selected.Value.Unit.Id != reactor.Id || los == null || los.RangeHexes != 3)
+            {
+                failure = "eligible range/LOS selection";
+                return false;
+            }
+
+            TacticalFirePreview preview = TacticalReactionFire.Preview(flat, reactor, weapon, moverPosition, los);
+            int modifierTotal = 0;
+            foreach (TacticalFireModifier modifier in preview.Modifiers) modifierTotal += modifier.Value;
+            if (!preview.IsValid || modifierTotal != preview.HitChance || preview.HitChance >= TacticalDirectFire.BaseHitChance)
+            {
+                failure = "reaction preview modifier accounting";
+                return false;
+            }
+
+            HexCoord farPosition = new HexCoord(0, 9);
+            TacticalReactionCandidate? tooFar = TacticalReactionFire.SelectReactor(flat, soleCandidate, farPosition, out _);
+            if (tooFar.HasValue)
+            {
+                failure = "out-of-range reactor was selected";
+                return false;
+            }
+
+            var blocked = CopyMovementFixture(flat, 0, 4);
+            blocked[new HexCoord(0, 2)].ElevationMetres = 100f;
+            TacticalReactionCandidate? blockedSelection = TacticalReactionFire.SelectReactor(blocked, soleCandidate, new HexCoord(0, 4), out _);
+            if (blockedSelection.HasValue)
+            {
+                failure = "blocked-LOS reactor was selected";
+                return false;
+            }
+
+            var reducedReactor = new TacticalUnitState("reactor-reduced", "Reactor Reduced", reactorPosition, 4);
+            reducedReactor.ApplySuppressionPoints(TacticalSuppression.ReducedThreshold);
+            var reducedCandidate = new List<TacticalReactionCandidate> { new TacticalReactionCandidate(reducedReactor, new TacticalWeaponState("rifle", "Rifle", 6)) };
+            if (TacticalReactionFire.SelectReactor(flat, reducedCandidate, moverPosition, out _).HasValue)
+            {
+                failure = "reduced reactor was eligible";
+                return false;
+            }
+
+            var emptyReactor = new TacticalUnitState("reactor-empty", "Reactor Empty", reactorPosition, 4);
+            var emptyCandidate = new List<TacticalReactionCandidate>
+            {
+                new TacticalReactionCandidate(emptyReactor, new TacticalWeaponState("rifle", "Rifle", 1) { RemainingAmmunition = 0 })
+            };
+            if (TacticalReactionFire.SelectReactor(flat, emptyCandidate, moverPosition, out _).HasValue)
+            {
+                failure = "reactor with no ammunition was eligible";
+                return false;
+            }
+
+            var nearReactor = new TacticalUnitState("reactor-near", "Reactor Near", new HexCoord(0, 2), 4);
+            var farReactor = new TacticalUnitState("reactor-far", "Reactor Far", new HexCoord(0, 0), 4);
+            var byDistance = new List<TacticalReactionCandidate>
+            {
+                new TacticalReactionCandidate(farReactor, new TacticalWeaponState("rifle", "Rifle", 6)),
+                new TacticalReactionCandidate(nearReactor, new TacticalWeaponState("rifle", "Rifle", 6))
+            };
+            TacticalReactionCandidate? nearest = TacticalReactionFire.SelectReactor(flat, byDistance, moverPosition, out _);
+            if (!nearest.HasValue || nearest.Value.Unit.Id != nearReactor.Id)
+            {
+                failure = "nearest-reactor ordering";
+                return false;
+            }
+
+            var tieA = new TacticalUnitState("reactor-a", "Reactor A", reactorPosition, 4);
+            var tieB = new TacticalUnitState("reactor-b", "Reactor B", reactorPosition, 4);
+            var tieOrderOne = new List<TacticalReactionCandidate>
+            {
+                new TacticalReactionCandidate(tieB, new TacticalWeaponState("rifle", "Rifle", 6)),
+                new TacticalReactionCandidate(tieA, new TacticalWeaponState("rifle", "Rifle", 6))
+            };
+            var tieOrderTwo = new List<TacticalReactionCandidate>
+            {
+                new TacticalReactionCandidate(tieA, new TacticalWeaponState("rifle", "Rifle", 6)),
+                new TacticalReactionCandidate(tieB, new TacticalWeaponState("rifle", "Rifle", 6))
+            };
+            TacticalReactionCandidate? tieResultOne = TacticalReactionFire.SelectReactor(flat, tieOrderOne, moverPosition, out _);
+            TacticalReactionCandidate? tieResultTwo = TacticalReactionFire.SelectReactor(flat, tieOrderTwo, moverPosition, out _);
+            if (!tieResultOne.HasValue || !tieResultTwo.HasValue ||
+                tieResultOne.Value.Unit.Id != "reactor-a" || tieResultTwo.Value.Unit.Id != "reactor-a")
+            {
+                failure = "deterministic tie-break ordering";
                 return false;
             }
             failure = null;
@@ -2989,6 +3403,13 @@ namespace AlwaysFaithful.Prototype
                 contactLine++;
             }
 
+            if (tacticalReactionActive && !string.IsNullOrEmpty(tacticalReactionBannerText))
+            {
+                Rect bannerRect = new Rect(uiWidth / 2f - 210f, 26f, 420f, 40f);
+                GUI.Box(bannerRect, GUIContent.none);
+                GUI.Label(bannerRect, tacticalReactionBannerText, reactionBannerStyle);
+            }
+
             if (hoveredLocalCell != null)
             {
                 bool showTargetStatus = tacticalFirePlanning && tacticalFireTarget != null && tacticalFireTarget.CombatStatus != TacticalCombatStatus.Ready;
@@ -3102,6 +3523,8 @@ namespace AlwaysFaithful.Prototype
             stateStyle = new GUIStyle(badgeStyle) { alignment = TextAnchor.MiddleRight };
             stateStyle.normal.textColor = new Color(.96f, .73f, .20f);
             buttonStyle = new GUIStyle(GUI.skin.button) { fontSize = 12, fontStyle = FontStyle.Bold };
+            reactionBannerStyle = new GUIStyle(GUI.skin.label) { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            reactionBannerStyle.normal.textColor = new Color(1f, .40f, .32f);
         }
 
         private static float GetUiScale() => Mathf.Clamp(Screen.height / 720f, .90f, 1.35f);

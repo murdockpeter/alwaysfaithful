@@ -90,9 +90,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 9 — Reaction fire and interruption
 
-- [ ] **Function:** detect eligible movement exposure, pause movement, resolve one reaction shot, and deterministically resume, halt, or suppress the mover.
-- [ ] **Presentation:** add an interruption banner, reaction-source indication, paused route state, camera cue, and event timing that remains readable at faster speeds.
-- [ ] **Proof:** test eligibility arcs/range/LOS, multiple reactors with deterministic ordering, interrupted paths, and no duplicate reactions.
+- [x] **Function:** detect eligible movement exposure, pause movement, resolve one reaction shot, and deterministically resume, halt, or suppress the mover.
+- [x] **Presentation:** add an interruption banner, reaction-source indication, paused route state, camera cue, and event timing that remains readable at faster speeds.
+- [x] **Proof:** test eligibility arcs/range/LOS, multiple reactors with deterministic ordering, interrupted paths, and no duplicate reactions.
 
 ### Pass 10 — Enemy turn and scenario loop
 

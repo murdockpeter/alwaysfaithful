@@ -169,6 +169,19 @@ namespace AlwaysFaithful.Prototype
             else faceRenderer.material.color = new Color(.62f, .66f, .61f, 1f);
         }
 
+        public int ReactionCueCount { get; private set; }
+
+        public void CueReactionSource()
+        {
+            ReactionCueCount++;
+            gameObject.SetActive(true);
+            transform.localScale = settledScale * 1.30f;
+            faceRenderer.material.color = new Color(1f, .90f, .40f, 1f);
+            uncertaintyRing.enabled = true;
+            uncertaintyRing.startColor = new Color(1f, .90f, .30f, .95f);
+            uncertaintyRing.endColor = uncertaintyRing.startColor;
+        }
+
         private void Update()
         {
             transform.localScale = Vector3.Lerp(transform.localScale, settledScale, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 9f));

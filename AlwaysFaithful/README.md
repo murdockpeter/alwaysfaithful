@@ -24,6 +24,8 @@ Pass 8 gives direct fire lasting consequences. Every Suppressed or Hit outcome n
 
 Every player action now has a rudimentary audio cue. Short tones are synthesized at runtime (no imported sound assets) for selecting a hex, opening an order menu, entering a planning mode, confirming or rejecting a move, each direct-fire outcome, rallying, ending a turn, transitioning to or from the tactical map, and a contact being gained or lost.
 
+Pass 9 lets the enemy shoot back while the platoon is moving. Every eligible PLA formation now carries its own small-arms weapon, and each move checks the hexes the platoon actually steps into for an enemy that is still able to fire and has an unblocked, in-range line of sight; the nearest eligible reactor (ties broken by unit ID) takes exactly one snap-shot reaction per move, resolved with the same deterministic small-arms model as deliberate fire but at a shorter range and an accuracy penalty. A miss lets the platoon complete its route; a suppressing or damaging hit halts it at the exposed hex and applies the same cumulative suppression as Pass 8. The interruption pauses the route animation, pans and tightens the camera on the firer, raises an on-screen reaction-fire banner, flashes the reactor's marker and the platoon's own counter, and logs a persistent, replayable reaction event alongside the movement record it cut short.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -40,6 +42,7 @@ Controls:
 - On the tactical map, right click the platoon and choose **Direct Fire**, hover a currently observed enemy, and left click to fire.
 - On the tactical map, right click the platoon and choose **Rally** to spend 1 AP recovering suppression once the unit is Suppressed, Disrupted, or Reduced.
 - Right click away from the unit or press **Escape** to cancel tactical movement, LOS inspection, or fire targeting.
+- Moving within an alert enemy's range and line of sight can trigger a reaction shot that pauses and may halt the move partway.
 - Use **Return to Island** to restore the operational map and its prior camera position.
 - Use **End Turn** on the unit card to advance the turn and restore the platoon's AP.
 - Mouse wheel zooms.

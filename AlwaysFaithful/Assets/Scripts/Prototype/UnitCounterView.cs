@@ -63,6 +63,16 @@ namespace AlwaysFaithful.Prototype
         public bool Matches(TacticalUnitState state)
             => PresentedReadiness == state.Readiness && PresentedSelection == state.IsSelected;
 
+        public int IncomingFireCueCount { get; private set; }
+
+        public void CueIncomingFire(TacticalFireOutcome outcome)
+        {
+            IncomingFireCueCount++;
+            if (faceRenderer == null) return;
+            faceRenderer.material.color = outcome == TacticalFireOutcome.Hit ? new Color(1f, .20f, .12f, 1f)
+                : outcome == TacticalFireOutcome.Suppressed ? new Color(1f, .62f, .14f, 1f) : new Color(.62f, .72f, .68f, 1f);
+        }
+
         private void BuildSelectionRing()
         {
             GameObject ring = new GameObject("Selection Ring");

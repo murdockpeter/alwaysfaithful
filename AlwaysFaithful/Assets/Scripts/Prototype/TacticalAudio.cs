@@ -18,7 +18,8 @@ namespace AlwaysFaithful.Prototype
         EndTurn,
         MapTransition,
         ContactDetected,
-        ContactLost
+        ContactLost,
+        Interrupt
     }
 
     public sealed class TacticalAudio : MonoBehaviour
@@ -61,6 +62,8 @@ namespace AlwaysFaithful.Prototype
                 SineSegment(1200f, .05f, .14f, 0f));
             clips[TacticalSound.ContactLost] = CreateClip("sfx_contact_lost",
                 ChirpSegment(800f, 380f, .07f, .14f, 0f));
+            clips[TacticalSound.Interrupt] = CreateClip("sfx_interrupt",
+                SineSegment(700f, .07f, .22f, .04f), SineSegment(700f, .07f, .22f, 0f));
         }
 
         public void Play(TacticalSound sound, float volume = 1f)
