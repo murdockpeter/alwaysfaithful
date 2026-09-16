@@ -108,9 +108,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 12 — Objectives, victory, and after-action review
 
-- [ ] **Function:** add attack/defend setup, objective control, turn limit, losses, victory calculation, and a structured battle-event history.
-- [ ] **Presentation:** add objective markers, setup boundaries, turn/side banner, victory progress, final result screen, and an inspectable chronological action log.
-- [ ] **Proof:** test every victory branch, ties, timeout, objective ownership, casualty totals, and result reconstruction from events.
+- [x] **Function:** add attack/defend setup, objective control, turn limit, losses, victory calculation, and a structured battle-event history.
+- [x] **Presentation:** add objective markers, setup boundaries, turn/side banner, victory progress, final result screen, and an inspectable chronological action log.
+- [x] **Proof:** test every victory branch, ties, timeout, objective ownership, casualty totals, and result reconstruction from events.
 
 ### Pass 13 — Sea of Uncertainty round trip
 
