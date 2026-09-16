@@ -1843,7 +1843,7 @@ namespace AlwaysFaithful.Prototype
                 if (leftClick)
                 {
                     if (movePlanning && pointedUnit == null && nextHover != null && TryIssueMove(nextHover.Coord)) return;
-                    if (pointedUnit == null && nextHover != null) SelectCell(nextHover);
+                    if (nextHover != null) SelectCell(nextHover);
                 }
                 if (rightClick)
                 {
