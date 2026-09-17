@@ -1,0 +1,75 @@
+using System;
+using System.Collections.Generic;
+
+namespace AlwaysFaithful.Core
+{
+    [Serializable]
+    public sealed class TacticalEnemyWeaponEntry
+    {
+        public string UnitId;
+        public TacticalWeaponState Weapon;
+    }
+
+    // A full in-memory tactical session snapshot: everything BuildTacticalBattlefield's
+    // fresh-build path constructs deterministically (unit/enemy rosters, weapons,
+    // contacts, turn number, event sequence) plus the already-serializable
+    // TacticalBattlefieldState (terrain, event history, objective, recon markers).
+    // Pure data — no file I/O or JSON parsing here; that lives in the Prototype layer.
+    [Serializable]
+    public sealed class TacticalBattleSaveState
+    {
+        public const int CurrentSchemaVersion = 1;
+
+        public int SchemaVersion = CurrentSchemaVersion;
+        public string SavedAtUtc;
+        public TacticalBattlefieldState Battlefield;
+        public TacticalTurnState Turn;
+        public TacticalUnitState UsmcUnit;
+        public TacticalWeaponState UsmcWeapon;
+        public List<TacticalUnitState> EnemyUnits = new List<TacticalUnitState>();
+        public List<TacticalEnemyWeaponEntry> EnemyWeapons = new List<TacticalEnemyWeaponEntry>();
+        public List<TacticalContactState> Contacts = new List<TacticalContactState>();
+        public int EventSequence;
+
+        // JsonUtility can round-trip a null nested reference field as a
+        // default-constructed object rather than null, so a request-less save
+        // could otherwise come back looking request-driven. This flag makes
+        // "no active request" unambiguous regardless of that behavior.
+        public bool HasActiveBattleRequest;
+        public BattleRequest ActiveBattleRequest;
+    }
+
+    public static class TacticalBattleSave
+    {
+        public static bool Validate(TacticalBattleSaveState state, out string error)
+        {
+            if (state == null)
+            {
+                error = "Save file did not parse to a valid save state";
+                return false;
+            }
+            if (state.SchemaVersion != TacticalBattleSaveState.CurrentSchemaVersion)
+            {
+                error = $"Unsupported save schema version {state.SchemaVersion} (expected {TacticalBattleSaveState.CurrentSchemaVersion})";
+                return false;
+            }
+            if (state.Battlefield == null || string.IsNullOrWhiteSpace(state.Battlefield.BattlefieldId))
+            {
+                error = "Save file is missing battlefield state";
+                return false;
+            }
+            if (state.UsmcUnit == null)
+            {
+                error = "Save file is missing the USMC unit";
+                return false;
+            }
+            if (state.Turn == null)
+            {
+                error = "Save file is missing turn state";
+                return false;
+            }
+            error = null;
+            return true;
+        }
+    }
+}

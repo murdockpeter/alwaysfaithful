@@ -36,6 +36,8 @@ Pass 13 adds a Recon order without adding a new unit — ISR drones stay off the
 
 Pass 14 completes Phase I's paired-implementation passes with a stub file-based round trip to Sea of Uncertainty — the theater location, forces, posture, seed, and objective a versioned `BattleRequest` can carry, not the full production contract (equipment, ammunition, experience, and the rest) that's a later milestone. Launching with `--battle-request=<path>` reads and validates the file, shows a brief campaign-briefing overlay with the imported request/campaign ID, theater hex, posture, and objective, then imports the platoon's and both PLA formations' IDs and display names wherever the request supplies them (the command card marks an imported platoon "IMPORTED"; the rest stay hidden behind fog of war like any other contact). A request's seed reseeds the whole battle — cover, posture, and objective placement together — by folding into the same battlefield ID every other deterministic system already hashes, so the identical request always reproduces the identical battle. The moment the battle concludes, its `BattleResult` — outcome, objective control, casualties, turns taken, and the same merged event log as the after-action screen — is written atomically (temp file, then rename) to the request's output path exactly once, and the after-action screen's dismiss button becomes "Return to Campaign" with the exported path shown. An invalid, malformed, or version-mismatched request is rejected with a readable on-screen error and a "Continue Standalone" fallback rather than a crash.
 
+With Phase I's paired-implementation passes complete, save and restore closes out the first item on the polish and release gate. A **Save** button on the tactical command card writes the entire live battle — terrain, event history, objective/victory state, the platoon and both PLA formations with their weapons, the current contact picture, the turn counter, and (when the battle was launched from a `BattleRequest`) that request itself — to a single save slot, atomically, the same way a `BattleResult` is written. The operational map's command card shows a **Continue Saved Battle** button whenever a save exists; choosing it rebuilds the exact tactical scene, including view elements a fresh battle would otherwise generate anew (recon rings, contact markers, occupancy), then resumes the observation and event-sequence bookkeeping precisely where the save left off rather than re-deriving anything. Saving is disabled once a battle has concluded, and a corrupted or out-of-bounds save file is rejected with the same readable on-screen error used for a bad `BattleRequest`.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -58,6 +60,7 @@ Controls:
 - Watch the gold objective ring and the turn counter on the command card; the battle ends in victory, defeat, a draw, or a stalemate once the platoon or the PLA is fought to a standstill or the turn limit runs out, and the after-action screen's **Return to Island** button ends the battle and restores the operational map.
 - Use **Return to Island** to restore the operational map and its prior camera position.
 - Use **End Turn** on the unit card to advance the turn and restore the platoon's AP.
+- On the tactical map, use **Save** to write the in-progress battle to a save slot; on the operational map, use **Continue Saved Battle** (shown whenever a save exists) to resume it exactly where it left off.
 - Mouse wheel zooms.
 - Middle-mouse drag or WASD pans.
 - R resets the camera.
@@ -65,6 +68,8 @@ Controls:
 ## Sea of Uncertainty developer flow
 
 Launch a battle from a file instead of the operational map with `AlwaysFaithful.exe --battle-request=<path-to-request.json>`. The `BattleRequest`/`BattleResult` JSON shapes are `AlwaysFaithful.Core.BattleRequest`/`BattleResult` (`Assets/Scripts/Core/TacticalBattleContract.cs`) — `TheaterHex`, `Seed`, optional posture/objective/turn-limit overrides, and an optional `Forces` list of `{ Role, UnitId, DisplayName }` entries (`Role` one of `usmc-rifle-platoon`, `pla-rifle-squad`, `pla-support-team`). The result is written once, atomically, to the request's `OutputPath` the moment the battle concludes. This is the Phase I stub of the integration boundary described in `docs/USMC_Tactical_Battle_Game_TODO.md` — theater, forces, posture, seed, and objective only, not the full production contract.
+
+The in-progress-battle save file defaults to `Application.persistentDataPath/always-faithful-battle-save.json`; override it with `--save-path=<path>` (useful for pointing a regression or a scripted run at a scratch file instead of the real save slot). Its `AlwaysFaithful.Core.TacticalBattleSaveState` shape (`Assets/Scripts/Core/TacticalBattleSave.cs`) wraps the full `TacticalBattlefieldState` plus everything else a live session needs to resume: turn state, both sides' units and weapons, the contact picture, the running event sequence number, and the active `BattleRequest` if the saved battle was launched from one.
 
 ## Geography strategy
 
