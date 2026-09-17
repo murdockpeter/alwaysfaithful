@@ -34,6 +34,8 @@ Pass 12 lets a tactical battle actually end. Every local map now deterministical
 
 Pass 13 adds a Recon order without adding a new unit — ISR drones stay off the table for now. The platoon can task a focused sensor sweep on any hex up to 12 hexes away for 3 AP, and unlike every other spotting tool this one needs no ground line of sight, representing an indirect or overhead request rather than the platoon's own eyes. A successful tasking grants a one-tier detection bonus — Hidden to Contact, Contact to Identified, Identified to Observed — on that exact hex for two turns, marked by a violet ring distinct from the objective and deployment-zone rings; because the bonus is tied to the hex rather than the formation on it, a PLA element that moves off the tasked ground stops benefiting from it, a deliberate limit rather than a gap. The order, its AP cost, its expiry, and the resulting contact-state change are all persistent, replayable events alongside the rest of the battle log.
 
+Pass 14 completes Phase I's paired-implementation passes with a stub file-based round trip to Sea of Uncertainty — the theater location, forces, posture, seed, and objective a versioned `BattleRequest` can carry, not the full production contract (equipment, ammunition, experience, and the rest) that's a later milestone. Launching with `--battle-request=<path>` reads and validates the file, shows a brief campaign-briefing overlay with the imported request/campaign ID, theater hex, posture, and objective, then imports the platoon's and both PLA formations' IDs and display names wherever the request supplies them (the command card marks an imported platoon "IMPORTED"; the rest stay hidden behind fog of war like any other contact). A request's seed reseeds the whole battle — cover, posture, and objective placement together — by folding into the same battlefield ID every other deterministic system already hashes, so the identical request always reproduces the identical battle. The moment the battle concludes, its `BattleResult` — outcome, objective control, casualties, turns taken, and the same merged event log as the after-action screen — is written atomically (temp file, then rename) to the request's output path exactly once, and the after-action screen's dismiss button becomes "Return to Campaign" with the exported path shown. An invalid, malformed, or version-mismatched request is rejected with a readable on-screen error and a "Continue Standalone" fallback rather than a crash.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -59,6 +61,10 @@ Controls:
 - Mouse wheel zooms.
 - Middle-mouse drag or WASD pans.
 - R resets the camera.
+
+## Sea of Uncertainty developer flow
+
+Launch a battle from a file instead of the operational map with `AlwaysFaithful.exe --battle-request=<path-to-request.json>`. The `BattleRequest`/`BattleResult` JSON shapes are `AlwaysFaithful.Core.BattleRequest`/`BattleResult` (`Assets/Scripts/Core/TacticalBattleContract.cs`) — `TheaterHex`, `Seed`, optional posture/objective/turn-limit overrides, and an optional `Forces` list of `{ Role, UnitId, DisplayName }` entries (`Role` one of `usmc-rifle-platoon`, `pla-rifle-squad`, `pla-support-team`). The result is written once, atomically, to the request's `OutputPath` the moment the battle concludes. This is the Phase I stub of the integration boundary described in `docs/USMC_Tactical_Battle_Game_TODO.md` — theater, forces, posture, seed, and objective only, not the full production contract.
 
 ## Geography strategy
 

@@ -120,9 +120,11 @@ Complete these in order unless a discovered dependency requires a documented reo
 
 ### Pass 14 — Sea of Uncertainty round trip
 
-- [ ] **Function:** define versioned `BattleRequest` and `BattleResult` schemas; import theater location, forces, posture, seed, and objective; atomically export outcome exactly once.
-- [ ] **Presentation:** add campaign handoff/loading treatment, strategic-context briefing, imported-force provenance, return-to-campaign confirmation, and graceful validation errors.
-- [ ] **Proof:** add schema fixtures, malformed/unsupported-version cases, deterministic request replay, ID preservation, atomic-write checks, and an automated launch/result round trip.
+- [x] **Function:** define versioned `BattleRequest` and `BattleResult` schemas (Phase I stub scope); import theater location, forces, posture, seed, and objective; atomically export outcome exactly once.
+- [x] **Presentation:** add campaign handoff/loading treatment, strategic-context briefing, imported-force provenance, return-to-campaign confirmation, and graceful validation errors.
+- [x] **Proof:** add schema fixtures, malformed/unsupported-version cases, deterministic request replay, ID preservation, atomic-write checks, and an automated launch/result round trip.
+
+**Paired implementation passes are now complete.** Remaining Phase I work is the polish and release gate below.
 
 ## Phase I polish and release gate
 

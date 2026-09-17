@@ -65,16 +65,27 @@ namespace AlwaysFaithful.Core
         public const int DefaultHeight = 19;
         public const int CellSizeMetres = 250;
 
+        // seed == 0 reproduces today's exact unseeded string, so every existing
+        // caller and regression fixture is unaffected; a nonzero seed (from an
+        // imported BattleRequest) both labels the battlefield distinctly and,
+        // since cover/posture/objective generation all hash BattlefieldId
+        // itself, deterministically reseeds the whole battle in one change.
+        public static string BuildBattlefieldId(HexCoord parentHex, int seed = 0)
+            => seed == 0
+                ? $"TW-{parentHex.Q:D2}-{parentHex.R:D3}-250M"
+                : $"TW-{parentHex.Q:D2}-{parentHex.R:D3}-250M-S{seed}";
+
         public static TacticalBattlefieldState Extract(
             HexCoord parentHex,
             double centerLongitude,
             double centerLatitude,
             Func<double, double, float> sampleElevation,
-            Func<double, double, bool> containsLand)
+            Func<double, double, bool> containsLand,
+            int seed = 0)
         {
             var battlefield = new TacticalBattlefieldState
             {
-                BattlefieldId = $"TW-{parentHex.Q:D2}-{parentHex.R:D3}-250M",
+                BattlefieldId = BuildBattlefieldId(parentHex, seed),
                 ParentHex = parentHex,
                 Width = DefaultWidth,
                 Height = DefaultHeight,

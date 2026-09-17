@@ -137,6 +137,13 @@ namespace AlwaysFaithful.Prototype
         private readonly Dictionary<HexCoord, LineRenderer> tacticalReconRings = new Dictionary<HexCoord, LineRenderer>();
         private bool automatedReconRegression;
         private bool automatedReconCapture;
+        private BattleRequest activeBattleRequest;
+        private string battleRequestError;
+        private string lastBattleResultPath;
+        private bool campaignBriefingActive;
+        private float campaignBriefingOpacity;
+        private bool automatedBattleContractRegression;
+        private bool automatedCampaignCapture;
         private bool tacticalReactionActive;
         private bool tacticalReactionHalted;
         private string tacticalReactionBannerText;
@@ -203,6 +210,8 @@ namespace AlwaysFaithful.Prototype
             automatedResultCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--result-capture-path=", StringComparison.Ordinal));
             automatedReconRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--recon-regression") >= 0;
             automatedReconCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--recon-capture-path=", StringComparison.Ordinal));
+            automatedBattleContractRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--battle-contract-regression") >= 0;
+            automatedCampaignCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--campaign-capture-path=", StringComparison.Ordinal));
             fastEnemyAnimation = Array.IndexOf(Environment.GetCommandLineArgs(), "--fast-enemy") >= 0;
             LoadGeography();
             BuildLightingAndCamera();
@@ -212,6 +221,8 @@ namespace AlwaysFaithful.Prototype
             BuildBoard();
             BuildUnit();
             ApplyCamera();
+            string battleRequestPath = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--battle-request=", StringComparison.Ordinal));
+            if (battleRequestPath != null) TryLoadBattleRequest(battleRequestPath.Substring("--battle-request=".Length));
             if (automatedCapture)
             {
                 BeginMovePlanning();
@@ -230,6 +241,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedCoverRegression) StartCoroutine(RunCoverRegression());
             if (automatedVictoryRegression) StartCoroutine(RunVictoryRegression());
             if (automatedReconRegression) StartCoroutine(RunReconRegression());
+            if (automatedBattleContractRegression) StartCoroutine(RunBattleContractRegression());
             if (automatedTacticalCapture)
             {
                 EnterTacticalMap(FindCoastalOperationalCell(), false);
@@ -313,12 +325,16 @@ namespace AlwaysFaithful.Prototype
                 TryIssueTacticalRecon(tacticalEnemyStates[0].Position);
                 StartCoroutine(CaptureReconScreenshotWhenRequested());
             }
+            // Requires --battle-request=<path> alongside --campaign-capture-path=;
+            // the request load above already enters the tactical map and starts
+            // the briefing fade, so this only needs to wait and snap.
+            if (automatedCampaignCapture) StartCoroutine(CaptureCampaignScreenshotWhenRequested());
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
         private void Update()
         {
-            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedEnemyTurnRegression || automatedCoverRegression || automatedVictoryRegression || automatedReconRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || automatedEnemyTurnCapture || automatedResultCapture || automatedReconCapture || mapTransitionActive) return;
+            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedEnemyTurnRegression || automatedCoverRegression || automatedVictoryRegression || automatedReconRegression || automatedBattleContractRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || automatedEnemyTurnCapture || automatedResultCapture || automatedReconCapture || automatedCampaignCapture || mapTransitionActive) return;
             UpdateCamera();
             if (tacticalMode) UpdateTacticalPointer();
             else UpdatePointer();
@@ -781,6 +797,30 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator CaptureCampaignScreenshotWhenRequested()
+        {
+            string argument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--campaign-capture-path=", StringComparison.Ordinal));
+            if (argument == null) yield break;
+            string path = argument.Substring("--campaign-capture-path=".Length);
+            float deadline = Time.realtimeSinceStartup + 5f;
+            do { yield return null; } while (!(campaignBriefingActive && campaignBriefingOpacity >= .98f) && Time.realtimeSinceStartup < deadline);
+            var target = new RenderTexture(1280, 720, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            mapCamera.targetTexture = target;
+            mapCamera.Render();
+            RenderTexture.active = target;
+            image.ReadPixels(new Rect(0f, 0f, target.width, target.height), 0, 0);
+            image.Apply();
+            File.WriteAllBytes(path, image.EncodeToPNG());
+            mapCamera.targetTexture = null;
+            RenderTexture.active = previous;
+            Destroy(target);
+            Destroy(image);
+            Debug.Log($"ALWAYS_FAITHFUL_CAMPAIGN_CAPTURED {path} requestId={activeBattleRequest?.RequestId} error={battleRequestError}");
+            Application.Quit(0);
+        }
+
         private void RequestTacticalMap(HexCellView parentCell)
         {
             if (parentCell == null || !parentCell.IsLand || mapTransitionActive) return;
@@ -816,6 +856,90 @@ namespace AlwaysFaithful.Prototype
             mapTransitionOpacity = to;
         }
 
+        private void TryLoadBattleRequest(string path)
+        {
+            battleRequestError = null;
+            activeBattleRequest = null;
+            if (!File.Exists(path))
+            {
+                ShowBattleRequestError($"Battle request file not found: {path}");
+                return;
+            }
+            string json;
+            try
+            {
+                json = File.ReadAllText(path);
+            }
+            catch (Exception exception)
+            {
+                ShowBattleRequestError("Could not read battle request file: " + exception.Message);
+                return;
+            }
+            BattleRequest request;
+            try
+            {
+                request = JsonUtility.FromJson<BattleRequest>(json);
+            }
+            catch (Exception exception)
+            {
+                ShowBattleRequestError("Battle request file is not valid JSON: " + exception.Message);
+                return;
+            }
+            if (!TacticalBattleContract.ValidateStructure(request, out string structureError))
+            {
+                ShowBattleRequestError(structureError);
+                return;
+            }
+            if (!cells.TryGetValue(request.TheaterHex, out HexCellView theaterCell) || !theaterCell.IsLand)
+            {
+                ShowBattleRequestError($"Theater hex {request.TheaterHex} is out of bounds or not land");
+                return;
+            }
+
+            activeBattleRequest = request;
+            campaignBriefingActive = true;
+            StartCoroutine(ShowCampaignBriefingThenDismiss());
+            EnterTacticalMap(theaterCell, false);
+            Debug.Log($"ALWAYS_FAITHFUL_BATTLE_REQUEST_LOADED requestId={request.RequestId} campaignId={request.CampaignId} seed={request.Seed} theater={request.TheaterHex} outputPath={request.OutputPath}");
+        }
+
+        private void ShowBattleRequestError(string message)
+        {
+            battleRequestError = message;
+            campaignBriefingActive = true;
+            StartCoroutine(FadeCampaignBriefing(0f, 1f, .35f));
+            Debug.LogWarning("ALWAYS_FAITHFUL_BATTLE_REQUEST_REJECTED " + message);
+        }
+
+        private IEnumerator ShowCampaignBriefingThenDismiss()
+        {
+            yield return FadeCampaignBriefing(0f, 1f, .35f);
+            yield return new WaitForSecondsRealtime(2.2f);
+            yield return FadeCampaignBriefing(1f, 0f, .35f);
+            campaignBriefingActive = false;
+        }
+
+        private IEnumerator FadeCampaignBriefing(float from, float to, float duration)
+        {
+            for (float elapsed = 0f; elapsed < duration; elapsed += Time.unscaledDeltaTime)
+            {
+                campaignBriefingOpacity = Mathf.SmoothStep(from, to, elapsed / duration);
+                yield return null;
+            }
+            campaignBriefingOpacity = to;
+        }
+
+        private void DismissCampaignBriefing()
+        {
+            campaignBriefingActive = false;
+            campaignBriefingOpacity = 0f;
+            if (battleRequestError != null)
+            {
+                battleRequestError = null;
+                activeBattleRequest = null;
+            }
+        }
+
         private void EnterTacticalMap(HexCellView parentCell, bool animate)
         {
             if (animate)
@@ -829,7 +953,7 @@ namespace AlwaysFaithful.Prototype
                 overviewCameraDistance = cameraDistance;
             }
             CancelUnitInteraction();
-            string requestedId = $"TW-{parentCell.Coord.Q:D2}-{parentCell.Coord.R:D3}-250M";
+            string requestedId = TacticalBattlefieldExtractor.BuildBattlefieldId(parentCell.Coord, activeBattleRequest?.Seed ?? 0);
             if (tacticalBattlefield == null || tacticalBattlefield.BattlefieldId != requestedId) BuildTacticalBattlefield(parentCell);
             tacticalMode = true;
             overviewRoot.SetActive(false);
@@ -855,6 +979,9 @@ namespace AlwaysFaithful.Prototype
             CancelTacticalInteraction(false);
             resultScreenActive = false;
             resultScreenOpacity = 0f;
+            campaignBriefingActive = false;
+            campaignBriefingOpacity = 0f;
+            lastBattleResultPath = null;
             tacticalRoot.SetActive(false);
             overviewRoot.SetActive(true);
             tacticalMode = false;
@@ -877,7 +1004,8 @@ namespace AlwaysFaithful.Prototype
                 parentCell.Longitude,
                 parentCell.Latitude,
                 (longitude, latitude) => elevation.SampleMetres(longitude, latitude),
-                (longitude, latitude) => coastline.ContainsLand(longitude, latitude));
+                (longitude, latitude) => coastline.ContainsLand(longitude, latitude),
+                activeBattleRequest?.Seed ?? 0);
             tacticalRoot = new GameObject("Tactical Battlefield " + tacticalBattlefield.BattlefieldId);
             tacticalRoot.transform.SetParent(transform, false);
 
@@ -994,25 +1122,46 @@ namespace AlwaysFaithful.Prototype
 
         private void BuildTacticalObjective()
         {
+            // An imported BattleRequest's overrides take priority over both the
+            // --posture=/--turn-limit= dev flags and the deterministic defaults;
+            // request-driven launch reuses this exact setup path, not a parallel one.
             string[] args = Environment.GetCommandLineArgs();
-            string postureArgument = Array.Find(args, value => value.StartsWith("--posture=", StringComparison.Ordinal));
-            string postureValue = postureArgument?.Substring("--posture=".Length);
-            TacticalPosture posture = string.Equals(postureValue, "defend", StringComparison.OrdinalIgnoreCase)
-                ? TacticalPosture.Defend
-                : string.Equals(postureValue, "attack", StringComparison.OrdinalIgnoreCase)
-                    ? TacticalPosture.Attack
-                    : TacticalVictory.ChoosePosture(tacticalBattlefield.BattlefieldId);
+            TacticalPosture posture;
+            if (activeBattleRequest != null && activeBattleRequest.HasPostureOverride)
+            {
+                posture = activeBattleRequest.Posture;
+            }
+            else
+            {
+                string postureArgument = Array.Find(args, value => value.StartsWith("--posture=", StringComparison.Ordinal));
+                string postureValue = postureArgument?.Substring("--posture=".Length);
+                posture = string.Equals(postureValue, "defend", StringComparison.OrdinalIgnoreCase)
+                    ? TacticalPosture.Defend
+                    : string.Equals(postureValue, "attack", StringComparison.OrdinalIgnoreCase)
+                        ? TacticalPosture.Attack
+                        : TacticalVictory.ChoosePosture(tacticalBattlefield.BattlefieldId);
+            }
 
-            string turnLimitArgument = Array.Find(args, value => value.StartsWith("--turn-limit=", StringComparison.Ordinal));
-            int turnLimit = turnLimitArgument != null &&
-                int.TryParse(turnLimitArgument.Substring("--turn-limit=".Length), out int parsedLimit) && parsedLimit > 0
-                ? parsedLimit
-                : TacticalVictory.DefaultTurnLimit;
+            int turnLimit;
+            if (activeBattleRequest != null && activeBattleRequest.TurnLimitOverride > 0)
+            {
+                turnLimit = activeBattleRequest.TurnLimitOverride;
+            }
+            else
+            {
+                string turnLimitArgument = Array.Find(args, value => value.StartsWith("--turn-limit=", StringComparison.Ordinal));
+                turnLimit = turnLimitArgument != null &&
+                    int.TryParse(turnLimitArgument.Substring("--turn-limit=".Length), out int parsedLimit) && parsedLimit > 0
+                    ? parsedLimit
+                    : TacticalVictory.DefaultTurnLimit;
+            }
 
             var enemyStarts = new List<HexCoord>();
             foreach (TacticalUnitState enemy in tacticalEnemyStates) enemyStarts.Add(enemy.Position);
             HexCoord center = new HexCoord(tacticalBattlefield.Width / 2, tacticalBattlefield.Height / 2);
-            HexCoord objectiveHex = TacticalVictory.ChooseObjective(localMovementBoard, center, posture, enemyStarts, tacticalBattlefield.BattlefieldId);
+            HexCoord objectiveHex = activeBattleRequest != null && activeBattleRequest.HasObjectiveOverride
+                ? activeBattleRequest.ObjectiveHexOverride
+                : TacticalVictory.ChooseObjective(localMovementBoard, center, posture, enemyStarts, tacticalBattlefield.BattlefieldId);
 
             tacticalObjective = new TacticalObjectiveState
             {
@@ -1093,7 +1242,8 @@ namespace AlwaysFaithful.Prototype
             collider.radius = .65f;
             collider.center = Vector3.up * .12f;
             tacticalUnit = root.AddComponent<UnitCounterView>();
-            tacticalUnitState = new TacticalUnitState("usmc-rifle-platoon-1", "USMC Rifle Platoon", start, TacticalPlatoonActionPoints);
+            FindForceImport("usmc-rifle-platoon", "usmc-rifle-platoon-1", "USMC Rifle Platoon", out string usmcId, out string usmcDisplayName);
+            tacticalUnitState = new TacticalUnitState(usmcId, usmcDisplayName, start, TacticalPlatoonActionPoints);
             tacticalWeapon = new TacticalWeaponState("m27-small-arms", "M27 Small Arms", 6);
             tacticalUnit.Initialize(tacticalUnitState.DisplayName);
             tacticalFormationView = root.AddComponent<TacticalFormationView>();
@@ -1102,6 +1252,23 @@ namespace AlwaysFaithful.Prototype
             tacticalUnit.Present(tacticalUnitState);
             tacticalFormationView.Present(tacticalUnitState);
             localMovementBoard[start].OccupantId = tacticalUnitState.Id;
+        }
+
+        // Lets an imported BattleRequest override a fixed roster slot's ID/name
+        // without turning this into a data-driven roster (out of scope for the
+        // Phase I stub) — falls back to the existing hardcoded defaults.
+        private void FindForceImport(string role, string defaultId, string defaultDisplayName, out string id, out string displayName)
+        {
+            id = defaultId;
+            displayName = defaultDisplayName;
+            if (activeBattleRequest?.Forces == null) return;
+            foreach (BattleUnitImport import in activeBattleRequest.Forces)
+            {
+                if (import == null || import.Role != role) continue;
+                if (!string.IsNullOrWhiteSpace(import.UnitId)) id = import.UnitId;
+                if (!string.IsNullOrWhiteSpace(import.DisplayName)) displayName = import.DisplayName;
+                return;
+            }
         }
 
         private void BuildTacticalMovementVisuals()
@@ -1180,8 +1347,10 @@ namespace AlwaysFaithful.Prototype
             HexCoord riflePosition = FindObservationDeployment(TacticalVisibilityState.Observed, occupied);
             occupied.Add(riflePosition);
             HexCoord supportPosition = FindObservationDeployment(TacticalVisibilityState.Contact, occupied);
-            TacticalUnitState rifle = new TacticalUnitState("pla-rifle-squad-1", "PLA Rifle Squad", riflePosition, 4);
-            TacticalUnitState support = new TacticalUnitState("pla-support-team-1", "PLA Support Team", supportPosition, 4);
+            FindForceImport("pla-rifle-squad", "pla-rifle-squad-1", "PLA Rifle Squad", out string rifleId, out string rifleDisplayName);
+            FindForceImport("pla-support-team", "pla-support-team-1", "PLA Support Team", out string supportId, out string supportDisplayName);
+            TacticalUnitState rifle = new TacticalUnitState(rifleId, rifleDisplayName, riflePosition, 4);
+            TacticalUnitState support = new TacticalUnitState(supportId, supportDisplayName, supportPosition, 4);
             tacticalEnemyStates.Add(rifle);
             tacticalEnemyStates.Add(support);
             foreach (TacticalUnitState enemy in tacticalEnemyStates)
@@ -1191,7 +1360,11 @@ namespace AlwaysFaithful.Prototype
                 markerObject.transform.SetParent(tacticalRoot.transform, false);
                 markerObject.transform.position = LocalCounterPosition(enemy.Position) + Vector3.up * .03f;
                 ContactMarkerView marker = markerObject.AddComponent<ContactMarkerView>();
-                marker.Initialize(enemy.DisplayName.Contains("Support") ? "SUPPORT" : "RIFLE");
+                // Reference-compare to the known roster slot rather than sniffing
+                // DisplayName, since an imported BattleRequest can rename either
+                // unit to anything (including something that no longer contains
+                // the word "Support").
+                marker.Initialize(enemy == support ? "SUPPORT" : "RIFLE");
                 tacticalContactViews.Add(enemy.Id, marker);
                 tacticalEnemyWeapons.Add(enemy.Id, new TacticalWeaponState(enemy.Id + "-weapon", "Squad Small Arms", 6));
             }
@@ -1282,7 +1455,7 @@ namespace AlwaysFaithful.Prototype
 
         private void UpdateTacticalPointer()
         {
-            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive) return;
+            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive || campaignBriefingActive) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
             if (returnToIslandRect.Contains(guiPointer) || tacticalMenuOpen && tacticalMenuRect.Contains(guiPointer) ||
                 new Rect(20f, 18f, 405f, 294f).Contains(guiPointer)) return;
@@ -2112,7 +2285,7 @@ namespace AlwaysFaithful.Prototype
         {
             // Do not let hover bookkeeping clear the committed route while its
             // movement coroutine is animating the counter.
-            if (mapCamera == null || unitMoving) return;
+            if (mapCamera == null || unitMoving || campaignBriefingActive) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
             if (endTurnRect.Contains(guiPointer) || enterTacticalRect.Contains(guiPointer) || counterMenuOpen && counterMenuRect.Contains(guiPointer)) return;
             bool leftClick = Input.GetMouseButtonDown(0);
@@ -2359,7 +2532,7 @@ namespace AlwaysFaithful.Prototype
 
         private void EndTacticalTurn()
         {
-            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive) return;
+            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive || campaignBriefingActive) return;
             CancelTacticalInteraction(false);
             tacticalAudio.Play(TacticalSound.EndTurn);
             StartCoroutine(RunEnemyTurn());
@@ -2444,7 +2617,78 @@ namespace AlwaysFaithful.Prototype
             tacticalObjective.OutcomeTurn = turnState.TurnNumber;
             tacticalObjective.OutcomeSummary = summary;
             Debug.Log($"ALWAYS_FAITHFUL_BATTLE_OUTCOME outcome={outcome} turn={turnState.TurnNumber} summary={summary}");
+            if (activeBattleRequest != null) WriteBattleResult();
             StartCoroutine(FadeResultScreen(0f, 1f, .45f));
+        }
+
+        // Assembles and atomically writes the Phase I stub BattleResult, then
+        // consumes the active request (one request, exactly one result) so
+        // any further standalone play in this session can't overwrite it.
+        private void WriteBattleResult()
+        {
+            bool usmcControls = localMovementBoard.TryGetValue(tacticalObjective.ObjectiveHex, out TacticalMovementCell cell) &&
+                cell.OccupantId == tacticalUnitState.Id;
+            var result = new BattleResult
+            {
+                RequestId = activeBattleRequest.RequestId,
+                CampaignId = activeBattleRequest.CampaignId,
+                BattlefieldId = tacticalBattlefield.BattlefieldId,
+                Seed = activeBattleRequest.Seed,
+                Outcome = tacticalObjective.Outcome,
+                OutcomeSummary = tacticalObjective.OutcomeSummary,
+                Posture = tacticalObjective.Posture,
+                ObjectiveHex = tacticalObjective.ObjectiveHex,
+                ObjectiveControlledByUsmc = usmcControls,
+                TurnsTaken = tacticalObjective.OutcomeTurn - tacticalObjective.BattleStartTurn + 1,
+                TurnLimit = tacticalObjective.TurnLimit,
+                UsmcCasualties = tacticalUnitState.CombatStatus == TacticalCombatStatus.Reduced ? 1 : 0,
+                PlaCasualties = CountReduced(tacticalEnemyStates),
+                EventLog = BuildTacticalEventLog(int.MaxValue),
+                CompletedAtUtc = DateTime.UtcNow.ToString("o")
+            };
+            result.Forces.Add(new BattleUnitResult
+            {
+                Role = "usmc-rifle-platoon",
+                UnitId = tacticalUnitState.Id,
+                DisplayName = tacticalUnitState.DisplayName,
+                FinalStatus = tacticalUnitState.CombatStatus
+            });
+            // tacticalEnemyStates is always populated [rifle, support] in that
+            // fixed order by BuildTacticalContacts; same convention the capture
+            // and regression flags already rely on via tacticalEnemyStates[0].
+            string[] enemyRoles = { "pla-rifle-squad", "pla-support-team" };
+            for (int index = 0; index < tacticalEnemyStates.Count; index++)
+            {
+                TacticalUnitState enemy = tacticalEnemyStates[index];
+                result.Forces.Add(new BattleUnitResult
+                {
+                    Role = index < enemyRoles.Length ? enemyRoles[index] : $"pla-unit-{index}",
+                    UnitId = enemy.Id,
+                    DisplayName = enemy.DisplayName,
+                    FinalStatus = enemy.CombatStatus
+                });
+            }
+
+            string outputPath = activeBattleRequest.OutputPath;
+            string tempPath = outputPath + ".tmp";
+            try
+            {
+                string directory = Path.GetDirectoryName(outputPath);
+                if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+                File.WriteAllText(tempPath, JsonUtility.ToJson(result, true));
+                if (File.Exists(outputPath)) File.Delete(outputPath);
+                File.Move(tempPath, outputPath);
+                lastBattleResultPath = outputPath;
+                Debug.Log($"ALWAYS_FAITHFUL_BATTLE_RESULT_WRITTEN path={outputPath} requestId={result.RequestId} outcome={result.Outcome}");
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_BATTLE_RESULT_WRITE_FAILED path={outputPath} error={exception.Message}");
+            }
+            finally
+            {
+                activeBattleRequest = null;
+            }
         }
 
         private IEnumerator FadeResultScreen(float from, float to, float duration)
@@ -3810,6 +4054,175 @@ namespace AlwaysFaithful.Prototype
             return true;
         }
 
+        private IEnumerator RunBattleContractRegression()
+        {
+            yield return null;
+            if (!ValidateBattleContractRules(out string ruleFailure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_BATTLE_CONTRACT_REGRESSION_FAILED rules=" + ruleFailure);
+                Application.Quit(1);
+                yield break;
+            }
+
+            HexCoord theaterHex = FindHighReliefOperationalCell().Coord;
+            string scratchDirectory = Path.Combine(Path.GetTempPath(), "AlwaysFaithfulBattleContractRegression");
+            Directory.CreateDirectory(scratchDirectory);
+            string requestPath = Path.Combine(scratchDirectory, "request.json");
+            string outputPath = Path.Combine(scratchDirectory, "result.json");
+            var request = new BattleRequest
+            {
+                RequestId = "regression-request-1",
+                CampaignId = "regression-campaign-1",
+                Seed = 4242,
+                TheaterHex = theaterHex,
+                HasPostureOverride = true,
+                Posture = TacticalPosture.Defend,
+                TurnLimitOverride = 1,
+                OutputPath = outputPath,
+                Forces = new List<BattleUnitImport>
+                {
+                    new BattleUnitImport { Role = "usmc-rifle-platoon", UnitId = "regression-usmc-1", DisplayName = "Regression Rifle Platoon" },
+                    new BattleUnitImport { Role = "pla-rifle-squad", UnitId = "regression-pla-rifle-1", DisplayName = "Regression PLA Rifle" },
+                    new BattleUnitImport { Role = "pla-support-team", UnitId = "regression-pla-support-1", DisplayName = "Regression PLA Support" }
+                }
+            };
+            File.WriteAllText(requestPath, JsonUtility.ToJson(request));
+
+            TryLoadBattleRequest(requestPath);
+            if (battleRequestError != null || activeBattleRequest == null)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_BATTLE_CONTRACT_REGRESSION_FAILED valid request rejected: " + battleRequestError);
+                Application.Quit(1);
+                yield break;
+            }
+            if (tacticalUnitState.Id != "regression-usmc-1" || tacticalEnemyStates.Count != 2 ||
+                tacticalEnemyStates[0].Id != "regression-pla-rifle-1" || tacticalEnemyStates[1].Id != "regression-pla-support-1" ||
+                tacticalObjective.Posture != TacticalPosture.Defend || tacticalObjective.TurnLimit != 1)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_BATTLE_CONTRACT_REGRESSION_FAILED import mismatch usmc={tacticalUnitState.Id} rifle={tacticalEnemyStates[0].Id} support={tacticalEnemyStates[1].Id} posture={tacticalObjective.Posture} limit={tacticalObjective.TurnLimit}");
+                Application.Quit(1);
+                yield break;
+            }
+            string liveBattlefieldId = tacticalBattlefield.BattlefieldId;
+            DismissCampaignBriefing();
+            fastEnemyAnimation = true;
+            EndTacticalTurn();
+            float deadline = Time.realtimeSinceStartup + 5f;
+            do { yield return null; } while ((tacticalEnemyTurnActive || !File.Exists(outputPath)) && Time.realtimeSinceStartup < deadline);
+            yield return null;
+
+            if (!File.Exists(outputPath) || File.Exists(outputPath + ".tmp"))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_BATTLE_CONTRACT_REGRESSION_FAILED result missing or temp file leftover exists={File.Exists(outputPath)} tmpExists={File.Exists(outputPath + ".tmp")}");
+                Application.Quit(1);
+                yield break;
+            }
+            BattleResult result = JsonUtility.FromJson<BattleResult>(File.ReadAllText(outputPath));
+            if (result == null || result.RequestId != request.RequestId || result.CampaignId != request.CampaignId ||
+                result.Forces.Count != 3 || result.Forces[0].UnitId != "regression-usmc-1" ||
+                result.Forces[1].UnitId != "regression-pla-rifle-1" || result.Forces[2].UnitId != "regression-pla-support-1" ||
+                result.Outcome == TacticalBattleOutcome.InProgress)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_BATTLE_CONTRACT_REGRESSION_FAILED result content requestId={result?.RequestId} forces={result?.Forces.Count} outcome={result?.Outcome}");
+                Application.Quit(1);
+                yield break;
+            }
+            if (activeBattleRequest != null)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_BATTLE_CONTRACT_REGRESSION_FAILED request was not consumed after export");
+                Application.Quit(1);
+                yield break;
+            }
+
+            // Deterministic replay: re-extracting the same theater hex with the
+            // same seed must reproduce the exact battlefield ID the live battle
+            // just used, without re-driving the UI a second time.
+            TacticalBattlefieldState replay = TacticalBattlefieldExtractor.Extract(
+                theaterHex, cells[theaterHex].Longitude, cells[theaterHex].Latitude,
+                (longitude, latitude) => elevation.SampleMetres(longitude, latitude),
+                (longitude, latitude) => coastline.ContainsLand(longitude, latitude),
+                request.Seed);
+            if (replay.BattlefieldId != liveBattlefieldId)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_BATTLE_CONTRACT_REGRESSION_FAILED replay mismatch live={liveBattlefieldId} replay={replay.BattlefieldId}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            File.WriteAllText(requestPath, "{ not json");
+            TryLoadBattleRequest(requestPath);
+            if (battleRequestError == null)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_BATTLE_CONTRACT_REGRESSION_FAILED malformed JSON was not rejected");
+                Application.Quit(1);
+                yield break;
+            }
+            DismissCampaignBriefing();
+
+            request.ContractVersion = BattleRequest.CurrentContractVersion + 1;
+            File.WriteAllText(requestPath, JsonUtility.ToJson(request));
+            TryLoadBattleRequest(requestPath);
+            if (battleRequestError == null)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_BATTLE_CONTRACT_REGRESSION_FAILED unsupported contract version was not rejected");
+                Application.Quit(1);
+                yield break;
+            }
+            DismissCampaignBriefing();
+
+            Debug.Log($"ALWAYS_FAITHFUL_BATTLE_CONTRACT_REGRESSION_OK requestId={result.RequestId} outcome={result.Outcome} battlefield={liveBattlefieldId}");
+            Application.Quit(0);
+        }
+
+        private static bool ValidateBattleContractRules(out string failure)
+        {
+            var valid = new BattleRequest { RequestId = "r1", OutputPath = "out.json" };
+            if (!TacticalBattleContract.ValidateStructure(valid, out _))
+            {
+                failure = "a structurally valid request was rejected";
+                return false;
+            }
+
+            var badVersion = new BattleRequest { ContractVersion = BattleRequest.CurrentContractVersion + 1, RequestId = "r1", OutputPath = "out.json" };
+            if (TacticalBattleContract.ValidateStructure(badVersion, out _))
+            {
+                failure = "an unsupported contract version was accepted";
+                return false;
+            }
+
+            var missingRequestId = new BattleRequest { OutputPath = "out.json" };
+            if (TacticalBattleContract.ValidateStructure(missingRequestId, out _))
+            {
+                failure = "a request missing RequestId was accepted";
+                return false;
+            }
+
+            var missingOutputPath = new BattleRequest { RequestId = "r1" };
+            if (TacticalBattleContract.ValidateStructure(missingOutputPath, out _))
+            {
+                failure = "a request missing OutputPath was accepted";
+                return false;
+            }
+
+            HexCoord hex = new HexCoord(3, 4);
+            string unseeded = TacticalBattlefieldExtractor.BuildBattlefieldId(hex);
+            if (unseeded != $"TW-{hex.Q:D2}-{hex.R:D3}-250M")
+            {
+                failure = $"seed=0 did not reproduce the legacy battlefield id, got {unseeded}";
+                return false;
+            }
+            string seededOnce = TacticalBattlefieldExtractor.BuildBattlefieldId(hex, 99);
+            string seededTwice = TacticalBattlefieldExtractor.BuildBattlefieldId(hex, 99);
+            if (seededOnce == unseeded || seededOnce != seededTwice)
+            {
+                failure = $"seeded battlefield id was not distinct/deterministic: {seededOnce} vs {seededTwice} (unseeded {unseeded})";
+                return false;
+            }
+
+            failure = null;
+            return true;
+        }
+
         private static bool ValidateFireRules(out string failure)
         {
             var flat = new Dictionary<HexCoord, TacticalMovementCell>();
@@ -4357,6 +4770,7 @@ namespace AlwaysFaithful.Prototype
                 DrawTacticalInterface(uiWidth, uiHeight);
                 DrawTransitionOverlay(uiWidth, uiHeight);
                 DrawResultScreen(uiWidth, uiHeight);
+                DrawCampaignBriefing(uiWidth, uiHeight);
                 GUI.matrix = Matrix4x4.identity;
                 return;
             }
@@ -4421,6 +4835,7 @@ namespace AlwaysFaithful.Prototype
                 GUI.enabled = true;
             }
             DrawTransitionOverlay(uiWidth, uiHeight);
+            DrawCampaignBriefing(uiWidth, uiHeight);
             GUI.matrix = Matrix4x4.identity;
         }
 
@@ -4436,7 +4851,8 @@ namespace AlwaysFaithful.Prototype
             GUI.Label(new Rect(38f, 121f, 350f, 36f),
                 $"Parent {tacticalBattlefield.ParentHex}  •  {TacticalWidthKilometres():0.00} × {(tacticalBattlefield.Height * tacticalBattlefield.CellSizeMetres / 1000f):0.00} km  •  Relief {localMinimumLandElevation:0}–{localMaximumLandElevation:0} m\n" +
                 $"{tacticalBattlefield.CenterLatitude:0.00000}°N  •  {tacticalBattlefield.CenterLongitude:0.00000}°E", bodyStyle);
-            GUI.Label(new Rect(38f, 165f, 220f, 24f), tacticalUnitState.DisplayName.ToUpperInvariant(), unitNameStyle);
+            string usmcNameLabel = tacticalUnitState.DisplayName.ToUpperInvariant() + (tacticalUnitState.Id != "usmc-rifle-platoon-1" ? "  •  IMPORTED" : string.Empty);
+            GUI.Label(new Rect(38f, 165f, 280f, 24f), usmcNameLabel, unitNameStyle);
             stateStyle.normal.textColor = tacticalUnitState.Readiness == UnitReadiness.Moving
                 ? new Color(.34f, .96f, .82f)
                 : tacticalUnitState.Readiness == UnitReadiness.Spent
@@ -4456,7 +4872,7 @@ namespace AlwaysFaithful.Prototype
 
             Rect tacticalEndTurnRect = new Rect(137f, 259f, 104f, 34f);
             returnToIslandRect = new Rect(244f, 259f, 161f, 34f);
-            bool tacticalControlsEnabled = !mapTransitionActive && !tacticalUnitMoving && !tacticalFireResolving && !tacticalEnemyTurnActive;
+            bool tacticalControlsEnabled = !mapTransitionActive && !tacticalUnitMoving && !tacticalFireResolving && !tacticalEnemyTurnActive && !campaignBriefingActive;
             GUI.enabled = tacticalControlsEnabled && !resultScreenActive;
             if (GUI.Button(tacticalEndTurnRect, "END TURN", buttonStyle)) EndTacticalTurn();
             GUI.enabled = tacticalControlsEnabled;
@@ -4641,6 +5057,7 @@ namespace AlwaysFaithful.Prototype
             string summary = $"{tacticalObjective.Posture.ToString().ToUpperInvariant()} • {tacticalBattlefield.BattlefieldId} • Objective {tacticalObjective.ObjectiveHex}\n" +
                 $"Turn {battleTurnReached}/{tacticalObjective.TurnLimit} • USMC casualties {usmcCasualties}/1 • PLA casualties {plaCasualties}/{tacticalEnemyStates.Count}\n" +
                 tacticalObjective.OutcomeSummary;
+            if (lastBattleResultPath != null) summary += $"\nResult exported to {lastBattleResultPath}";
             GUI.Label(new Rect(box.x + 30f, box.y + 76f, box.width - 60f, 66f), summary, bodyStyle);
 
             GUI.Label(new Rect(box.x + 30f, box.y + 148f, box.width - 60f, 20f), "BATTLE LOG", badgeStyle);
@@ -4648,7 +5065,45 @@ namespace AlwaysFaithful.Prototype
             GUI.Label(new Rect(box.x + 30f, box.y + 170f, box.width - 60f, 230f), logText, bodyStyle);
 
             Rect dismissRect = new Rect(box.x + box.width / 2f - 90f, box.y + box.height - 50f, 180f, 34f);
-            if (GUI.Button(dismissRect, "RETURN TO ISLAND", buttonStyle)) ReturnToIsland(true);
+            string dismissLabel = lastBattleResultPath != null ? "RETURN TO CAMPAIGN" : "RETURN TO ISLAND";
+            if (GUI.Button(dismissRect, dismissLabel, buttonStyle)) ReturnToIsland(true);
+        }
+
+        private void DrawCampaignBriefing(float uiWidth, float uiHeight)
+        {
+            if (!campaignBriefingActive || campaignBriefingOpacity <= .001f) return;
+            Color previousColor = GUI.color;
+            GUI.color = new Color(.02f, .03f, .05f, campaignBriefingOpacity * .82f);
+            GUI.DrawTexture(new Rect(0f, 0f, uiWidth, uiHeight), Texture2D.whiteTexture);
+            GUI.color = previousColor;
+            if (campaignBriefingOpacity < .98f) return;
+
+            bool isError = battleRequestError != null;
+            float boxWidth = 560f;
+            float boxHeight = isError ? 220f : 260f;
+            Rect box = new Rect(uiWidth / 2f - boxWidth / 2f, uiHeight / 2f - boxHeight / 2f, boxWidth, boxHeight);
+            GUI.Box(box, GUIContent.none);
+
+            if (isError)
+            {
+                resultHeadlineStyle.normal.textColor = new Color(.96f, .32f, .28f);
+                GUI.Label(new Rect(box.x, box.y + 16f, box.width, 38f), "BATTLE REQUEST REJECTED", resultHeadlineStyle);
+                GUI.Label(new Rect(box.x + 30f, box.y + 64f, box.width - 60f, 100f), battleRequestError, bodyStyle);
+                Rect dismissRect = new Rect(box.x + box.width / 2f - 110f, box.y + box.height - 48f, 220f, 34f);
+                if (GUI.Button(dismissRect, "CONTINUE STANDALONE", buttonStyle)) DismissCampaignBriefing();
+                return;
+            }
+
+            if (activeBattleRequest == null) return;
+            resultHeadlineStyle.normal.textColor = new Color(.42f, .82f, .96f);
+            GUI.Label(new Rect(box.x, box.y + 16f, box.width, 38f), "SEA OF UNCERTAINTY", resultHeadlineStyle);
+            string briefing = $"Request {activeBattleRequest.RequestId}" +
+                (string.IsNullOrEmpty(activeBattleRequest.CampaignId) ? string.Empty : $"  •  Campaign {activeBattleRequest.CampaignId}") +
+                $"\nTheater {activeBattleRequest.TheaterHex}  •  Seed {activeBattleRequest.Seed}" +
+                (tacticalObjective != null
+                    ? $"\n{tacticalObjective.Posture.ToString().ToUpperInvariant()}  •  Objective {tacticalObjective.ObjectiveHex}  •  Turn limit {tacticalObjective.TurnLimit}"
+                    : string.Empty);
+            GUI.Label(new Rect(box.x + 30f, box.y + 64f, box.width - 60f, 130f), briefing, bodyStyle);
         }
 
         private void DrawActionPointPips(Rect area, TacticalUnitState state)
