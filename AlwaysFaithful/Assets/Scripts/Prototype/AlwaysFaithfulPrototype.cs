@@ -1572,7 +1572,10 @@ namespace AlwaysFaithful.Prototype
             ring.useWorldSpace = true;
             ring.positionCount = 36;
             ring.widthMultiplier = .05f;
-            Color color = new Color(.30f, .82f, .96f, .85f);
+            // Distinct from both the gold objective ring and the cyan
+            // deployment-zone ring (Pass 12) so the three never read as the
+            // same marker when a recon target sits near either of them.
+            Color color = new Color(.80f, .42f, .96f, .90f);
             ring.material = NewOverlayMaterial(color);
             ring.startColor = color;
             ring.endColor = color;

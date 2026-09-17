@@ -32,6 +32,8 @@ Pass 11 gives every 250 m tactical map real terrain texture. Each land hex now d
 
 Pass 12 lets a tactical battle actually end. Every local map now deterministically assigns an Attack or Defend posture and a single objective hex — Attack places it as far from the platoon's own landing zone as the terrain allows without sitting next to a PLA start position, Defend simply asks the platoon to hold the ground it lands on — plus a short turn limit. A gold ring marks the objective and turns green the instant the platoon physically occupies it, a teal ring marks the platoon's own deployment zone when the two differ, and the command card reports the battle's turn count against its limit alongside a seize/hold status line. The battle concludes the moment the platoon or every observed PLA formation is fought to a standstill, or the turn limit expires, whichever comes first: a full-screen after-action screen reports victory, defeat, a mutual-destruction draw, or an inconclusive stalemate, alongside turns taken, casualties on both sides, and a chronological log merged from every movement, fire, suppression, reaction, and enemy-action record of the battle.
 
+Pass 13 adds a Recon order without adding a new unit — ISR drones stay off the table for now. The platoon can task a focused sensor sweep on any hex up to 12 hexes away for 3 AP, and unlike every other spotting tool this one needs no ground line of sight, representing an indirect or overhead request rather than the platoon's own eyes. A successful tasking grants a one-tier detection bonus — Hidden to Contact, Contact to Identified, Identified to Observed — on that exact hex for two turns, marked by a violet ring distinct from the objective and deployment-zone rings; because the bonus is tied to the hex rather than the formation on it, a PLA element that moves off the tasked ground stops benefiting from it, a deliberate limit rather than a gap. The order, its AP cost, its expiry, and the resulting contact-state change are all persistent, replayable events alongside the rest of the battle log.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -47,7 +49,8 @@ Controls:
 - On the tactical map, right click the platoon and choose **Inspect LOS**, then hover hexes to inspect visibility.
 - On the tactical map, right click the platoon and choose **Direct Fire**, hover a currently observed enemy, and left click to fire.
 - On the tactical map, right click the platoon and choose **Rally** to spend 1 AP recovering suppression once the unit is Suppressed, Disrupted, or Reduced.
-- Right click away from the unit or press **Escape** to cancel tactical movement, LOS inspection, or fire targeting.
+- On the tactical map, right click the platoon and choose **Recon** to spend 3 AP tasking a sensor sweep on any hex within 12 hexes, no line of sight required; watch for the violet ring and the "Recon active" line in hex inspection.
+- Right click away from the unit or press **Escape** to cancel tactical movement, LOS inspection, fire targeting, or recon tasking.
 - Moving within an alert enemy's range and line of sight can trigger a reaction shot that pauses and may halt the move partway.
 - On the tactical map, use **End Turn** to hand control to the PLA; watch the phase banner and camera focus for each visible action, or toggle **Enemy Speed** between cinematic and fast pacing.
 - Watch the gold objective ring and the turn counter on the command card; the battle ends in victory, defeat, a draw, or a stalemate once the platoon or the PLA is fought to a standstill or the turn limit runs out, and the after-action screen's **Return to Island** button ends the battle and restores the operational map.

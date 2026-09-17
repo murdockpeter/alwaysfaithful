@@ -112,7 +112,13 @@ Complete these in order unless a discovered dependency requires a documented reo
 - [x] **Presentation:** add objective markers, setup boundaries, turn/side banner, victory progress, final result screen, and an inspectable chronological action log.
 - [x] **Proof:** test every victory branch, ties, timeout, objective ownership, casualty totals, and result reconstruction from events.
 
-### Pass 13 — Sea of Uncertainty round trip
+### Pass 13 — Recon and ISR tasking
+
+- [x] **Function:** add a platoon-level recon order that tasks a focused sensor sweep on a hex up to 12 hexes away without requiring ground line of sight, granting a temporary one-tier detection bonus (Hidden→Contact→Identified→Observed) for a short duration; no new unit, deliberately distinct from the still-deferred ISR drone concept.
+- [x] **Presentation:** add a distinct violet marker ring on the tasked hex, a RECON order-menu option and AP cost, hover/target feedback, and recon status/duration reporting in hex inspection and the chronological event log.
+- [x] **Proof:** verify the detection-bonus state progression and its cap, exact-hex targeting, and an in-game order/decay round trip (AP spent, event recorded, marker and marker expiry after its duration).
+
+### Pass 14 — Sea of Uncertainty round trip
 
 - [ ] **Function:** define versioned `BattleRequest` and `BattleResult` schemas; import theater location, forces, posture, seed, and objective; atomically export outcome exactly once.
 - [ ] **Presentation:** add campaign handoff/loading treatment, strategic-context briefing, imported-force provenance, return-to-campaign confirmation, and graceful validation errors.
