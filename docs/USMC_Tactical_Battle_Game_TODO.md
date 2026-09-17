@@ -76,6 +76,8 @@ This table is a design reference, not a requirement to reproduce either game's e
 
 ## 6. Sea of Uncertainty integration contract
 
+**Status: guiding reference, intentionally deferred.** Always Faithful and Sea of Uncertainty should each be finished out on their own merits first, with this section kept in mind so neither one paints itself into a corner — not treated as an active build target. Concretely: the Phase I file-based `BattleRequest`/`BattleResult` stub (`Core/TacticalBattleContract.cs`, `--battle-request=`) already exists and proves the mechanism works — that stays as-is, it's the "standalone first" gate already satisfied. Everything richer below it (Battalion/`ParentFormationType` anchoring, the EABO Establish/Defend/Displace scenario split, counter-lifecycle triggers, the supporting-fires budget) is design intent only. Do not implement it until both games are independently feature-complete and someone is looking at both sides at once to reconcile it for real.
+
 ### Boundary
 
 - [ ] Treat Always Faithful as a separately runnable application.
@@ -86,6 +88,80 @@ This table is a design reference, not a requirement to reproduce either game's e
 - [ ] Use files as the first integration transport because they are debuggable and tolerant of either game closing; add IPC only if user experience later requires it.
 - [ ] Write results atomically to a caller-provided output location, then exit or offer return-to-campaign.
 - [ ] Never allow either game to read the other's private save format directly.
+
+### Echelon boundary
+
+This is the organizing principle the rest of this section hangs off of. **Battalion is the shared echelon: it exists as a counter in both games.** Everything below it — company, platoon, squad, individual attachments — exists only inside Always Faithful and is never independently visible to Sea of Uncertainty. This section is a guiding reference, not a claim of training fidelity — general USMC organizational knowledge, not a verified current source; exact designations and any post-2024 restructuring should be checked against public USMC material before being treated as ground truth for game data, per the research/citation discipline already asked for in §8.
+
+**The ladder, top to bottom:**
+
+- MAGTF (Marine Air-Ground Task Force) — the scalable organizing concept, not a fixed size: MEU (smallest standing MAGTF, ~2,200 Marines) / MEB / MEF (largest, built around a Division). Always four elements: Command, Ground Combat, Aviation Combat, Logistics. Sea of Uncertainty's domain, not Always Faithful's.
+- **Battalion's parent formation — this is a fork, not a single answer:**
+  - **MEU** — a MEU's Ground Combat Element is standardly built around exactly *one* reinforced infantry battalion (a Battalion Landing Team: the battalion plus attached tanks/artillery/engineers). Clean, simple parent for a single-battalion campaign.
+  - **Marine Littoral Regiment (MLR)** — the Force Design 2030 formation actually built for EABO/sea-denial, sitting at the Regiment echelon: a Littoral Combat Team, a Littoral Anti-Air Battalion, and a Littoral Logistics Battalion underneath it, with NMESIS-type shore-based anti-ship fires as an MLR capability specifically. This is the doctrinally correct parent for the HIMARS/NMESIS EABO scenario — not a MEU.
+  - Larger, non-MEU/non-EABO operations would run Battalion → Regiment → Division → MEF instead. Out of scope until a campaign needs that scale.
+  - **Implication:** a Battalion needs a `ParentFormationType` (MEU | MLR | Regiment | …) alongside its `ParentFormationId`, not a hardcoded single parent kind.
+- Battalion (~800–1,000 Marines, Lieutenant Colonel) — **the shared echelon.**
+- Company (~150–200 Marines, Captain) — exists as a bookkeeping/task-organization echelon (which company a platoon reports to) but Always Faithful never fields more than one company's worth of action on a tactical map at Phase I's scale; not independently played.
+- Platoon (~30–45 Marines, Lieutenant) — Always Faithful's current playable granularity.
+- Squad (~13 Marines) / Fire team (4 Marines) — Always Faithful's internal tactical detail, below what a `BattleRequest` needs to name individually.
+
+**Contract implications:**
+
+- [ ] `BattleRequest` is anchored to a Battalion identity (with its `ParentFormationType`/`ParentFormationId`), not a flat unit list. Sea of Uncertainty asks Always Faithful to resolve an action involving Battalion X; it does not hand over a pre-built roster of platoons.
+- [ ] Always Faithful decides the task organization for that specific action from its own roster/attachment rules — which platoon, which company it nominally belongs to, which attachments, whether an EABO fires element is present — the same "parent formation plus attachments rather than a bespoke unit for every combination" approach already called for in §5/§8.
+- [ ] `BattleResult` rolls back up to the Battalion, not down to the sub-unit: Sea of Uncertainty should read a Battalion-scoped combat-effectiveness/capability change, not a squad-by-squad casualty list. Sub-battalion detail is Always Faithful's own audit trail, not the primary contract.
+- [ ] A "counter lifecycle trigger" (see Bucket 3 below) is therefore always scoped to the Battalion that owns the action — an EABO battery going operational, captured equipment, a secured node — reported as an attribute or attachment *on that Battalion's counter*, never as an independent free-floating new counter.
+- [ ] **Known gap:** the Phase I stub schema actually built in Always Faithful (`Core/TacticalBattleContract.cs`) does not have any of this yet — `BattleRequest.Forces` is a flat `List<BattleUnitImport>` keyed by fixed role strings (`usmc-rifle-platoon`, `pla-rifle-squad`, `pla-support-team`), with no Battalion/parent-formation anchor and no task-organization logic. Fine for a single-platoon stub; needs a real redesign (`BattalionId`, `ParentFormationType`, `ParentFormationId`, plus Always Faithful-side task-org rules) before this echelon boundary is actually load-bearing.
+
+### EABO insertion and employment
+
+Always Faithful's EAB-related scenario types should reflect how these positions are actually meant to get emplaced, not just how they're defended once they exist — general public-doctrine knowledge, same fidelity caveat as above.
+
+- Primary rapid-mobility insertion/extraction means is the **MV-22 Osprey** — speed and range over a traditional helicopter is central to the whole distributed/mobile concept.
+- Surface movement matters too: traditional well-deck LCAC/LCU off big amphibs, and the **Light Amphibious Warship (LAW)** concept the Marine Corps has pursued specifically to move littoral forces island-to-island in smaller, more numerous, lower-signature hulls than a handful of large amphibs.
+- Insertion is meant to be **low-signature, often into permissive or lightly-defended terrain**, frequently pre-conflict or early-conflict — not a classic contested beach assault. A prepared, heavily-defended opposed landing is not the primary envisioned case.
+- Positions are explicitly **temporary and mobile** ("shoot and scoot," the same survivability logic that already justifies HIMARS itself): emplace, complete the mission, displace before being targeted. A fixed base defended to the last man is closer to the failure mode this concept tries to avoid than the intent.
+- **Open question, not resolved here:** sustaining these distributed small positions logistically under contested conditions is one of the most publicly debated gaps in the EABO concept. Don't design around a tidy answer; flag it as a real constraint when it matters (e.g. ammunition/resupply modeling for an EAB scenario).
+
+This reframes the EAB entry in Bucket 1 below into three distinct scenario flavors rather than one.
+
+### Cross-boundary mission catalog
+
+Sea of Uncertainty already resolves the strategic/naval/missile layer; Always Faithful resolves platoon-scale ground and littoral tactical combat. Every mission or order type that could cross the boundary has to be assigned to exactly one of three buckets, or the contract stops being honest about who is actually deciding the outcome. This catalog exists so that adding a new mission type is a deliberate decision about which bucket it belongs in, not an accident of whichever side happened to implement it first.
+
+**Bucket 1 — Always Faithful resolves outright (ground/littoral tactical scenario types).** Sea of Uncertainty supplies the `BattleRequest`; Always Faithful plays the whole engagement and only the `BattleResult` goes back.
+
+- [x] Attack/seize an objective (Pass 12).
+- [ ] Defend a position (general).
+- [ ] Establish/occupy an EABO firing site (HIMARS/NMESIS or successor) — usually a permissive or lightly-opposed insertion per the doctrine note above, not a contested assault; success is what triggers the counter-lifecycle spawn of the operational battery in §6's Bucket 3.
+- [ ] Defend an EABO firing site once emplaced — the ground fight for the battery, not the missile shot itself; see the EABO fires roster entry in §8.
+- [ ] Displace/relocate an EABO firing site before it's targeted — a time-pressured extraction-and-move order, not a stand-and-fight scenario; failing to displace in time should be able to feed the "prior damage" pre-battle context in Bucket 3.
+- [ ] Counter-reconnaissance / hunt an enemy fires or sensor site (the mirror image of the above).
+- [ ] Raid (limited objective, planned withdrawal).
+- [ ] Security/screen for a flank, a fires node, or a logistics node.
+- [ ] Opposed or friendly beachhead/landing-zone defense.
+- [ ] Movement to contact / reconnaissance-in-force.
+- [ ] Urban or complex-terrain clearance.
+- [ ] Withdrawal/extraction under pressure.
+
+**Bucket 2 — Sea of Uncertainty resolves outright; Always Faithful never represents these directly, to keep its own scope honest.**
+
+- Ballistic/cruise missile strike resolution (launch, midcourse, terminal effect, intercept attempt).
+- Missile defense battery/radar engagement math.
+- Naval surface action, submarine warfare, air superiority/interdiction.
+- Strategic logistics and campaign-level attrition/reinforcement pooling.
+- The actual missile-vs-ship terminal effect of an EABO fires mission (Always Faithful only ever fights for control of the launcher, never simulates the shot).
+
+**Bucket 3 — cross-boundary. This is where new contract fields actually belong.**
+
+- [ ] *Pre-battle context, SOU → AF:* prior bombardment/strike effects (starting suppression/cohesion penalties, casualties, destroyed equipment) applied to the roster a `BattleRequest` imports, and objective/terrain pre-damage (cratering, reduced cover, blocked movement) at battle start.
+- [ ] *Supporting-fires budget, SOU → AF:* a small budget of off-map fire-support missions (naval gunfire, artillery, CAS, extended-range HIMARS counter-battery) attached to the request, each with an availability window, an effect/probability band, and a cooldown, resolved locally by Always Faithful with the same deterministic seeded-roll approach already used for direct fire. This is the Phase-appropriate substitute for a live call-for-fire loop between two running processes — real-time IPC stays a later stretch goal per the file-first boundary decision above, not a near-term ask.
+- [ ] *Battle outcome, AF → SOU:* EAB/firing-site survival status (captured/destroyed/held) as its own explicit field — the single fact Sea of Uncertainty needs before it lets that unit fire again strategically — alongside the per-unit survivor/casualty detail already listed below.
+- [ ] *Consumed support, AF → SOU:* fire-support missions actually expended against the budget granted above, reported back the same way ammunition/supply expenditure already is.
+- [ ] *Counter lifecycle triggers, AF → SOU:* some in-battle orders don't just change existing-unit stats, they should be able to bring a new capability into existence, or retire one, attached to the owning Battalion's counter per the echelon boundary above — establishing an EABO firing site operational, constructing a logistics/resupply node, or recovering/repairing captured equipment into a usable asset are all the same shape of event. Always Faithful should never invent *what kind* of counter/capability that is — Sea of Uncertainty owns that roster/data model. The `BattleRequest` instead carries a template or reference ID plus the in-battle condition that triggers it (e.g. "objective held at conclusion" or "this order completed"), and the `BattleResult` reports only whether the trigger fired, as a list of spawn/retire events scoped to the requesting Battalion — never a freeform new unit definition, and never below the Battalion.
+
+None of the exact field names above are final — they describe Always Faithful's semantic needs, not a schema either side has agreed to yet. Reconciling them against Sea of Uncertainty's actual data model is a joint pass, not something Always Faithful can finish alone.
 
 ### Versioned battle input
 
@@ -186,7 +262,7 @@ This table is a design reference, not a requirement to reproduce either game's e
   - engineer/breaching element;
   - logistics/resupply element;
   - UAS reconnaissance and one aviation support option;
-  - one littoral/anti-ship capability only if the tactical scale supports meaningful employment.
+  - an EABO extended-range fires element (HIMARS/NMESIS or a successor), represented only as a ground-defendable firing position — Always Faithful fights to hold or seize it, never simulates the missile-vs-ship shot itself (see the Bucket 1/Bucket 3 split in §6's cross-boundary mission catalog).
 - [ ] Represent task organization through parent formation plus attachments rather than a separate bespoke unit for every combination.
 - [ ] Define an opposing-force MVP roster of comparable tactical roles.
 - [ ] Research public, unclassified sources for capabilities and doctrine; document abstractions and avoid claims of training fidelity.
