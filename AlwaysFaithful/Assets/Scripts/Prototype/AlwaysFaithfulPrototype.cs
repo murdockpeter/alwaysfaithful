@@ -139,6 +139,9 @@ namespace AlwaysFaithful.Prototype
         private bool automatedReconRegression;
         private bool automatedReconCapture;
         private BattleRequest activeBattleRequest;
+        private int standaloneScenarioSeed;
+        private int? scenarioSeedOverride;
+        private bool automatedScenarioRegression;
         private string battleRequestError;
         private string campaignErrorTitle = "BATTLE REQUEST REJECTED";
         private string lastBattleResultPath;
@@ -222,6 +225,11 @@ namespace AlwaysFaithful.Prototype
             automatedSaveRestoreRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--save-restore-regression") >= 0;
             automatedSaveRestoreCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--save-restore-capture-path=", StringComparison.Ordinal));
             automatedFeedbackRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--feedback-regression") >= 0;
+            automatedScenarioRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--scenario-regression") >= 0;
+            string scenarioSeedArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--scenario-seed=", StringComparison.Ordinal));
+            scenarioSeedOverride = scenarioSeedArgument != null && int.TryParse(scenarioSeedArgument.Substring("--scenario-seed=".Length), out int parsedScenarioSeed) && parsedScenarioSeed > 0
+                ? parsedScenarioSeed
+                : (int?)null;
             fastEnemyAnimation = Array.IndexOf(Environment.GetCommandLineArgs(), "--fast-enemy") >= 0;
             string saveArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--save-path=", StringComparison.Ordinal));
             saveFilePath = saveArgument != null
@@ -347,12 +355,13 @@ namespace AlwaysFaithful.Prototype
             if (automatedSaveRestoreRegression) StartCoroutine(RunSaveRestoreRegression());
             if (automatedSaveRestoreCapture) StartCoroutine(RunSaveRestoreCapture());
             if (automatedFeedbackRegression) StartCoroutine(RunFeedbackRegression());
+            if (automatedScenarioRegression) StartCoroutine(RunScenarioRegression());
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
         private void Update()
         {
-            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedEnemyTurnRegression || automatedCoverRegression || automatedVictoryRegression || automatedReconRegression || automatedBattleContractRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || automatedEnemyTurnCapture || automatedResultCapture || automatedReconCapture || automatedCampaignCapture || automatedSaveRestoreRegression || automatedSaveRestoreCapture || automatedFeedbackRegression || mapTransitionActive) return;
+            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedEnemyTurnRegression || automatedCoverRegression || automatedVictoryRegression || automatedReconRegression || automatedBattleContractRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || automatedEnemyTurnCapture || automatedResultCapture || automatedReconCapture || automatedCampaignCapture || automatedSaveRestoreRegression || automatedSaveRestoreCapture || automatedFeedbackRegression || automatedScenarioRegression || mapTransitionActive) return;
             UpdateCamera();
             if (tacticalMode) UpdateTacticalPointer();
             else UpdatePointer();
@@ -1055,7 +1064,22 @@ namespace AlwaysFaithful.Prototype
                 overviewCameraDistance = cameraDistance;
             }
             CancelUnitInteraction();
-            string requestedId = TacticalBattlefieldExtractor.BuildBattlefieldId(parentCell.Coord, activeBattleRequest?.Seed ?? 0);
+
+            // A brand-new standalone battle (no BattleRequest, no save restore,
+            // and not simply re-entering a still-in-progress battle at the same
+            // hex) is this codebase's one deliberate exception to total
+            // determinism: roll a fresh scenario seed, so cover, posture,
+            // objective siting, turn limit, and enemy roster all vary battle to
+            // battle. Resuming an in-progress battle at the same hex must reuse
+            // the seed already in memory, or a Return-to-Island/re-enter round
+            // trip would silently reroll a live battle out from under the player.
+            bool sameHexInMemory = restore == null && tacticalBattlefield != null && tacticalBattlefield.ParentHex.Equals(parentCell.Coord);
+            bool resumingInProgress = sameHexInMemory && activeBattleRequest == null &&
+                tacticalObjective != null && tacticalObjective.Outcome == TacticalBattleOutcome.InProgress;
+            if (restore == null && activeBattleRequest == null && !resumingInProgress)
+                standaloneScenarioSeed = scenarioSeedOverride ?? UnityEngine.Random.Range(1, int.MaxValue);
+
+            string requestedId = TacticalBattlefieldExtractor.BuildBattlefieldId(parentCell.Coord, activeBattleRequest?.Seed ?? standaloneScenarioSeed);
             if (restore != null || tacticalBattlefield == null || tacticalBattlefield.BattlefieldId != requestedId)
                 BuildTacticalBattlefield(parentCell, restore);
             tacticalMode = true;
@@ -1109,7 +1133,11 @@ namespace AlwaysFaithful.Prototype
                 parentCell.Latitude,
                 (longitude, latitude) => elevation.SampleMetres(longitude, latitude),
                 (longitude, latitude) => coastline.ContainsLand(longitude, latitude),
-                activeBattleRequest?.Seed ?? 0);
+                activeBattleRequest?.Seed ?? standaloneScenarioSeed);
+            // Resync so EnterTacticalMap's next same-hex comparison never
+            // spuriously mismatches (covers restore, request-driven, and
+            // freshly-rolled cases alike).
+            standaloneScenarioSeed = tacticalBattlefield.Seed;
             if (restore != null)
             {
                 turnState.TurnNumber = restore.Turn.TurnNumber;
@@ -1272,10 +1300,12 @@ namespace AlwaysFaithful.Prototype
             else
             {
                 string turnLimitArgument = Array.Find(args, value => value.StartsWith("--turn-limit=", StringComparison.Ordinal));
-                turnLimit = turnLimitArgument != null &&
-                    int.TryParse(turnLimitArgument.Substring("--turn-limit=".Length), out int parsedLimit) && parsedLimit > 0
-                    ? parsedLimit
-                    : TacticalVictory.DefaultTurnLimit;
+                if (turnLimitArgument != null && int.TryParse(turnLimitArgument.Substring("--turn-limit=".Length), out int parsedLimit) && parsedLimit > 0)
+                    turnLimit = parsedLimit;
+                else if (activeBattleRequest != null)
+                    turnLimit = TacticalVictory.DefaultTurnLimit; // BattleRequest path: contract-frozen, never varied
+                else
+                    turnLimit = TacticalScenario.ChooseTurnLimit(tacticalBattlefield.BattlefieldId);
             }
 
             var enemyStarts = new List<HexCoord>();
@@ -1493,6 +1523,7 @@ namespace AlwaysFaithful.Prototype
             tacticalContacts.Clear();
             tacticalContactViews.Clear();
             tacticalEnemyWeapons.Clear();
+            var enemyMarkerLabels = new List<string>();
             if (restore != null)
             {
                 tacticalEnemyStates.AddRange(restore.EnemyUnits);
@@ -1504,9 +1535,18 @@ namespace AlwaysFaithful.Prototype
                 // restore-specific logic needed.
                 foreach (TacticalContactState contact in restore.Contacts)
                     tacticalContacts[contact.TargetId] = contact;
+                // A request-driven restore is always the legacy fixed [rifle,
+                // support] pair; a standalone restore's units were always named
+                // "pla-rifle-squad-N"/"pla-support-team-N" by the roster branch
+                // below (never overridden), so an ID prefix reliably recovers the role.
+                for (int index = 0; index < tacticalEnemyStates.Count; index++)
+                    enemyMarkerLabels.Add(activeBattleRequest != null
+                        ? (index == 1 ? "SUPPORT" : "RIFLE")
+                        : (tacticalEnemyStates[index].Id.StartsWith(TacticalScenario.SupportRole + "-", StringComparison.Ordinal) ? "SUPPORT" : "RIFLE"));
             }
-            else
+            else if (activeBattleRequest != null)
             {
+                // Unchanged legacy 2-unit path — the SOU-interop contract stays frozen.
                 var occupied = new HashSet<HexCoord> { tacticalUnitState.Position };
                 HexCoord riflePosition = FindObservationDeployment(TacticalVisibilityState.Observed, occupied);
                 occupied.Add(riflePosition);
@@ -1517,11 +1557,34 @@ namespace AlwaysFaithful.Prototype
                 tacticalEnemyStates.Add(new TacticalUnitState(supportId, supportDisplayName, supportPosition, 4));
                 foreach (TacticalUnitState enemy in tacticalEnemyStates)
                     tacticalEnemyWeapons.Add(enemy.Id, new TacticalWeaponState(enemy.Id + "-weapon", "Squad Small Arms", 6));
+                enemyMarkerLabels.Add("RIFLE");
+                enemyMarkerLabels.Add("SUPPORT");
             }
-            // Index-based rather than reference-comparing to a "support" local,
-            // since tacticalEnemyStates is already relied on elsewhere (result
-            // export, capture/regression code) to always be [rifle, support] in
-            // this fixed order, restored or freshly built.
+            else
+            {
+                // Standalone: a hash-driven roster of 1-3 units, first slot always
+                // the "main" rifle squad deployed at Observed range, the rest at
+                // Contact range, exactly like the legacy path's two
+                // FindObservationDeployment calls.
+                var occupied = new HashSet<HexCoord> { tacticalUnitState.Position };
+                List<string> roster = TacticalScenario.ChooseEnemyRoster(tacticalBattlefield.BattlefieldId);
+                var roleCounts = new Dictionary<string, int>();
+                for (int slot = 0; slot < roster.Count; slot++)
+                {
+                    string role = roster[slot];
+                    TacticalVisibilityState desired = slot == 0 ? TacticalVisibilityState.Observed : TacticalVisibilityState.Contact;
+                    HexCoord position = FindObservationDeployment(desired, occupied);
+                    occupied.Add(position);
+                    int perRoleIndex = (roleCounts.TryGetValue(role, out int existing) ? existing : 0) + 1;
+                    roleCounts[role] = perRoleIndex;
+                    string id = $"{role}-{perRoleIndex}";
+                    string displayName = role == TacticalScenario.SupportRole ? $"PLA Support Team {perRoleIndex}" : $"PLA Rifle Squad {perRoleIndex}";
+                    var enemy = new TacticalUnitState(id, displayName, position, 4);
+                    tacticalEnemyStates.Add(enemy);
+                    tacticalEnemyWeapons.Add(enemy.Id, new TacticalWeaponState(enemy.Id + "-weapon", "Squad Small Arms", 6));
+                    enemyMarkerLabels.Add(role == TacticalScenario.SupportRole ? "SUPPORT" : "RIFLE");
+                }
+            }
             for (int index = 0; index < tacticalEnemyStates.Count; index++)
             {
                 TacticalUnitState enemy = tacticalEnemyStates[index];
@@ -1530,7 +1593,7 @@ namespace AlwaysFaithful.Prototype
                 markerObject.transform.SetParent(tacticalRoot.transform, false);
                 markerObject.transform.position = LocalCounterPosition(enemy.Position) + Vector3.up * .03f;
                 ContactMarkerView marker = markerObject.AddComponent<ContactMarkerView>();
-                marker.Initialize(index == 1 ? "SUPPORT" : "RIFLE");
+                marker.Initialize(index < enemyMarkerLabels.Count ? enemyMarkerLabels[index] : "RIFLE");
                 tacticalContactViews.Add(enemy.Id, marker);
             }
         }
@@ -3485,6 +3548,10 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 yield break;
             }
+            // Pinned so the roster deterministically includes both an Observed-tier
+            // and a Contact-tier enemy (this test proves both presentation states
+            // render); a fresh random scenario could otherwise roll a 1-unit roster.
+            scenarioSeedOverride = 12345;
             EnterTacticalMap(FindHighReliefOperationalCell(), false);
             // This check proves the presentation pipeline can render every contact
             // state (detailed vs. uncertain) on a fixed scenario; it predates cover
@@ -3516,7 +3583,13 @@ namespace AlwaysFaithful.Prototype
             var snapshot = new TacticalObservationSnapshot { Contacts = new List<TacticalContactState>(tacticalContacts.Values) };
             string serialized = JsonUtility.ToJson(snapshot);
             TacticalObservationSnapshot restored = JsonUtility.FromJson<TacticalObservationSnapshot>(serialized);
-            if (tacticalContacts.Count != 2 || tacticalContactViews.Count != 2 || visibleMarkers < 1 || detailedFormations < 1 || uncertainGlyphs < 1 ||
+            // Standalone play now generates a 1-3 unit roster rather than always
+            // exactly 2 (Pass: randomized scenario generation); this test's own
+            // purpose is proving detailed/uncertain contact presentation, which
+            // is independent of the exact headcount, so it only bounds-checks
+            // the count rather than requiring the old fixed value.
+            if (tacticalContacts.Count < TacticalScenario.MinRosterSize || tacticalContacts.Count > TacticalScenario.MaxRosterSize ||
+                tacticalContactViews.Count != tacticalContacts.Count || visibleMarkers < 1 || detailedFormations < 1 || uncertainGlyphs < 1 ||
                 tacticalFormationView == null || tacticalFormationView.ManeuverElementCount != 3 ||
                 !tacticalFormationView.HasRecognitionStripe || !tacticalFormationView.HasCommandNode ||
                 tacticalFormationView.Affiliation != TacticalFormationAffiliation.Usmc ||
@@ -4696,9 +4769,9 @@ namespace AlwaysFaithful.Prototype
 
         private static bool ValidateFeedbackRules(out string failure)
         {
-            if (TacticalBattlefieldState.CurrentSchemaVersion != 9)
+            if (TacticalBattlefieldState.CurrentSchemaVersion != 10)
             {
-                failure = $"expected schema version 9 after adding ObjectiveEvents, got {TacticalBattlefieldState.CurrentSchemaVersion}";
+                failure = $"expected schema version 10, got {TacticalBattlefieldState.CurrentSchemaVersion}";
                 return false;
             }
             var battlefield = new TacticalBattlefieldState { BattlefieldId = "TEST" };
@@ -4813,6 +4886,125 @@ namespace AlwaysFaithful.Prototype
             }
 
             Debug.Log("ALWAYS_FAITHFUL_FEEDBACK_REGRESSION_OK");
+            Application.Quit(0);
+        }
+
+        private static bool ValidateScenarioRules(out string failure)
+        {
+            if (TacticalBattlefieldState.CurrentSchemaVersion != 10)
+            {
+                failure = $"expected schema version 10 after adding Seed, got {TacticalBattlefieldState.CurrentSchemaVersion}";
+                return false;
+            }
+            const string id = "TW-TEST-SCENARIO";
+            int limitA = TacticalScenario.ChooseTurnLimit(id);
+            int limitB = TacticalScenario.ChooseTurnLimit(id);
+            if (limitA != limitB || limitA < TacticalScenario.MinTurnLimit || limitA > TacticalScenario.MaxTurnLimit)
+            {
+                failure = $"turn limit not deterministic/bounded: {limitA} vs {limitB}";
+                return false;
+            }
+            List<string> rosterA = TacticalScenario.ChooseEnemyRoster(id);
+            List<string> rosterB = TacticalScenario.ChooseEnemyRoster(id);
+            if (rosterA.Count != rosterB.Count || rosterA.Count < TacticalScenario.MinRosterSize || rosterA.Count > TacticalScenario.MaxRosterSize ||
+                rosterA[0] != TacticalScenario.RifleRole)
+            {
+                failure = $"roster not deterministic/bounded or missing lead rifle squad: [{string.Join(",", rosterA)}]";
+                return false;
+            }
+            for (int index = 0; index < rosterA.Count; index++)
+                if (rosterA[index] != rosterB[index])
+                {
+                    failure = "roster not deterministic across calls";
+                    return false;
+                }
+            failure = null;
+            return true;
+        }
+
+        private IEnumerator RunScenarioRegression()
+        {
+            yield return null;
+            if (!ValidateScenarioRules(out string ruleFailure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_SCENARIO_REGRESSION_FAILED rules=" + ruleFailure);
+                Application.Quit(1);
+                yield break;
+            }
+
+            HexCellView parent = FindHighReliefOperationalCell();
+            EnterTacticalMap(parent, false);
+            string firstBattlefieldId = tacticalBattlefield.BattlefieldId;
+            int firstSeed = standaloneScenarioSeed;
+            int firstTurnLimit = tacticalObjective.TurnLimit;
+            var firstRoster = new List<string>();
+            foreach (TacticalUnitState enemy in tacticalEnemyStates) firstRoster.Add(enemy.Id);
+            if (firstSeed == 0 || firstBattlefieldId == TacticalBattlefieldExtractor.BuildBattlefieldId(parent.Coord, 0) ||
+                tacticalEnemyStates.Count < TacticalScenario.MinRosterSize || tacticalEnemyStates.Count > TacticalScenario.MaxRosterSize)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SCENARIO_REGRESSION_FAILED entropy point did not fire seed={firstSeed} battlefield={firstBattlefieldId} enemies={tacticalEnemyStates.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            // Return to Island mid-battle (still InProgress) then re-enter the SAME
+            // hex must reproduce the identical battlefield/turn-limit/roster, not reroll.
+            ReturnToIsland(false);
+            EnterTacticalMap(parent, false);
+            var resumedRoster = new List<string>();
+            foreach (TacticalUnitState enemy in tacticalEnemyStates) resumedRoster.Add(enemy.Id);
+            bool rosterMatches = resumedRoster.Count == firstRoster.Count;
+            if (rosterMatches)
+                for (int index = 0; index < resumedRoster.Count; index++)
+                    if (resumedRoster[index] != firstRoster[index]) rosterMatches = false;
+            if (tacticalBattlefield.BattlefieldId != firstBattlefieldId || standaloneScenarioSeed != firstSeed ||
+                tacticalObjective.TurnLimit != firstTurnLimit || !rosterMatches)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SCENARIO_REGRESSION_FAILED resume rerolled battlefield={tacticalBattlefield.BattlefieldId}/{firstBattlefieldId} seed={standaloneScenarioSeed}/{firstSeed} limit={tacticalObjective.TurnLimit}/{firstTurnLimit} rosterMatches={rosterMatches}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            // Entering a DIFFERENT hex must reroll (not reuse the previous seed).
+            HexCellView otherParent = FindCoastalOperationalCell();
+            if (!otherParent.Coord.Equals(parent.Coord))
+            {
+                EnterTacticalMap(otherParent, false);
+                if (standaloneScenarioSeed == firstSeed)
+                {
+                    Debug.LogError("ALWAYS_FAITHFUL_SCENARIO_REGRESSION_FAILED different hex reused the previous seed");
+                    Application.Quit(1);
+                    yield break;
+                }
+                ReturnToIsland(false);
+            }
+
+            // A BattleRequest-driven entry must still produce exactly the legacy
+            // 2-unit roster and TacticalVictory.DefaultTurnLimit when no override is set.
+            string scratchDirectory = Path.Combine(Path.GetTempPath(), "AlwaysFaithfulScenarioRegression");
+            Directory.CreateDirectory(scratchDirectory);
+            string requestPath = Path.Combine(scratchDirectory, "request.json");
+            var request = new BattleRequest
+            {
+                RequestId = "scenario-regression-request-1",
+                CampaignId = "scenario-regression-campaign-1",
+                Seed = 777,
+                TheaterHex = parent.Coord,
+                OutputPath = Path.Combine(scratchDirectory, "result.json")
+            };
+            File.WriteAllText(requestPath, JsonUtility.ToJson(request));
+            TryLoadBattleRequest(requestPath);
+            if (battleRequestError != null || activeBattleRequest == null ||
+                tacticalEnemyStates.Count != 2 || tacticalEnemyStates[0].Id != "pla-rifle-squad-1" || tacticalEnemyStates[1].Id != "pla-support-team-1" ||
+                tacticalObjective.TurnLimit != TacticalVictory.DefaultTurnLimit)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SCENARIO_REGRESSION_FAILED battle-request path altered enemies={tacticalEnemyStates.Count} limit={tacticalObjective.TurnLimit}");
+                Application.Quit(1);
+                yield break;
+            }
+            DismissCampaignBriefing();
+
+            Debug.Log($"ALWAYS_FAITHFUL_SCENARIO_REGRESSION_OK seed={firstSeed} turnLimit={firstTurnLimit} roster=[{string.Join(",", firstRoster)}]");
             Application.Quit(0);
         }
 

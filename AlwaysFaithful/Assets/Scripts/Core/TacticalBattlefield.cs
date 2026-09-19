@@ -19,10 +19,11 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 9;
+        public const int CurrentSchemaVersion = 10;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;
+        public int Seed;
         public HexCoord ParentHex;
         public int Width;
         public int Height;
@@ -87,6 +88,7 @@ namespace AlwaysFaithful.Core
             var battlefield = new TacticalBattlefieldState
             {
                 BattlefieldId = BuildBattlefieldId(parentHex, seed),
+                Seed = seed,
                 ParentHex = parentHex,
                 Width = DefaultWidth,
                 Height = DefaultHeight,

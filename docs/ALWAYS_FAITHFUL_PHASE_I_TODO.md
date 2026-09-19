@@ -132,6 +132,7 @@ Complete these in order unless a discovered dependency requires a documented reo
 - [ ] Add graphics presets, UI scaling, color-safe overlays, reduced motion, animation speed, and remappable essential controls.
 - [x] Save and restore an in-progress standalone battle.
 - [x] Ensure every important action has visible feedback and an event-log explanation.
+- [x] Add randomized scenario generation for standalone play, so no two battles at a hex play the same.
 - [ ] Run a clean-machine Windows build test and archive the exact executable plus test logs.
 - [ ] Conduct at least three no-instruction playtests and record confusion, misclicks, and unreadable states.
 - [ ] Resolve all blocking and high-severity findings before calling Phase I complete.
