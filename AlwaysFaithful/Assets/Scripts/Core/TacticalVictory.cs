@@ -9,6 +9,20 @@ namespace AlwaysFaithful.Core
         Defend
     }
 
+    // Standalone-only mission variety layered on top of Posture (which now only
+    // means "which hex-siting shape ChooseObjective uses" — Attack-shaped or
+    // Defend-shaped). A BattleRequest-driven battle only ever sets this to a
+    // plain Attack/Defend mirror of Posture; the frozen SOU-interop contract
+    // never rolls or accepts a new mission type.
+    public enum TacticalMissionType
+    {
+        Attack,
+        Defend,
+        Raid,
+        ReconInForce,
+        Withdrawal
+    }
+
     public enum TacticalBattleOutcome
     {
         InProgress,
@@ -23,11 +37,14 @@ namespace AlwaysFaithful.Core
     {
         public HexCoord ObjectiveHex;
         public TacticalPosture Posture;
+        public TacticalMissionType MissionType = TacticalMissionType.Attack;
         public int TurnLimit;
         public int BattleStartTurn;
         public TacticalBattleOutcome Outcome = TacticalBattleOutcome.InProgress;
         public int OutcomeTurn;
         public string OutcomeSummary;
+        public bool RaidObjectiveAchieved;
+        public List<string> ObservedEnemyIds = new List<string>();
     }
 
     [Serializable]
@@ -72,9 +89,37 @@ namespace AlwaysFaithful.Core
                 return TacticalBattleOutcome.UsmcVictory;
             }
 
+            if (objective.MissionType == TacticalMissionType.Raid)
+            {
+                if (!objective.RaidObjectiveAchieved && enemies != null && enemies.Count > 0 &&
+                    ReducedCount(enemies) * 2 >= enemies.Count)
+                    objective.RaidObjectiveAchieved = true;
+                if (objective.RaidObjectiveAchieved)
+                {
+                    summary = "Raid objective achieved: PLA element strength broken.";
+                    return TacticalBattleOutcome.UsmcVictory;
+                }
+            }
+            else if (objective.MissionType == TacticalMissionType.ReconInForce)
+            {
+                if (enemies != null && enemies.Count > 0 && objective.ObservedEnemyIds.Count >= enemies.Count)
+                {
+                    summary = "Enemy roster fully identified.";
+                    return TacticalBattleOutcome.UsmcVictory;
+                }
+            }
+
             int turnsElapsed = currentTurn - objective.BattleStartTurn;
             if (turnsElapsed >= objective.TurnLimit)
             {
+                if (objective.MissionType == TacticalMissionType.Withdrawal)
+                {
+                    // Reaching this branch already proves the platoon survived
+                    // (usmcReduced would have returned UsmcDefeat above otherwise);
+                    // withdrawal success never depends on holding any hex.
+                    summary = "Platoon withdrew intact.";
+                    return TacticalBattleOutcome.UsmcVictory;
+                }
                 bool usmcControls = usmc != null && board.TryGetValue(objective.ObjectiveHex, out TacticalMovementCell cell) &&
                     cell.OccupantId == usmc.Id;
                 if (usmcControls)
@@ -90,12 +135,33 @@ namespace AlwaysFaithful.Core
             return TacticalBattleOutcome.InProgress;
         }
 
+        // Tracks cumulative recon-in-force progress — called once per turn
+        // handback alongside Evaluate, since fog can regress an enemy back to
+        // Hidden after a stale track expires; achievement should not un-happen.
+        public static void TrackObservation(TacticalObjectiveState objective, IReadOnlyDictionary<string, TacticalContactState> contacts)
+        {
+            if (objective == null || objective.MissionType != TacticalMissionType.ReconInForce || contacts == null) return;
+            foreach (TacticalContactState contact in contacts.Values)
+            {
+                if (contact.State < TacticalVisibilityState.Identified) continue;
+                if (!objective.ObservedEnemyIds.Contains(contact.TargetId)) objective.ObservedEnemyIds.Add(contact.TargetId);
+            }
+        }
+
         private static bool AllReduced(IReadOnlyList<TacticalUnitState> units)
         {
             if (units == null || units.Count == 0) return false;
             foreach (TacticalUnitState unit in units)
                 if (unit.CombatStatus != TacticalCombatStatus.Reduced) return false;
             return true;
+        }
+
+        private static int ReducedCount(IReadOnlyList<TacticalUnitState> units)
+        {
+            int count = 0;
+            foreach (TacticalUnitState unit in units)
+                if (unit.CombatStatus == TacticalCombatStatus.Reduced) count++;
+            return count;
         }
 
         // Defend holds the same hex USMC already deploys on. Attack picks the
@@ -143,6 +209,14 @@ namespace AlwaysFaithful.Core
 
         public static TacticalPosture ChoosePosture(string battlefieldId)
             => ObjectiveRoll(battlefieldId, default) % 2 == 0 ? TacticalPosture.Attack : TacticalPosture.Defend;
+
+        // Raid and ReconInForce both site an objective the same way Attack does
+        // (farthest passable hex); Withdrawal sites like Defend (the platoon's
+        // own start hex) since it never advances toward new ground.
+        public static TacticalPosture SitingShapeFor(TacticalMissionType missionType)
+            => missionType == TacticalMissionType.Defend || missionType == TacticalMissionType.Withdrawal
+                ? TacticalPosture.Defend
+                : TacticalPosture.Attack;
 
         // Mirrors the FNV-seed + coordinate-prime-xorshift idiom already used by
         // TacticalBattlefieldExtractor's cover generation and TacticalEnemyTurn's

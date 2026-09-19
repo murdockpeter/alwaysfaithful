@@ -133,17 +133,17 @@ Sea of Uncertainty already resolves the strategic/naval/missile layer; Always Fa
 **Bucket 1 — Always Faithful resolves outright (ground/littoral tactical scenario types).** Sea of Uncertainty supplies the `BattleRequest`; Always Faithful plays the whole engagement and only the `BattleResult` goes back.
 
 - [x] Attack/seize an objective (Pass 12).
-- [ ] Defend a position (general).
+- [x] Defend a position (general) (Pass 12).
 - [ ] Establish/occupy an EABO firing site (HIMARS/NMESIS or successor) — usually a permissive or lightly-opposed insertion per the doctrine note above, not a contested assault; success is what triggers the counter-lifecycle spawn of the operational battery in §6's Bucket 3.
 - [ ] Defend an EABO firing site once emplaced — the ground fight for the battery, not the missile shot itself; see the EABO fires roster entry in §8.
 - [ ] Displace/relocate an EABO firing site before it's targeted — a time-pressured extraction-and-move order, not a stand-and-fight scenario; failing to displace in time should be able to feed the "prior damage" pre-battle context in Bucket 3.
 - [ ] Counter-reconnaissance / hunt an enemy fires or sensor site (the mirror image of the above).
-- [ ] Raid (limited objective, planned withdrawal).
+- [x] Raid (limited objective, planned withdrawal) — standalone-only mission type, objective achieved by breaking at least half the opposing roster rather than by holding ground.
 - [ ] Security/screen for a flank, a fires node, or a logistics node.
 - [ ] Opposed or friendly beachhead/landing-zone defense.
-- [ ] Movement to contact / reconnaissance-in-force.
+- [x] Movement to contact / reconnaissance-in-force — standalone-only "ReconInForce" mission type, won by identifying the full opposing roster.
 - [ ] Urban or complex-terrain clearance.
-- [ ] Withdrawal/extraction under pressure.
+- [x] Withdrawal/extraction under pressure — standalone-only "Withdrawal" mission type, won by platoon survival to the turn limit regardless of hex control.
 
 **Bucket 2 — Sea of Uncertainty resolves outright; Always Faithful never represents these directly, to keep its own scope honest.**
 

@@ -133,6 +133,7 @@ Complete these in order unless a discovered dependency requires a documented reo
 - [x] Save and restore an in-progress standalone battle.
 - [x] Ensure every important action has visible feedback and an event-log explanation.
 - [x] Add randomized scenario generation for standalone play, so no two battles at a hex play the same.
+- [x] Add new mission types (Raid, Reconnaissance-in-Force, Withdrawal) and a persistent standalone Battalion status/campaign layer.
 - [ ] Run a clean-machine Windows build test and archive the exact executable plus test logs.
 - [ ] Conduct at least three no-instruction playtests and record confusion, misclicks, and unreadable states.
 - [ ] Resolve all blocking and high-severity findings before calling Phase I complete.
@@ -142,8 +143,9 @@ Complete these in order unless a discovered dependency requires a documented reo
 - multiple tactical maps and a public map editor;
 - full contemporary USMC and opposing-force rosters;
 - vehicles, transport, aviation, naval gunfire, detailed logistics, EW, drones, smoke, engineering, and amphibious movement;
-- campaign progression inside Always Faithful;
 - multiplayer;
 - authoritative 250 m terrain coverage for the entire island at once.
+
+Campaign progression inside Always Faithful, previously listed here, is now implemented in a lightweight form for standalone play (persistent Battalion status carrying attrition across generated scenarios) — removed from this deferred list accordingly.
 
 These are not rejected features. They are deferred so Phase I can prove the core decision loop, presentation language, deterministic architecture, and Sea of Uncertainty handoff first.

@@ -19,7 +19,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 10;
+        public const int CurrentSchemaVersion = 11;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;

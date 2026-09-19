@@ -2,12 +2,14 @@ using System.Collections.Generic;
 
 namespace AlwaysFaithful.Core
 {
-    // Standalone-only scenario variability: turn limit and enemy roster, both
-    // hashed from BattlefieldId exactly like TacticalVictory.ObjectiveRoll and
-    // TacticalBattlefieldExtractor's cover generation, so a given battlefield
-    // always rerolls the same way. Sequences 1-4 are cover/built-up generation
-    // and 5 is ObjectiveRoll's tie-break; 6+ are reserved here so none of these
-    // rolls correlate with cover, posture, or objective siting.
+    // Standalone-only scenario variability: turn limit, enemy roster, and
+    // mission type, all hashed from BattlefieldId exactly like
+    // TacticalVictory.ObjectiveRoll and TacticalBattlefieldExtractor's cover
+    // generation, so a given battlefield always rerolls the same way.
+    // Sequences 1-4 are cover/built-up generation and 5 is ObjectiveRoll's
+    // tie-break. Within this file: 6=turn limit, 7=roster count, 9-10=roster
+    // slots 1-2 (ChooseEnemyRoster's loop starts at slot=1, so 8+1..8+2),
+    // 11=mission type; 12+ still reserved.
     public static class TacticalScenario
     {
         public const int MinTurnLimit = 5;
@@ -30,6 +32,16 @@ namespace AlwaysFaithful.Core
             for (int slot = 1; slot < count; slot++)
                 roster.Add(ScenarioRoll(battlefieldId, 8 + slot) % 2 == 0 ? RifleRole : SupportRole);
             return roster;
+        }
+
+        public static TacticalMissionType ChooseMissionType(string battlefieldId)
+        {
+            uint roll = (uint)ScenarioRoll(battlefieldId, 11) % 100u;
+            if (roll < 35) return TacticalMissionType.Attack;
+            if (roll < 70) return TacticalMissionType.Defend;
+            if (roll < 80) return TacticalMissionType.Raid;
+            if (roll < 90) return TacticalMissionType.ReconInForce;
+            return TacticalMissionType.Withdrawal;
         }
 
         // Mirrors TacticalVictory.ObjectiveRoll's seed + xorshift idiom.
