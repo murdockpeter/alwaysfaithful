@@ -131,7 +131,7 @@ Complete these in order unless a discovered dependency requires a documented reo
 - [ ] Profile overview and tactical maps on the target Windows hardware; establish frame-time, memory, load-time, and draw-call budgets.
 - [ ] Add graphics presets, UI scaling, color-safe overlays, reduced motion, animation speed, and remappable essential controls.
 - [x] Save and restore an in-progress standalone battle.
-- [ ] Ensure every important action has visible feedback and an event-log explanation.
+- [x] Ensure every important action has visible feedback and an event-log explanation.
 - [ ] Run a clean-machine Windows build test and archive the exact executable plus test logs.
 - [ ] Conduct at least three no-instruction playtests and record confusion, misclicks, and unreadable states.
 - [ ] Resolve all blocking and high-severity findings before calling Phase I complete.

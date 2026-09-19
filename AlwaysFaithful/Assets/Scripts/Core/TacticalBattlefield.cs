@@ -19,7 +19,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 8;
+        public const int CurrentSchemaVersion = 9;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;
@@ -42,6 +42,7 @@ namespace AlwaysFaithful.Core
         public List<TacticalReactionEvent> ReactionEvents = new List<TacticalReactionEvent>();
         public List<TacticalEnemyActionEvent> EnemyActionEvents = new List<TacticalEnemyActionEvent>();
         public List<TacticalReconEvent> ReconEvents = new List<TacticalReconEvent>();
+        public List<TacticalObjectiveEvent> ObjectiveEvents = new List<TacticalObjectiveEvent>();
         public List<TacticalReconMarker> ActiveReconMarkers = new List<TacticalReconMarker>();
         public TacticalObjectiveState Objective;
 

@@ -129,6 +129,7 @@ namespace AlwaysFaithful.Prototype
         private bool automatedResultCapture;
         private TacticalObjectiveState tacticalObjective;
         private LineRenderer tacticalObjectiveRing;
+        private bool? tacticalObjectiveControlledByUsmc;
         private bool resultScreenActive;
         private float resultScreenOpacity;
         private GUIStyle resultHeadlineStyle;
@@ -149,6 +150,7 @@ namespace AlwaysFaithful.Prototype
         private bool hasSavedBattle;
         private bool automatedSaveRestoreRegression;
         private bool automatedSaveRestoreCapture;
+        private bool automatedFeedbackRegression;
         private bool tacticalReactionActive;
         private bool tacticalReactionHalted;
         private string tacticalReactionBannerText;
@@ -219,6 +221,7 @@ namespace AlwaysFaithful.Prototype
             automatedCampaignCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--campaign-capture-path=", StringComparison.Ordinal));
             automatedSaveRestoreRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--save-restore-regression") >= 0;
             automatedSaveRestoreCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--save-restore-capture-path=", StringComparison.Ordinal));
+            automatedFeedbackRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--feedback-regression") >= 0;
             fastEnemyAnimation = Array.IndexOf(Environment.GetCommandLineArgs(), "--fast-enemy") >= 0;
             string saveArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--save-path=", StringComparison.Ordinal));
             saveFilePath = saveArgument != null
@@ -343,12 +346,13 @@ namespace AlwaysFaithful.Prototype
             if (automatedCampaignCapture) StartCoroutine(CaptureCampaignScreenshotWhenRequested());
             if (automatedSaveRestoreRegression) StartCoroutine(RunSaveRestoreRegression());
             if (automatedSaveRestoreCapture) StartCoroutine(RunSaveRestoreCapture());
+            if (automatedFeedbackRegression) StartCoroutine(RunFeedbackRegression());
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
         private void Update()
         {
-            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedEnemyTurnRegression || automatedCoverRegression || automatedVictoryRegression || automatedReconRegression || automatedBattleContractRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || automatedEnemyTurnCapture || automatedResultCapture || automatedReconCapture || automatedCampaignCapture || automatedSaveRestoreRegression || automatedSaveRestoreCapture || mapTransitionActive) return;
+            if (automatedCapture || automatedMovementRegression || automatedTacticalRegression || automatedTacticalMovementRegression || automatedLosRegression || automatedObservationRegression || automatedFireRegression || automatedSuppressionRegression || automatedReactionRegression || automatedEnemyTurnRegression || automatedCoverRegression || automatedVictoryRegression || automatedReconRegression || automatedBattleContractRegression || automatedTacticalCapture || automatedLosCapture || automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture || automatedEnemyTurnCapture || automatedResultCapture || automatedReconCapture || automatedCampaignCapture || automatedSaveRestoreRegression || automatedSaveRestoreCapture || automatedFeedbackRegression || mapTransitionActive) return;
             UpdateCamera();
             if (tacticalMode) UpdateTacticalPointer();
             else UpdatePointer();
@@ -923,6 +927,7 @@ namespace AlwaysFaithful.Prototype
             campaignErrorTitle = title;
             campaignBriefingActive = true;
             StartCoroutine(FadeCampaignBriefing(0f, 1f, .35f));
+            tacticalAudio.Play(TacticalSound.OrderCancel);
             Debug.LogWarning("ALWAYS_FAITHFUL_BATTLE_REQUEST_REJECTED " + message);
         }
 
@@ -986,11 +991,13 @@ namespace AlwaysFaithful.Prototype
                 File.Move(tempPath, outputPath);
                 if (outputPath == saveFilePath) hasSavedBattle = true;
                 tacticalOrderFeedback = "BATTLE SAVED";
+                tacticalAudio.Play(TacticalSound.OrderConfirm);
                 Debug.Log($"ALWAYS_FAITHFUL_BATTLE_SAVED path={outputPath} battlefield={tacticalBattlefield.BattlefieldId} turn={turnState.TurnNumber} sequence={tacticalEventSequence}");
             }
             catch (Exception exception)
             {
                 tacticalOrderFeedback = "SAVE FAILED";
+                tacticalAudio.Play(TacticalSound.OrderCancel);
                 Debug.LogError($"ALWAYS_FAITHFUL_BATTLE_SAVE_FAILED path={outputPath} error={exception.Message}");
             }
         }
@@ -1024,6 +1031,7 @@ namespace AlwaysFaithful.Prototype
                 return false;
             }
 
+            tacticalAudio.Play(TacticalSound.MapTransition);
             EnterTacticalMap(parentCell, false, state);
             Debug.Log($"ALWAYS_FAITHFUL_BATTLE_RESTORED path={path} battlefield={state.Battlefield.BattlefieldId} turn={state.Turn.TurnNumber}");
             return true;
@@ -1317,6 +1325,7 @@ namespace AlwaysFaithful.Prototype
 
         private void BuildTacticalObjectiveMarker(HexCoord hex)
         {
+            tacticalObjectiveControlledByUsmc = null;
             HexCellView markerCell = localCells[hex];
             GameObject ringObject = new GameObject("Objective Marker");
             ringObject.layer = LayerMask.NameToLayer("Ignore Raycast");
@@ -1344,6 +1353,22 @@ namespace AlwaysFaithful.Prototype
             Color color = usmcControls ? new Color(.32f, .92f, .52f, .94f) : new Color(.98f, .73f, .19f, .92f);
             tacticalObjectiveRing.startColor = color;
             tacticalObjectiveRing.endColor = color;
+            if (tacticalObjectiveControlledByUsmc.HasValue && tacticalObjectiveControlledByUsmc.Value != usmcControls)
+            {
+                var objectiveEvent = new TacticalObjectiveEvent
+                {
+                    Sequence = ++tacticalEventSequence,
+                    BattlefieldId = tacticalBattlefield.BattlefieldId,
+                    Turn = turnState.TurnNumber,
+                    Hex = tacticalObjective.ObjectiveHex,
+                    ControlledByUsmc = usmcControls
+                };
+                tacticalBattlefield.ObjectiveEvents.Add(objectiveEvent);
+                tacticalOrderFeedback = usmcControls ? "OBJECTIVE SECURED" : "OBJECTIVE LOST";
+                tacticalAudio.Play(usmcControls ? TacticalSound.OrderConfirm : TacticalSound.OrderCancel);
+                Debug.Log($"ALWAYS_FAITHFUL_OBJECTIVE_EVENT sequence={objectiveEvent.Sequence} hex={objectiveEvent.Hex} controlled={objectiveEvent.ControlledByUsmc}");
+            }
+            tacticalObjectiveControlledByUsmc = usmcControls;
         }
 
         private void BuildTacticalUnit(TacticalBattleSaveState restore = null)
@@ -1770,12 +1795,26 @@ namespace AlwaysFaithful.Prototype
 
         private bool TryIssueTacticalFire(HexCoord targetPosition)
         {
-            if (!tacticalFirePlanning || tacticalFirePreview == null || !tacticalFirePreview.IsValid ||
-                !tacticalFirePreview.TargetPosition.Equals(targetPosition)) return false;
+            if (!tacticalFirePlanning) return false;
+            if (tacticalFirePreview == null || !tacticalFirePreview.TargetPosition.Equals(targetPosition) || !tacticalFirePreview.IsValid)
+            {
+                tacticalOrderFeedback = tacticalFirePreview != null && tacticalFirePreview.TargetPosition.Equals(targetPosition)
+                    ? tacticalFirePreview.RejectionReason
+                    : "Target not previewed — hover before firing";
+                if (localCells.TryGetValue(targetPosition, out HexCellView rejectedFireCell)) rejectedFireCell.SetInvalid(true);
+                tacticalAudio.Play(TacticalSound.OrderCancel);
+                return false;
+            }
             int sequence = tacticalEventSequence + 1;
             int seed = TacticalDirectFire.CreateSeed(tacticalBattlefield.BattlefieldId, turnState.TurnNumber, sequence);
             TacticalFireEvent fireEvent = TacticalDirectFire.Resolve(tacticalFirePreview, tacticalWeapon, seed);
-            if (fireEvent.Outcome == TacticalFireOutcome.Rejected || !tacticalUnitState.TrySpendActionPoints(TacticalDirectFire.ActionPointCost)) return false;
+            if (fireEvent.Outcome == TacticalFireOutcome.Rejected || !tacticalUnitState.TrySpendActionPoints(TacticalDirectFire.ActionPointCost))
+            {
+                tacticalOrderFeedback = fireEvent.Outcome == TacticalFireOutcome.Rejected ? "No ammunition remaining" : "Insufficient AP to fire";
+                if (localCells.TryGetValue(targetPosition, out HexCellView rejectedFireCell)) rejectedFireCell.SetInvalid(true);
+                tacticalAudio.Play(TacticalSound.OrderCancel);
+                return false;
+            }
             fireEvent.Sequence = ++tacticalEventSequence;
             fireEvent.BattlefieldId = tacticalBattlefield.BattlefieldId;
             fireEvent.Turn = turnState.TurnNumber;
@@ -1836,8 +1875,20 @@ namespace AlwaysFaithful.Prototype
         {
             if (!tacticalReconPlanning) return false;
             int range = HexCoord.Distance(tacticalUnitState.Position, target);
-            if (range > TacticalRecon.MaximumRangeHexes || !tacticalUnitState.TrySpendActionPoints(TacticalRecon.ActionPointCost))
+            if (range > TacticalRecon.MaximumRangeHexes)
+            {
+                tacticalOrderFeedback = $"RECON • {range} hex exceeds {TacticalRecon.MaximumRangeHexes}-hex range";
+                if (localCells.TryGetValue(target, out HexCellView rejectedReconCell)) rejectedReconCell.SetInvalid(true);
+                tacticalAudio.Play(TacticalSound.OrderCancel);
                 return false;
+            }
+            if (!tacticalUnitState.TrySpendActionPoints(TacticalRecon.ActionPointCost))
+            {
+                tacticalOrderFeedback = "Insufficient AP for RECON";
+                if (localCells.TryGetValue(target, out HexCellView rejectedReconCell)) rejectedReconCell.SetInvalid(true);
+                tacticalAudio.Play(TacticalSound.OrderCancel);
+                return false;
+            }
 
             TacticalReconMarker marker = null;
             foreach (TacticalReconMarker existing in tacticalReconMarkers)
@@ -1910,6 +1961,7 @@ namespace AlwaysFaithful.Prototype
                 if (marker.TurnsRemaining > 0) continue;
                 tacticalReconMarkers.RemoveAt(index);
                 tacticalBattlefield.ActiveReconMarkers.Remove(marker);
+                tacticalAudio.Play(TacticalSound.ContactLost);
                 if (tacticalReconRings.TryGetValue(marker.Hex, out LineRenderer ring) && ring != null) Destroy(ring.gameObject);
                 tacticalReconRings.Remove(marker.Hex);
             }
@@ -2842,25 +2894,39 @@ namespace AlwaysFaithful.Prototype
             resultScreenOpacity = to;
         }
 
+        private string UnitDisplayName(string id)
+        {
+            if (tacticalUnitState != null && tacticalUnitState.Id == id) return tacticalUnitState.DisplayName;
+            TacticalUnitState enemy = tacticalEnemyStates.Find(unit => unit.Id == id);
+            return enemy != null ? enemy.DisplayName : id;
+        }
+
         private List<string> BuildTacticalEventLog(int maximumEntries)
         {
             var entries = new List<(int Sequence, string Line)>();
             foreach (TacticalMovementEvent movement in tacticalBattlefield.MovementEvents)
-                entries.Add((movement.Sequence, $"MOVE • {movement.UnitId} {movement.Origin}→{movement.Destination} • {movement.Outcome}"));
+            {
+                string detailSuffix = string.IsNullOrEmpty(movement.Detail) ? string.Empty : $" — {movement.Detail}";
+                entries.Add((movement.Sequence, $"MOVE • {UnitDisplayName(movement.UnitId)} {movement.Origin}→{movement.Destination} • {movement.Outcome}{detailSuffix}"));
+            }
             foreach (TacticalFireEvent fire in tacticalBattlefield.FireEvents)
-                entries.Add((fire.Sequence, $"FIRE • T{fire.Turn} • {fire.AttackerId}→{fire.TargetId} • {fire.Outcome} ({fire.HitChance}% hit)"));
+                entries.Add((fire.Sequence, $"FIRE • T{fire.Turn} • {UnitDisplayName(fire.AttackerId)}→{UnitDisplayName(fire.TargetId)} • {fire.Outcome} ({fire.HitChance}% hit)"));
             foreach (TacticalSuppressionEvent suppression in tacticalBattlefield.SuppressionEvents)
-                entries.Add((suppression.Sequence, $"SUPPRESSION • T{suppression.Turn} • {suppression.UnitId} {suppression.StatusBefore}→{suppression.StatusAfter} ({suppression.Cause})"));
+                entries.Add((suppression.Sequence, $"SUPPRESSION • T{suppression.Turn} • {UnitDisplayName(suppression.UnitId)} {suppression.StatusBefore}→{suppression.StatusAfter} ({suppression.Cause})"));
             foreach (TacticalReactionEvent reaction in tacticalBattlefield.ReactionEvents)
-                entries.Add((reaction.Sequence, $"REACTION • T{reaction.Turn} • {reaction.ReactorId}→{reaction.MoverId} • {reaction.Outcome} • {reaction.Resolution}"));
+                entries.Add((reaction.Sequence, $"REACTION • T{reaction.Turn} • {UnitDisplayName(reaction.ReactorId)}→{UnitDisplayName(reaction.MoverId)} • {reaction.Outcome} • {reaction.Resolution}"));
             foreach (TacticalEnemyActionEvent enemyAction in tacticalBattlefield.EnemyActionEvents)
                 entries.Add((enemyAction.Sequence, $"PLA • T{enemyAction.Turn} • {enemyAction.Summary}"));
             foreach (TacticalReconEvent recon in tacticalBattlefield.ReconEvents)
-                entries.Add((recon.Sequence, $"RECON • T{recon.Turn} • {recon.UnitId} tasked {recon.Hex} ({recon.DurationTurns} turns)"));
+                entries.Add((recon.Sequence, $"RECON • T{recon.Turn} • {UnitDisplayName(recon.UnitId)} tasked {recon.Hex} ({recon.DurationTurns} turns)"));
+            foreach (TacticalObjectiveEvent objectiveEvent in tacticalBattlefield.ObjectiveEvents)
+                entries.Add((objectiveEvent.Sequence, $"OBJECTIVE • T{objectiveEvent.Turn} • {objectiveEvent.Hex} {(objectiveEvent.ControlledByUsmc ? "secured" : "lost")} by USMC"));
             entries.Sort((a, b) => a.Sequence.CompareTo(b.Sequence));
             var lines = new List<string>();
             int start = Mathf.Max(0, entries.Count - maximumEntries);
             for (int index = start; index < entries.Count; index++) lines.Add(entries[index].Line);
+            if (tacticalObjective != null && tacticalObjective.Outcome != TacticalBattleOutcome.InProgress)
+                lines.Add($"RESULT • T{tacticalObjective.OutcomeTurn} • {tacticalObjective.OutcomeSummary}");
             return lines;
         }
 
@@ -3965,7 +4031,9 @@ namespace AlwaysFaithful.Prototype
             }
 
             int mergedEventCount = tacticalBattlefield.MovementEvents.Count + tacticalBattlefield.FireEvents.Count +
-                tacticalBattlefield.SuppressionEvents.Count + tacticalBattlefield.ReactionEvents.Count + tacticalBattlefield.EnemyActionEvents.Count;
+                tacticalBattlefield.SuppressionEvents.Count + tacticalBattlefield.ReactionEvents.Count + tacticalBattlefield.EnemyActionEvents.Count +
+                tacticalBattlefield.ReconEvents.Count + tacticalBattlefield.ObjectiveEvents.Count +
+                (tacticalObjective.Outcome != TacticalBattleOutcome.InProgress ? 1 : 0);
             List<string> log = BuildTacticalEventLog(int.MaxValue);
             if (log.Count != mergedEventCount)
             {
@@ -4623,6 +4691,128 @@ namespace AlwaysFaithful.Prototype
             Destroy(target);
             Destroy(image);
             Debug.Log($"ALWAYS_FAITHFUL_SAVE_RESTORE_CAPTURED {path} battlefield={tacticalBattlefield.BattlefieldId} turn={turnState.TurnNumber}");
+            Application.Quit(0);
+        }
+
+        private static bool ValidateFeedbackRules(out string failure)
+        {
+            if (TacticalBattlefieldState.CurrentSchemaVersion != 9)
+            {
+                failure = $"expected schema version 9 after adding ObjectiveEvents, got {TacticalBattlefieldState.CurrentSchemaVersion}";
+                return false;
+            }
+            var battlefield = new TacticalBattlefieldState { BattlefieldId = "TEST" };
+            battlefield.ObjectiveEvents.Add(new TacticalObjectiveEvent
+            {
+                Sequence = 1,
+                BattlefieldId = "TEST",
+                Turn = 2,
+                Hex = new HexCoord(3, 4),
+                ControlledByUsmc = true
+            });
+            string serialized = JsonUtility.ToJson(battlefield);
+            TacticalBattlefieldState restored = JsonUtility.FromJson<TacticalBattlefieldState>(serialized);
+            if (restored?.ObjectiveEvents.Count != 1 || restored.ObjectiveEvents[0].Turn != 2 ||
+                !restored.ObjectiveEvents[0].Hex.Equals(new HexCoord(3, 4)) || !restored.ObjectiveEvents[0].ControlledByUsmc)
+            {
+                failure = "TacticalObjectiveEvent did not round-trip through JsonUtility";
+                return false;
+            }
+            failure = null;
+            return true;
+        }
+
+        private IEnumerator RunFeedbackRegression()
+        {
+            yield return null;
+            if (!ValidateFeedbackRules(out string ruleFailure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_FEEDBACK_REGRESSION_FAILED rules=" + ruleFailure);
+                Application.Quit(1);
+                yield break;
+            }
+
+            EnterTacticalMap(FindHighReliefOperationalCell(), false);
+
+            // 1. Rejected Fire: self-targeting is always illegal, deterministic
+            // regardless of RNG/posture/battlefield layout.
+            BeginTacticalFirePlanning();
+            PreviewTacticalFire(localCells[tacticalUnitState.Position]);
+            string hoverFireFeedback = tacticalOrderFeedback;
+            tacticalOrderFeedback = "SENTINEL";
+            bool fireAccepted = TryIssueTacticalFire(tacticalUnitState.Position);
+            if (fireAccepted || tacticalOrderFeedback == "SENTINEL" || tacticalOrderFeedback != hoverFireFeedback)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_FEEDBACK_REGRESSION_FAILED rejected fire feedback accepted={fireAccepted} feedback='{tacticalOrderFeedback}' hover='{hoverFireFeedback}'");
+                Application.Quit(1);
+                yield break;
+            }
+
+            // 2. Rejected Recon: pure out-of-range math, no board-bounds dependency.
+            BeginTacticalReconPlanning();
+            HexCoord farHex = new HexCoord(tacticalUnitState.Position.Q + TacticalRecon.MaximumRangeHexes + 5, tacticalUnitState.Position.R);
+            bool reconAccepted = TryIssueTacticalRecon(farHex);
+            if (reconAccepted || !tacticalOrderFeedback.Contains("exceeds"))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_FEEDBACK_REGRESSION_FAILED rejected recon feedback accepted={reconAccepted} feedback='{tacticalOrderFeedback}'");
+                Application.Quit(1);
+                yield break;
+            }
+
+            // 3. Objective control flip: directly mutate occupancy to simulate
+            // arrival/departure without depending on a real, interruptible move.
+            int objectiveEventsBefore = tacticalBattlefield.ObjectiveEvents.Count;
+            bool initialControl = tacticalObjectiveControlledByUsmc.Value;
+            HexCoord objectiveHex = tacticalObjective.ObjectiveHex;
+            string originalOccupant = localMovementBoard[objectiveHex].OccupantId;
+            localMovementBoard[objectiveHex].OccupantId = initialControl ? null : tacticalUnitState.Id;
+            RefreshTacticalObservation();
+            if (tacticalBattlefield.ObjectiveEvents.Count != objectiveEventsBefore + 1 ||
+                tacticalBattlefield.ObjectiveEvents[tacticalBattlefield.ObjectiveEvents.Count - 1].ControlledByUsmc == initialControl)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_FEEDBACK_REGRESSION_FAILED objective flip events={tacticalBattlefield.ObjectiveEvents.Count}/{objectiveEventsBefore + 1}");
+                Application.Quit(1);
+                yield break;
+            }
+            List<string> logAfterFlip = BuildTacticalEventLog(int.MaxValue);
+            if (!logAfterFlip.Exists(line => line.StartsWith("OBJECTIVE")))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_FEEDBACK_REGRESSION_FAILED no OBJECTIVE line in merged log");
+                Application.Quit(1);
+                yield break;
+            }
+            localMovementBoard[objectiveHex].OccupantId = originalOccupant;
+            RefreshTacticalObservation();
+
+            // 4. Rejected move (same-hex) proves Detail text and DisplayName resolution.
+            int movementEventsBefore = tacticalBattlefield.MovementEvents.Count;
+            BeginTacticalMovePlanning();
+            bool moveAccepted = TryIssueTacticalMove(tacticalUnitState.Position);
+            List<string> logAfterMove = BuildTacticalEventLog(int.MaxValue);
+            string moveLine = logAfterMove.Count > 0 ? logAfterMove[logAfterMove.Count - 1] : string.Empty;
+            if (moveAccepted || tacticalBattlefield.MovementEvents.Count != movementEventsBefore + 1 ||
+                !moveLine.Contains("Already occupying destination") || !moveLine.Contains(tacticalUnitState.DisplayName))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_FEEDBACK_REGRESSION_FAILED rejected move accepted={moveAccepted} line='{moveLine}'");
+                Application.Quit(1);
+                yield break;
+            }
+
+            // 5. RESULT line appears once the battle concludes.
+            fastEnemyAnimation = true;
+            tacticalObjective.TurnLimit = 1;
+            EndTacticalTurn();
+            float deadline = Time.realtimeSinceStartup + 5f;
+            do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
+            List<string> finalLog = BuildTacticalEventLog(int.MaxValue);
+            if (tacticalObjective.Outcome == TacticalBattleOutcome.InProgress || finalLog.Count == 0 || !finalLog[finalLog.Count - 1].StartsWith("RESULT"))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_FEEDBACK_REGRESSION_FAILED result line outcome={tacticalObjective.Outcome} lastLine='{(finalLog.Count > 0 ? finalLog[finalLog.Count - 1] : "<none>")}'");
+                Application.Quit(1);
+                yield break;
+            }
+
+            Debug.Log("ALWAYS_FAITHFUL_FEEDBACK_REGRESSION_OK");
             Application.Quit(0);
         }
 

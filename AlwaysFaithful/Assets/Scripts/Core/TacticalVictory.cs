@@ -30,6 +30,16 @@ namespace AlwaysFaithful.Core
         public string OutcomeSummary;
     }
 
+    [Serializable]
+    public sealed class TacticalObjectiveEvent
+    {
+        public int Sequence;
+        public string BattlefieldId;
+        public int Turn;
+        public HexCoord Hex;
+        public bool ControlledByUsmc;
+    }
+
     public static class TacticalVictory
     {
         public const int DefaultTurnLimit = 6;
