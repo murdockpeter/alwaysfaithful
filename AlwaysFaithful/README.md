@@ -44,6 +44,8 @@ Every standalone battle now varies. Starting a genuinely new tactical battle —
 
 Standalone play now has real mission variety and a lightweight campaign layer above it. Beyond Attack and Defend, a fresh scenario can roll **Raid** (win by breaking at least half the opposing roster, not by holding ground — a later PLA recovery can't retroactively undo an achieved raid), **Reconnaissance-in-Force** (win by identifying the entire opposing roster at least once, rewarding Recon tasking and LOS play over direct combat), or **Withdrawal** (win by platoon survival to the turn limit, regardless of who holds the objective hex) — drawn straight from the mission catalog `docs/USMC_Tactical_Battle_Game_TODO.md` already called for. A `--mission=attack|defend|raid|recon|withdrawal` flag can force one for testing; `BattleRequest`-driven battles are entirely unaffected, always a plain Attack/Defend mirror of their posture. Sitting above individual scenarios, a persistent **Battalion status** — file-backed, surviving an app restart until deliberately reset — tracks strength from 0-100% across every generated standalone battle: a clean win nudges it up, a costly win, stalemate, draw, or defeat drags it down (never below a 20% floor), and a Battalion under 60% strength fields its next platoon two action points light until it recovers. A toast announces the mission type and Battalion status at the start of every fresh scenario, both maps show the current strength, the after-action screen reports the change, and a **Reset Campaign** button on the operational map starts the campaign over.
 
+A persistent **Settings** panel — the first half of a broader accessibility pass — is reachable from a bottom-left button on both maps. It currently covers UI scale (Auto, which reproduces the original screen-height-derived sizing exactly, plus fixed Small/Normal/Large/Extra-Large tiers) and remappable Cancel and Reset Camera keys, the two single-bound essential controls where a bad default could genuinely strand a player (camera pan already has a redundant WASD-and-Arrow-keys binding, so it isn't remapped). Rebinding captures the next key you press via `Event.current` inside `OnGUI` and rejects binding both actions to the same key with visible feedback rather than allowing ambiguity. Settings persist the same way the battle save and Battalion status do — atomically, to a file under `Application.persistentDataPath` — with a Reset to Defaults button and a `--settings-path=<path>` override for scripted runs. Graphics presets, color-safe overlays, reduced motion, and an animation-speed setting are the still-to-come second half of this pass, landing on this same settings file and panel.
+
 Open `Assets/Scenes/HexAndCounterPrototype.unity` and enter Play mode.
 
 Controls:
@@ -71,6 +73,7 @@ Controls:
 - Mouse wheel zooms.
 - Middle-mouse drag or WASD pans.
 - R resets the camera.
+- Use **Settings** (bottom-left, either map) to change UI scale or rebind the Cancel and Reset Camera keys; Escape and R are the defaults until changed.
 
 ## Sea of Uncertainty developer flow
 
@@ -79,6 +82,8 @@ Launch a battle from a file instead of the operational map with `AlwaysFaithful.
 The in-progress-battle save file defaults to `Application.persistentDataPath/always-faithful-battle-save.json`; override it with `--save-path=<path>` (useful for pointing a regression or a scripted run at a scratch file instead of the real save slot). Its `AlwaysFaithful.Core.TacticalBattleSaveState` shape (`Assets/Scripts/Core/TacticalBattleSave.cs`) wraps the full `TacticalBattlefieldState` plus everything else a live session needs to resume: turn state, both sides' units and weapons, the contact picture, the running event sequence number, and the active `BattleRequest` if the saved battle was launched from one.
 
 The persistent Battalion status file defaults to `Application.persistentDataPath/always-faithful-battalion-status.json`; override it with `--battalion-status-path=<path>` for the same reason. Its `AlwaysFaithful.Core.TacticalBattalionStatus` shape (`Assets/Scripts/Core/TacticalBattalion.cs`) is a single strength value plus a history of concluded engagements — small enough to read or hand-edit directly for testing a specific strength band.
+
+The settings file defaults to `Application.persistentDataPath/always-faithful-settings.json`; override it with `--settings-path=<path>` for the same reason. Its `AlwaysFaithful.Core.AlwaysFaithfulSettings` shape (`Assets/Scripts/Core/AlwaysFaithfulSettings.cs`) currently holds the UI scale tier and the two remappable key bindings.
 
 ## Geography strategy
 

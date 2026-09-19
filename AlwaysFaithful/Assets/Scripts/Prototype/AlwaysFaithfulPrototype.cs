@@ -145,6 +145,12 @@ namespace AlwaysFaithful.Prototype
         private bool automatedBattalionRegression;
         private TacticalBattalionStatus battalionStatus;
         private string battalionStatusPath;
+        private AlwaysFaithfulSettings settings;
+        private string settingsPath;
+        private bool settingsPanelOpen;
+        private RemapTarget? awaitingRemapFor;
+        private string remapRejectionText;
+        private bool automatedSettingsRegression;
         private string battleRequestError;
         private string campaignErrorTitle = "BATTLE REQUEST REJECTED";
         private string lastBattleResultPath;
@@ -179,6 +185,12 @@ namespace AlwaysFaithful.Prototype
             public HexCellView Cell;
             public Vector2 Center;
             public float Radius;
+        }
+
+        private enum RemapTarget
+        {
+            Cancel,
+            ResetCamera
         }
 
         private sealed class GeographicLabel
@@ -230,6 +242,7 @@ namespace AlwaysFaithful.Prototype
             automatedFeedbackRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--feedback-regression") >= 0;
             automatedScenarioRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--scenario-regression") >= 0;
             automatedBattalionRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--battalion-regression") >= 0;
+            automatedSettingsRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--settings-regression") >= 0;
             string scenarioSeedArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--scenario-seed=", StringComparison.Ordinal));
             scenarioSeedOverride = scenarioSeedArgument != null && int.TryParse(scenarioSeedArgument.Substring("--scenario-seed=".Length), out int parsedScenarioSeed) && parsedScenarioSeed > 0
                 ? parsedScenarioSeed
@@ -245,6 +258,11 @@ namespace AlwaysFaithful.Prototype
                 ? battalionStatusArgument.Substring("--battalion-status-path=".Length)
                 : Path.Combine(Application.persistentDataPath, "always-faithful-battalion-status.json");
             if (!TryLoadBattalionStatus(battalionStatusPath, out battalionStatus)) battalionStatus = TacticalBattalion.CreateFresh();
+            string settingsArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--settings-path=", StringComparison.Ordinal));
+            settingsPath = settingsArgument != null
+                ? settingsArgument.Substring("--settings-path=".Length)
+                : Path.Combine(Application.persistentDataPath, "always-faithful-settings.json");
+            if (!TryLoadSettings(settingsPath, out settings)) settings = AlwaysFaithfulSettingsRules.CreateDefault();
             LoadGeography();
             BuildLightingAndCamera();
             overviewRoot = new GameObject("Taiwan Operational Map");
@@ -366,6 +384,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedFeedbackRegression) StartCoroutine(RunFeedbackRegression());
             if (automatedScenarioRegression) StartCoroutine(RunScenarioRegression());
             if (automatedBattalionRegression) StartCoroutine(RunBattalionRegression());
+            if (automatedSettingsRegression) StartCoroutine(RunSettingsRegression());
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
@@ -382,7 +401,7 @@ namespace AlwaysFaithful.Prototype
                automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture ||
                automatedEnemyTurnCapture || automatedResultCapture || automatedReconCapture || automatedCampaignCapture ||
                automatedSaveRestoreRegression || automatedSaveRestoreCapture || automatedFeedbackRegression || automatedScenarioRegression ||
-               automatedBattalionRegression;
+               automatedBattalionRegression || automatedSettingsRegression;
 
         private void Update()
         {
@@ -1126,6 +1145,48 @@ namespace AlwaysFaithful.Prototype
             Debug.Log("ALWAYS_FAITHFUL_BATTALION_STATUS_RESET");
         }
 
+        private bool TryLoadSettings(string path, out AlwaysFaithfulSettings loaded)
+        {
+            loaded = null;
+            if (!File.Exists(path)) return false;
+            AlwaysFaithfulSettings parsed;
+            try
+            {
+                parsed = JsonUtility.FromJson<AlwaysFaithfulSettings>(File.ReadAllText(path));
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"ALWAYS_FAITHFUL_SETTINGS_LOAD_FAILED path={path} error={exception.Message}");
+                return false;
+            }
+            if (!AlwaysFaithfulSettingsRules.Validate(parsed, out string error))
+            {
+                Debug.LogWarning($"ALWAYS_FAITHFUL_SETTINGS_LOAD_FAILED path={path} error={error}");
+                return false;
+            }
+            loaded = parsed;
+            return true;
+        }
+
+        private void SaveSettings()
+        {
+            if (settings == null) return;
+            string tempPath = settingsPath + ".tmp";
+            try
+            {
+                string directory = Path.GetDirectoryName(settingsPath);
+                if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+                File.WriteAllText(tempPath, JsonUtility.ToJson(settings, true));
+                if (File.Exists(settingsPath)) File.Delete(settingsPath);
+                File.Move(tempPath, settingsPath);
+                Debug.Log($"ALWAYS_FAITHFUL_SETTINGS_SAVED path={settingsPath} uiScale={settings.UiScale} cancel={settings.RemapCancelKey} resetCamera={settings.RemapResetCameraKey}");
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SETTINGS_SAVE_FAILED path={settingsPath} error={exception.Message}");
+            }
+        }
+
         private void EnterTacticalMap(HexCellView parentCell, bool animate, TacticalBattleSaveState restore = null)
         {
             if (animate)
@@ -1806,11 +1867,11 @@ namespace AlwaysFaithful.Prototype
 
         private void UpdateTacticalPointer()
         {
-            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive || campaignBriefingActive) return;
+            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive || campaignBriefingActive || settingsPanelOpen) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
             if (returnToIslandRect.Contains(guiPointer) || tacticalMenuOpen && tacticalMenuRect.Contains(guiPointer) ||
                 new Rect(20f, 18f, 405f, 318f).Contains(guiPointer)) return;
-            if (Input.GetKeyDown(KeyCode.Escape))
+            if (Input.GetKeyDown(settings.RemapCancelKey))
             {
                 CancelTacticalInteraction(true);
                 return;
@@ -2663,7 +2724,7 @@ namespace AlwaysFaithful.Prototype
         {
             // Do not let hover bookkeeping clear the committed route while its
             // movement coroutine is animating the counter.
-            if (mapCamera == null || unitMoving || campaignBriefingActive) return;
+            if (mapCamera == null || unitMoving || campaignBriefingActive || settingsPanelOpen) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
             if (endTurnRect.Contains(guiPointer) || enterTacticalRect.Contains(guiPointer) || counterMenuOpen && counterMenuRect.Contains(guiPointer)) return;
             bool leftClick = Input.GetMouseButtonDown(0);
@@ -2910,7 +2971,7 @@ namespace AlwaysFaithful.Prototype
 
         private void EndTacticalTurn()
         {
-            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive || campaignBriefingActive) return;
+            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive || campaignBriefingActive || settingsPanelOpen) return;
             CancelTacticalInteraction(false);
             tacticalAudio.Play(TacticalSound.EndTurn);
             StartCoroutine(RunEnemyTurn());
@@ -5427,6 +5488,94 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private static bool ValidateSettingsRules(out string failure)
+        {
+            AlwaysFaithfulSettings fresh = AlwaysFaithfulSettingsRules.CreateDefault();
+            if (fresh.UiScale != UiScaleTier.Auto || fresh.RemapCancelKey != KeyCode.Escape || fresh.RemapResetCameraKey != KeyCode.R)
+            {
+                failure = $"expected default settings (Auto/Escape/R), got {fresh.UiScale}/{fresh.RemapCancelKey}/{fresh.RemapResetCameraKey}";
+                return false;
+            }
+            if (AlwaysFaithfulSettingsRules.Validate(null, out _))
+            {
+                failure = "a null settings state was accepted";
+                return false;
+            }
+            var badVersion = AlwaysFaithfulSettingsRules.CreateDefault();
+            badVersion.SchemaVersion = AlwaysFaithfulSettings.CurrentSchemaVersion + 1;
+            if (AlwaysFaithfulSettingsRules.Validate(badVersion, out _))
+            {
+                failure = "an unsupported settings schema version was accepted";
+                return false;
+            }
+            var unboundCancel = AlwaysFaithfulSettingsRules.CreateDefault();
+            unboundCancel.RemapCancelKey = KeyCode.None;
+            if (AlwaysFaithfulSettingsRules.Validate(unboundCancel, out _))
+            {
+                failure = "an unbound Cancel key was accepted";
+                return false;
+            }
+            var collision = AlwaysFaithfulSettingsRules.CreateDefault();
+            collision.RemapCancelKey = KeyCode.R;
+            if (AlwaysFaithfulSettingsRules.Validate(collision, out _))
+            {
+                failure = "Cancel and Reset Camera bound to the same key was accepted";
+                return false;
+            }
+            if (!AlwaysFaithfulSettingsRules.Validate(fresh, out string validError))
+            {
+                failure = "a structurally valid settings state was rejected: " + validError;
+                return false;
+            }
+            if (UiScaleValueFor(UiScaleTier.Small) != .85f || UiScaleValueFor(UiScaleTier.Normal) != 1.0f ||
+                UiScaleValueFor(UiScaleTier.Large) != 1.2f || UiScaleValueFor(UiScaleTier.ExtraLarge) != 1.5f)
+            {
+                failure = "UI scale tier lookup did not return the expected literal values";
+                return false;
+            }
+            failure = null;
+            return true;
+        }
+
+        private IEnumerator RunSettingsRegression()
+        {
+            yield return null;
+            if (!ValidateSettingsRules(out string ruleFailure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_SETTINGS_REGRESSION_FAILED rules=" + ruleFailure);
+                Application.Quit(1);
+                yield break;
+            }
+
+            // Isolate this regression from whatever real settings file might
+            // already exist at the default persistentDataPath location.
+            string scratchDirectory = Path.Combine(Path.GetTempPath(), "AlwaysFaithfulSettingsRegression");
+            Directory.CreateDirectory(scratchDirectory);
+            settingsPath = Path.Combine(scratchDirectory, "settings.json");
+            settings = AlwaysFaithfulSettingsRules.CreateDefault();
+            settings.UiScale = UiScaleTier.Large;
+            settings.RemapResetCameraKey = KeyCode.T;
+            SaveSettings();
+
+            if (!TryLoadSettings(settingsPath, out AlwaysFaithfulSettings roundTripped) ||
+                roundTripped.UiScale != UiScaleTier.Large || roundTripped.RemapResetCameraKey != KeyCode.T || roundTripped.RemapCancelKey != KeyCode.Escape)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SETTINGS_REGRESSION_FAILED persistence round trip failed scale={roundTripped?.UiScale} resetKey={roundTripped?.RemapResetCameraKey}");
+                Application.Quit(1);
+                yield break;
+            }
+            settings = roundTripped;
+            if (Mathf.Abs(GetUiScale() - 1.2f) > .0001f)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SETTINGS_REGRESSION_FAILED GetUiScale did not reflect the loaded Large tier, got {GetUiScale()}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            Debug.Log("ALWAYS_FAITHFUL_SETTINGS_REGRESSION_OK");
+            Application.Quit(0);
+        }
+
         private static bool ValidateFireRules(out string failure)
         {
             var flat = new Dictionary<HexCoord, TacticalMovementCell>();
@@ -5919,7 +6068,7 @@ namespace AlwaysFaithful.Prototype
                 cameraFocus.x = Mathf.Clamp(cameraFocus.x, -14f, 14f);
                 cameraFocus.z = Mathf.Clamp(cameraFocus.z, -11f, 11f);
             }
-            if (Input.GetKeyDown(KeyCode.R))
+            if (Input.GetKeyDown(settings.RemapResetCameraKey))
             {
                 cameraFocus = tacticalMode ? Vector3.zero : HexToWorld(new HexCoord(Width / 2, Height / 2));
                 cameraDistance = tacticalMode ? 33f : 190f;
@@ -5975,6 +6124,7 @@ namespace AlwaysFaithful.Prototype
                 DrawTransitionOverlay(uiWidth, uiHeight);
                 DrawResultScreen(uiWidth, uiHeight);
                 DrawCampaignBriefing(uiWidth, uiHeight);
+                DrawSettingsButtonAndPanel(uiWidth, uiHeight);
                 GUI.matrix = Matrix4x4.identity;
                 return;
             }
@@ -6057,7 +6207,106 @@ namespace AlwaysFaithful.Prototype
             }
             DrawTransitionOverlay(uiWidth, uiHeight);
             DrawCampaignBriefing(uiWidth, uiHeight);
+            DrawSettingsButtonAndPanel(uiWidth, uiHeight);
             GUI.matrix = Matrix4x4.identity;
+        }
+
+        private static readonly UiScaleTier[] UiScaleTierOptions =
+            { UiScaleTier.Auto, UiScaleTier.Small, UiScaleTier.Normal, UiScaleTier.Large, UiScaleTier.ExtraLarge };
+        private static readonly string[] UiScaleTierLabels = { "AUTO", "SMALL", "NORMAL", "LARGE", "X-LARGE" };
+
+        private void DrawSettingsButtonAndPanel(float uiWidth, float uiHeight)
+        {
+            Rect settingsButtonRect = new Rect(20f, uiHeight - 44f, 96f, 34f);
+            if (GUI.Button(settingsButtonRect, "SETTINGS", buttonStyle)) settingsPanelOpen = !settingsPanelOpen;
+            if (!settingsPanelOpen) return;
+
+            // Consume a keystroke for rebinding before anything else this frame
+            // reads it — Event.current is only valid inside OnGUI, which is why
+            // this capture lives here rather than in Update().
+            if (awaitingRemapFor != null && Event.current.type == EventType.KeyDown && Event.current.keyCode != KeyCode.None)
+            {
+                KeyCode pressed = Event.current.keyCode;
+                Event.current.Use();
+                bool collision = (awaitingRemapFor == RemapTarget.Cancel && pressed == settings.RemapResetCameraKey) ||
+                                  (awaitingRemapFor == RemapTarget.ResetCamera && pressed == settings.RemapCancelKey);
+                if (collision)
+                {
+                    remapRejectionText = $"{pressed} is already bound to the other action";
+                }
+                else
+                {
+                    if (awaitingRemapFor == RemapTarget.Cancel) settings.RemapCancelKey = pressed;
+                    else settings.RemapResetCameraKey = pressed;
+                    remapRejectionText = null;
+                }
+                awaitingRemapFor = null;
+            }
+
+            Rect panel = new Rect(uiWidth / 2f - 260f, uiHeight / 2f - 200f, 520f, 400f);
+            GUI.Box(panel, GUIContent.none);
+            GUI.Label(new Rect(panel.x + 20f, panel.y + 14f, 300f, 30f), "SETTINGS", titleStyle);
+            if (GUI.Button(new Rect(panel.x + panel.width - 44f, panel.y + 14f, 28f, 28f), "X", buttonStyle))
+            {
+                settingsPanelOpen = false;
+                awaitingRemapFor = null;
+                SaveSettings();
+            }
+
+            float rowY = panel.y + 64f;
+            GUI.Label(new Rect(panel.x + 20f, rowY, 200f, 22f), "UI SCALE", badgeStyle);
+            rowY += 26f;
+            const float tierButtonWidth = 92f;
+            for (int index = 0; index < UiScaleTierOptions.Length; index++)
+            {
+                Rect tierRect = new Rect(panel.x + 20f + index * (tierButtonWidth + 4f), rowY, tierButtonWidth, 30f);
+                bool active = settings.UiScale == UiScaleTierOptions[index];
+                string label = active ? $"[{UiScaleTierLabels[index]}]" : UiScaleTierLabels[index];
+                if (GUI.Button(tierRect, label, buttonStyle)) settings.UiScale = UiScaleTierOptions[index];
+            }
+
+            rowY += 66f;
+            GUI.Label(new Rect(panel.x + 20f, rowY, 150f, 22f), "CANCEL KEY", badgeStyle);
+            string cancelLabel = awaitingRemapFor == RemapTarget.Cancel ? "PRESS A KEY..." : settings.RemapCancelKey.ToString().ToUpperInvariant();
+            GUI.Label(new Rect(panel.x + 180f, rowY + 2f, 150f, 22f), cancelLabel, bodyStyle);
+            if (GUI.Button(new Rect(panel.x + 340f, rowY - 4f, 140f, 30f), "REBIND", buttonStyle))
+            {
+                awaitingRemapFor = RemapTarget.Cancel;
+                remapRejectionText = null;
+            }
+
+            rowY += 40f;
+            GUI.Label(new Rect(panel.x + 20f, rowY, 150f, 22f), "RESET CAMERA KEY", badgeStyle);
+            string resetLabel = awaitingRemapFor == RemapTarget.ResetCamera ? "PRESS A KEY..." : settings.RemapResetCameraKey.ToString().ToUpperInvariant();
+            GUI.Label(new Rect(panel.x + 180f, rowY + 2f, 150f, 22f), resetLabel, bodyStyle);
+            if (GUI.Button(new Rect(panel.x + 340f, rowY - 4f, 140f, 30f), "REBIND", buttonStyle))
+            {
+                awaitingRemapFor = RemapTarget.ResetCamera;
+                remapRejectionText = null;
+            }
+
+            rowY += 38f;
+            if (!string.IsNullOrEmpty(remapRejectionText))
+            {
+                GUIStyle rejectionStyle = new GUIStyle(bodyStyle) { normal = { textColor = new Color(.96f, .32f, .28f) } };
+                GUI.Label(new Rect(panel.x + 20f, rowY, panel.width - 40f, 22f), remapRejectionText, rejectionStyle);
+            }
+
+            rowY += 40f;
+            if (GUI.Button(new Rect(panel.x + 20f, rowY, panel.width - 40f, 34f), "RESET TO DEFAULTS", buttonStyle))
+            {
+                settings = AlwaysFaithfulSettingsRules.CreateDefault();
+                awaitingRemapFor = null;
+                remapRejectionText = null;
+            }
+
+            rowY += 44f;
+            if (GUI.Button(new Rect(panel.x + 20f, rowY, panel.width - 40f, 34f), "CLOSE", buttonStyle))
+            {
+                settingsPanelOpen = false;
+                awaitingRemapFor = null;
+                SaveSettings();
+            }
         }
 
         private void DrawTacticalInterface(float uiWidth, float uiHeight)
@@ -6102,7 +6351,7 @@ namespace AlwaysFaithful.Prototype
             Rect tacticalSaveRect = new Rect(38f, 283f, 93f, 34f);
             Rect tacticalEndTurnRect = new Rect(137f, 283f, 104f, 34f);
             returnToIslandRect = new Rect(244f, 283f, 161f, 34f);
-            bool tacticalControlsEnabled = !mapTransitionActive && !tacticalUnitMoving && !tacticalFireResolving && !tacticalEnemyTurnActive && !campaignBriefingActive;
+            bool tacticalControlsEnabled = !mapTransitionActive && !tacticalUnitMoving && !tacticalFireResolving && !tacticalEnemyTurnActive && !campaignBriefingActive && !settingsPanelOpen;
             GUI.enabled = tacticalControlsEnabled && !resultScreenActive && tacticalObjective != null && tacticalObjective.Outcome == TacticalBattleOutcome.InProgress;
             if (GUI.Button(tacticalSaveRect, "SAVE", buttonStyle)) SaveTacticalBattle();
             GUI.enabled = tacticalControlsEnabled && !resultScreenActive;
@@ -6414,7 +6663,25 @@ namespace AlwaysFaithful.Prototype
             resultHeadlineStyle.normal.textColor = Color.white;
         }
 
-        private static float GetUiScale() => Mathf.Clamp(Screen.height / 720f, .90f, 1.35f);
+        private float GetUiScale()
+        {
+            if (settings.UiScale == UiScaleTier.Auto) return Mathf.Clamp(Screen.height / 720f, .90f, 1.35f);
+            return UiScaleValueFor(settings.UiScale);
+        }
+
+        // Pure lookup, split out from GetUiScale() so a static regression can
+        // assert the exact per-tier value without needing a live instance.
+        private static float UiScaleValueFor(UiScaleTier tier)
+        {
+            switch (tier)
+            {
+                case UiScaleTier.Small: return .85f;
+                case UiScaleTier.Normal: return 1.0f;
+                case UiScaleTier.Large: return 1.2f;
+                case UiScaleTier.ExtraLarge: return 1.5f;
+                default: return 1.0f;
+            }
+        }
 
         private float TacticalWidthKilometres()
             => ((tacticalBattlefield.Width - 1) * Mathf.Sqrt(3f) * .5f + 1f) * tacticalBattlefield.CellSizeMetres / 1000f;
