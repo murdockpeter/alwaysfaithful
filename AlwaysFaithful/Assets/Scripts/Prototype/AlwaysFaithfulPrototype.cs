@@ -136,6 +136,14 @@ namespace AlwaysFaithful.Prototype
         private bool tacticalReconPlanning;
         private readonly List<TacticalReconMarker> tacticalReconMarkers = new List<TacticalReconMarker>();
         private readonly Dictionary<HexCoord, LineRenderer> tacticalReconRings = new Dictionary<HexCoord, LineRenderer>();
+        // PLA-side counterparts: the enemy's own active sensor-tasking markers
+        // on the platoon, and the AI's own per-unit contact memory (mirrors
+        // tacticalContacts, but keyed by the PLA unit that holds the contact).
+        private readonly List<TacticalReconMarker> tacticalPlaReconMarkers = new List<TacticalReconMarker>();
+        private readonly Dictionary<HexCoord, LineRenderer> tacticalPlaReconRings = new Dictionary<HexCoord, LineRenderer>();
+        private readonly Dictionary<string, TacticalContactState> tacticalEnemyContacts = new Dictionary<string, TacticalContactState>();
+        private TacticalVisibilityState tacticalUnitSpottedTier = TacticalVisibilityState.Hidden;
+        private static readonly Color PlaReconRingColor = new Color(.92f, .30f, .18f, .85f);
         private bool automatedReconRegression;
         private bool automatedReconCapture;
         private BattleRequest activeBattleRequest;
@@ -148,6 +156,8 @@ namespace AlwaysFaithful.Prototype
         private bool supportCardModalActive;
         private bool supportPanelOpen;
         private bool automatedCardsRegression;
+        private bool automatedPlaReconRegression;
+        private bool automatedPlaReconCapture;
         private AlwaysFaithfulSettings settings;
         private string settingsPath;
         private bool settingsPanelOpen;
@@ -247,6 +257,8 @@ namespace AlwaysFaithful.Prototype
             automatedBattalionRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--battalion-regression") >= 0;
             automatedSettingsRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--settings-regression") >= 0;
             automatedCardsRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--cards-regression") >= 0;
+            automatedPlaReconRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--pla-recon-regression") >= 0;
+            automatedPlaReconCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--pla-recon-capture-path=", StringComparison.Ordinal));
             string scenarioSeedArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--scenario-seed=", StringComparison.Ordinal));
             scenarioSeedOverride = scenarioSeedArgument != null && int.TryParse(scenarioSeedArgument.Substring("--scenario-seed=".Length), out int parsedScenarioSeed) && parsedScenarioSeed > 0
                 ? parsedScenarioSeed
@@ -390,6 +402,8 @@ namespace AlwaysFaithful.Prototype
             if (automatedBattalionRegression) StartCoroutine(RunBattalionRegression());
             if (automatedSettingsRegression) StartCoroutine(RunSettingsRegression());
             if (automatedCardsRegression) StartCoroutine(RunCardsRegression());
+            if (automatedPlaReconRegression) StartCoroutine(RunPlaReconRegression());
+            if (automatedPlaReconCapture) StartCoroutine(CapturePlaReconScreenshotWhenRequested());
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
@@ -406,7 +420,8 @@ namespace AlwaysFaithful.Prototype
                automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture ||
                automatedEnemyTurnCapture || automatedResultCapture || automatedReconCapture || automatedCampaignCapture ||
                automatedSaveRestoreRegression || automatedSaveRestoreCapture || automatedFeedbackRegression || automatedScenarioRegression ||
-               automatedBattalionRegression || automatedSettingsRegression || automatedCardsRegression;
+               automatedBattalionRegression || automatedSettingsRegression || automatedCardsRegression || automatedPlaReconRegression ||
+               automatedPlaReconCapture;
 
         private void Update()
         {
@@ -873,6 +888,44 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
+        private IEnumerator CapturePlaReconScreenshotWhenRequested()
+        {
+            string argument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--pla-recon-capture-path=", StringComparison.Ordinal));
+            if (argument == null) yield break;
+            string path = argument.Substring("--pla-recon-capture-path=".Length);
+
+            yield return null;
+            EnterTacticalMap(FindHighReliefOperationalCell(), false);
+            fastEnemyAnimation = true;
+            tacticalObjective.TurnLimit = (turnState.TurnNumber - tacticalObjective.BattleStartTurn) + 20;
+            if (!TryManufactureLostContact(tacticalEnemyStates[0], out _))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_PLA_RECON_CAPTURE_FAILED could not create lost-contact fixture");
+                Application.Quit(1);
+                yield break;
+            }
+            EndTacticalTurn();
+            float deadline = Time.realtimeSinceStartup + 5f;
+            do { yield return null; } while (tacticalEnemyTurnActive && Time.realtimeSinceStartup < deadline);
+            yield return new WaitForSecondsRealtime(.25f);
+
+            var target = new RenderTexture(1280, 720, 24);
+            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            mapCamera.targetTexture = target;
+            mapCamera.Render();
+            RenderTexture.active = target;
+            image.ReadPixels(new Rect(0f, 0f, target.width, target.height), 0, 0);
+            image.Apply();
+            File.WriteAllBytes(path, image.EncodeToPNG());
+            mapCamera.targetTexture = null;
+            RenderTexture.active = previous;
+            Destroy(target);
+            Destroy(image);
+            Debug.Log($"ALWAYS_FAITHFUL_PLA_RECON_CAPTURED {path} markers={tacticalPlaReconMarkers.Count} visibleRings={tacticalPlaReconRings.Count}");
+            Application.Quit(0);
+        }
+
         private IEnumerator CaptureCampaignScreenshotWhenRequested()
         {
             string argument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--campaign-capture-path=", StringComparison.Ordinal));
@@ -1026,7 +1079,15 @@ namespace AlwaysFaithful.Prototype
             if (playedCard != null)
             {
                 battalionStatus.Hand.Remove(playedCard);
-                ApplySupportCardEffect(playedCard.AssetType);
+                string effectSummary = ApplySupportCardEffect(playedCard.AssetType);
+                tacticalBattlefield.SupportCardEvents.Add(new TacticalSupportCardEvent
+                {
+                    Sequence = ++tacticalEventSequence,
+                    BattlefieldId = tacticalBattlefield.BattlefieldId,
+                    Turn = turnState.TurnNumber,
+                    AssetType = playedCard.AssetType,
+                    Summary = $"{TacticalSupportCardCatalog.DisplayName(playedCard.AssetType)} committed — {effectSummary}"
+                });
                 SaveBattalionStatus();
                 Debug.Log($"ALWAYS_FAITHFUL_SUPPORT_CARD_PLAYED type={playedCard.AssetType}");
             }
@@ -1038,14 +1099,17 @@ namespace AlwaysFaithful.Prototype
         // Whole-battle pre-battle effects. Called only after BuildTacticalBattlefield
         // has already constructed tacticalObjective/tacticalEnemyStates/tacticalUnitState,
         // so each effect safely mutates already-built in-memory battle state.
-        private void ApplySupportCardEffect(TacticalSupportAssetType assetType)
+        // Returns a short human-readable summary of what the effect actually did,
+        // for the event log this card play produces.
+        private string ApplySupportCardEffect(TacticalSupportAssetType assetType)
         {
             switch (assetType)
             {
                 case TacticalSupportAssetType.Isr:
                     tacticalBattlefield.IsrCardActive = true;
-                    break;
+                    return "enemy detection elevated for the battle.";
                 case TacticalSupportAssetType.FireSupport:
+                    int suppressedCount = 0;
                     foreach (TacticalUnitState enemy in tacticalEnemyStates)
                     {
                         if (HexCoord.Distance(enemy.Position, tacticalObjective.ObjectiveHex) > TacticalSupportCards.FireSupportRadiusHexes) continue;
@@ -1056,12 +1120,15 @@ namespace AlwaysFaithful.Prototype
                         suppressionEvent.BattlefieldId = tacticalBattlefield.BattlefieldId;
                         suppressionEvent.Turn = turnState.TurnNumber;
                         tacticalBattlefield.SuppressionEvents.Add(suppressionEvent);
+                        suppressedCount++;
                     }
-                    break;
+                    return suppressedCount > 0
+                        ? $"{suppressedCount} enemy unit(s) suppressed near the objective."
+                        : "no enemies were within range of the objective.";
                 default:
                     tacticalUnitState.MaximumActionPoints += TacticalSupportCards.ReserveActionPointBonus;
                     tacticalUnitState.RemainingActionPoints += TacticalSupportCards.ReserveActionPointBonus;
-                    break;
+                    return $"+{TacticalSupportCards.ReserveActionPointBonus} action points this battle.";
             }
         }
 
@@ -1085,6 +1152,8 @@ namespace AlwaysFaithful.Prototype
                 state.EnemyWeapons.Add(new TacticalEnemyWeaponEntry { UnitId = pair.Key, Weapon = pair.Value });
             foreach (TacticalContactState contact in tacticalContacts.Values)
                 state.Contacts.Add(contact);
+            foreach (TacticalContactState contact in tacticalEnemyContacts.Values)
+                state.EnemyContacts.Add(contact);
 
             string tempPath = outputPath + ".tmp";
             try
@@ -1353,6 +1422,7 @@ namespace AlwaysFaithful.Prototype
                 turnState.ActiveSide = restore.Turn.ActiveSide;
             }
             tacticalReconMarkers.AddRange(tacticalBattlefield.ActiveReconMarkers);
+            tacticalPlaReconMarkers.AddRange(tacticalBattlefield.ActivePlaReconMarkers);
             tacticalRoot = new GameObject("Tactical Battlefield " + tacticalBattlefield.BattlefieldId);
             tacticalRoot.transform.SetParent(transform, false);
 
@@ -1398,7 +1468,9 @@ namespace AlwaysFaithful.Prototype
                 });
                 TacticalCoverView.Build(cellObject.transform, source.LocalCoord, source.Cover, source.IsBuiltUp, overlayShader);
             }
-            foreach (TacticalReconMarker marker in tacticalReconMarkers) BuildTacticalReconRing(marker.Hex);
+            foreach (TacticalReconMarker marker in tacticalReconMarkers) BuildTacticalReconRing(marker.Hex, tacticalReconRings, TacticalReconRingColor);
+            foreach (TacticalReconMarker marker in tacticalPlaReconMarkers)
+                if (marker.IsVisibleToUsmc) BuildTacticalReconRing(marker.Hex, tacticalPlaReconRings, PlaReconRingColor);
             BuildTacticalTable();
             BuildTacticalShoreline();
             BuildTacticalReferenceMarks();
@@ -1768,6 +1840,7 @@ namespace AlwaysFaithful.Prototype
         {
             tacticalEnemyStates.Clear();
             tacticalContacts.Clear();
+            tacticalEnemyContacts.Clear();
             tacticalContactViews.Clear();
             tacticalEnemyWeapons.Clear();
             var enemyMarkerLabels = new List<string>();
@@ -1782,6 +1855,10 @@ namespace AlwaysFaithful.Prototype
                 // restore-specific logic needed.
                 foreach (TacticalContactState contact in restore.Contacts)
                     tacticalContacts[contact.TargetId] = contact;
+                // Every EnemyContacts entry shares the same TargetId (the platoon)
+                // and is differentiated by which PLA unit owns it.
+                foreach (TacticalContactState contact in restore.EnemyContacts)
+                    tacticalEnemyContacts[contact.ObserverId] = contact;
                 // A request-driven restore is always the legacy fixed [rifle,
                 // support] pair; a standalone restore's units were always named
                 // "pla-rifle-squad-N"/"pla-support-team-N" by the roster branch
@@ -1910,7 +1987,35 @@ namespace AlwaysFaithful.Prototype
                 marker.Present(report, enemy);
                 Debug.Log($"ALWAYS_FAITHFUL_CONTACT target={report.TargetId} state={report.State} stale={report.IsStale} position={report.LastKnownPosition} range={report.RangeHexes} observer={report.ObserverId}");
             }
+
+            // Symmetric counterpart: what does each PLA unit currently know about
+            // the platoon? Drives the AI's own contact memory (tacticalEnemyContacts,
+            // consumed by RunEnemyTurn) and the player's "spotted" readout below.
+            TacticalVisibilityState spottedTier = TacticalVisibilityState.Hidden;
+            foreach (TacticalUnitState enemy in tacticalEnemyStates)
+            {
+                tacticalEnemyContacts.TryGetValue(enemy.Id, out TacticalContactState previousEnemyContact);
+                TacticalContactState enemyContact = ComputeEnemyContactOnPlatoon(enemy, previousEnemyContact);
+                tacticalEnemyContacts[enemy.Id] = enemyContact;
+                if (!enemyContact.IsStale && enemyContact.State > spottedTier) spottedTier = enemyContact.State;
+            }
+            if (spottedTier != tacticalUnitSpottedTier)
+            {
+                bool wasHidden = tacticalUnitSpottedTier == TacticalVisibilityState.Hidden;
+                bool isHidden = spottedTier == TacticalVisibilityState.Hidden;
+                if (wasHidden && !isHidden) tacticalAudio.Play(TacticalSound.ContactDetected);
+                else if (!wasHidden && isHidden) tacticalAudio.Play(TacticalSound.ContactLost);
+                tacticalUnitSpottedTier = spottedTier;
+            }
             UpdateObjectiveMarkerColor();
+        }
+
+        private TacticalContactState ComputeEnemyContactOnPlatoon(TacticalUnitState enemy, TacticalContactState previous)
+        {
+            TacticalContactState report = TacticalObservation.Check(localMovementBoard, enemy.Id, enemy.Position,
+                tacticalUnitState.Id, tacticalUnitState.DisplayName, tacticalUnitState.Position, turnState.TurnNumber, previous);
+            report.State = TacticalRecon.ApplyBonus(report.State, TacticalRecon.IsUnderActiveRecon(tacticalPlaReconMarkers, tacticalUnitState.Position));
+            return report;
         }
 
         private void FrameObservationContacts()
@@ -2211,7 +2316,7 @@ namespace AlwaysFaithful.Prototype
                 tacticalBattlefield.ActiveReconMarkers.Add(marker);
             }
             marker.TurnsRemaining = TacticalRecon.DurationTurns;
-            BuildTacticalReconRing(target);
+            BuildTacticalReconRing(target, tacticalReconRings, TacticalReconRingColor);
 
             var reconEvent = new TacticalReconEvent
             {
@@ -2235,9 +2340,14 @@ namespace AlwaysFaithful.Prototype
             return true;
         }
 
-        private void BuildTacticalReconRing(HexCoord hex)
+        private static readonly Color TacticalReconRingColor = new Color(.80f, .42f, .96f, .90f);
+
+        // Distinct colors per ringSet so a player-recon'd hex and a PLA-recon'd
+        // hex are never mistaken for each other, and both stay distinct from
+        // the gold objective ring and the cyan deployment-zone ring (Pass 12).
+        private void BuildTacticalReconRing(HexCoord hex, Dictionary<HexCoord, LineRenderer> ringSet, Color color)
         {
-            if (tacticalReconRings.TryGetValue(hex, out LineRenderer existingRing) && existingRing != null) return;
+            if (ringSet.TryGetValue(hex, out LineRenderer existingRing) && existingRing != null) return;
             HexCellView cell = localCells[hex];
             GameObject ringObject = new GameObject("Recon Marker " + hex);
             ringObject.layer = LayerMask.NameToLayer("Ignore Raycast");
@@ -2247,10 +2357,6 @@ namespace AlwaysFaithful.Prototype
             ring.useWorldSpace = true;
             ring.positionCount = 36;
             ring.widthMultiplier = .05f;
-            // Distinct from both the gold objective ring and the cyan
-            // deployment-zone ring (Pass 12) so the three never read as the
-            // same marker when a recon target sits near either of them.
-            Color color = new Color(.80f, .42f, .96f, .90f);
             ring.material = NewOverlayMaterial(color);
             ring.startColor = color;
             ring.endColor = color;
@@ -2260,21 +2366,25 @@ namespace AlwaysFaithful.Prototype
                 float radius = index % 2 == 0 ? .62f : .50f;
                 ring.SetPosition(index, cell.transform.position + new Vector3(Mathf.Cos(angle) * radius, CellSurfaceOffset + .11f, Mathf.Sin(angle) * radius));
             }
-            tacticalReconRings[hex] = ring;
+            ringSet[hex] = ring;
         }
 
-        private void DecayTacticalReconMarkers()
+        private void DecayTacticalReconMarkers() => DecayReconMarkerList(tacticalReconMarkers, tacticalBattlefield.ActiveReconMarkers, tacticalReconRings);
+
+        private void DecayPlaReconMarkers() => DecayReconMarkerList(tacticalPlaReconMarkers, tacticalBattlefield.ActivePlaReconMarkers, tacticalPlaReconRings);
+
+        private void DecayReconMarkerList(List<TacticalReconMarker> markers, List<TacticalReconMarker> battlefieldMarkers, Dictionary<HexCoord, LineRenderer> rings)
         {
-            for (int index = tacticalReconMarkers.Count - 1; index >= 0; index--)
+            for (int index = markers.Count - 1; index >= 0; index--)
             {
-                TacticalReconMarker marker = tacticalReconMarkers[index];
+                TacticalReconMarker marker = markers[index];
                 marker.TurnsRemaining--;
                 if (marker.TurnsRemaining > 0) continue;
-                tacticalReconMarkers.RemoveAt(index);
-                tacticalBattlefield.ActiveReconMarkers.Remove(marker);
+                markers.RemoveAt(index);
+                battlefieldMarkers.Remove(marker);
                 tacticalAudio.Play(TacticalSound.ContactLost);
-                if (tacticalReconRings.TryGetValue(marker.Hex, out LineRenderer ring) && ring != null) Destroy(ring.gameObject);
-                tacticalReconRings.Remove(marker.Hex);
+                if (rings.TryGetValue(marker.Hex, out LineRenderer ring) && ring != null) Destroy(ring.gameObject);
+                rings.Remove(marker.Hex);
             }
         }
 
@@ -3059,10 +3169,12 @@ namespace AlwaysFaithful.Prototype
                 int seed = TacticalDirectFire.CreateSeed(tacticalBattlefield.BattlefieldId, turnState.TurnNumber,
                     tacticalEventSequence + orders);
                 TacticalWeaponState weapon = tacticalEnemyWeapons[enemy.Id];
+                tacticalEnemyContacts.TryGetValue(enemy.Id, out TacticalContactState previousEnemyContact);
+                TacticalContactState opponentContact = ComputeEnemyContactOnPlatoon(enemy, previousEnemyContact);
                 TacticalAiOrder order = TacticalEnemyTurn.PlanOrder(localMovementBoard, enemy, weapon,
-                    tacticalUnitState.Position, tacticalUnitState, turnState.TurnNumber, seed);
+                    tacticalUnitState.Position, tacticalUnitState, opponentContact, turnState.TurnNumber, seed);
                 if (!TacticalEnemyTurn.ValidateOrder(localMovementBoard, order, enemy, weapon,
-                        tacticalUnitState, turnState.TurnNumber, out string rejection))
+                        tacticalUnitState, opponentContact, turnState.TurnNumber, out string rejection))
                 {
                     Debug.LogWarning($"ALWAYS_FAITHFUL_ENEMY_ORDER_REJECTED unit={enemy.Id} kind={order.Kind} reason={rejection}");
                     order = new TacticalAiOrder { UnitId = enemy.Id, Kind = TacticalAiOrderKind.Hold,
@@ -3082,7 +3194,7 @@ namespace AlwaysFaithful.Prototype
                     ApplyCamera();
                 }
                 yield return EnemyDelay(.30f);
-                yield return ExecuteEnemyOrder(enemy, weapon, order, visible);
+                yield return ExecuteEnemyOrder(enemy, weapon, order, opponentContact, visible);
                 RecordEnemyAction(enemy, order, visible);
                 RefreshTacticalObservation();
                 yield return EnemyDelay(.34f);
@@ -3099,6 +3211,7 @@ namespace AlwaysFaithful.Prototype
             tacticalUnit.Present(tacticalUnitState);
             tacticalFormationView.Present(tacticalUnitState);
             DecayTacticalReconMarkers();
+            DecayPlaReconMarkers();
             RefreshTacticalObservation();
             EvaluateTacticalVictory();
             tacticalOrderFeedback = tacticalObjective.Outcome != TacticalBattleOutcome.InProgress
@@ -3267,6 +3380,8 @@ namespace AlwaysFaithful.Prototype
                 entries.Add((recon.Sequence, $"RECON • T{recon.Turn} • {UnitDisplayName(recon.UnitId)} tasked {recon.Hex} ({recon.DurationTurns} turns)"));
             foreach (TacticalObjectiveEvent objectiveEvent in tacticalBattlefield.ObjectiveEvents)
                 entries.Add((objectiveEvent.Sequence, $"OBJECTIVE • T{objectiveEvent.Turn} • {objectiveEvent.Hex} {(objectiveEvent.ControlledByUsmc ? "secured" : "lost")} by USMC"));
+            foreach (TacticalSupportCardEvent supportCard in tacticalBattlefield.SupportCardEvents)
+                entries.Add((supportCard.Sequence, $"SUPPORT • T{supportCard.Turn} • {supportCard.Summary}"));
             entries.Sort((a, b) => a.Sequence.CompareTo(b.Sequence));
             var lines = new List<string>();
             int start = Mathf.Max(0, entries.Count - maximumEntries);
@@ -3285,7 +3400,7 @@ namespace AlwaysFaithful.Prototype
         }
 
         private IEnumerator ExecuteEnemyOrder(TacticalUnitState enemy, TacticalWeaponState weapon,
-            TacticalAiOrder order, bool visible)
+            TacticalAiOrder order, TacticalContactState opponentContact, bool visible)
         {
             switch (order.Kind)
             {
@@ -3301,14 +3416,19 @@ namespace AlwaysFaithful.Prototype
                     }
                     break;
                 case TacticalAiOrderKind.Fire:
-                    yield return ExecuteEnemyFire(enemy, weapon, order, visible);
+                    yield return ExecuteEnemyFire(enemy, weapon, order, opponentContact, visible);
                     break;
                 case TacticalAiOrderKind.Move:
                     yield return ExecuteEnemyMove(enemy, order, visible);
                     break;
+                case TacticalAiOrderKind.Recon:
+                    yield return ExecuteEnemyRecon(enemy, order, visible);
+                    break;
                 case TacticalAiOrderKind.Observe:
-                    TacticalObservation.Check(localMovementBoard, enemy.Id, enemy.Position,
-                        tacticalUnitState.Id, tacticalUnitState.DisplayName, tacticalUnitState.Position, turnState.TurnNumber);
+                    // opponentContact was already computed by RunEnemyTurn (with
+                    // proper memory/recon-bonus applied) — Observe has no further
+                    // effect to apply here beyond that, which RefreshTacticalObservation
+                    // already persists into tacticalEnemyContacts after this order runs.
                     break;
             }
         }
@@ -3340,12 +3460,10 @@ namespace AlwaysFaithful.Prototype
         }
 
         private IEnumerator ExecuteEnemyFire(TacticalUnitState enemy, TacticalWeaponState weapon,
-            TacticalAiOrder order, bool visible)
+            TacticalAiOrder order, TacticalContactState opponentContact, bool visible)
         {
-            TacticalContactState target = TacticalObservation.Check(localMovementBoard, enemy.Id, enemy.Position,
-                tacticalUnitState.Id, tacticalUnitState.DisplayName, tacticalUnitState.Position, turnState.TurnNumber);
             TacticalFirePreview preview = TacticalDirectFire.Preview(localMovementBoard, enemy.Id, enemy.Position,
-                target, tacticalUnitState.Position, weapon, enemy.RemainingActionPoints);
+                opponentContact, tacticalUnitState.Position, weapon, enemy.RemainingActionPoints);
             TacticalFireEvent fire = TacticalDirectFire.Resolve(preview, weapon, order.Seed);
             if (fire.Outcome == TacticalFireOutcome.Rejected || !enemy.TrySpendActionPoints(TacticalDirectFire.ActionPointCost)) yield break;
             fire.Sequence = ++tacticalEventSequence;
@@ -3373,6 +3491,35 @@ namespace AlwaysFaithful.Prototype
             yield return EnemyDelay(.42f);
             tacticalFireLine.enabled = false;
             Debug.Log($"ALWAYS_FAITHFUL_ENEMY_FIRE unit={enemy.Id} seed={fire.Seed} roll={fire.Roll} outcome={fire.Outcome}");
+        }
+
+        // PLA-side counterpart of TryIssueTacticalRecon: tasks an active sensor
+        // sweep on the platoon's last-known hex to try to reacquire lost contact.
+        // Spends AP and places/refreshes a marker regardless of visibility (the
+        // effect is real either way); only the ring/camera are gated on visible,
+        // matching ExecuteEnemyMove/ExecuteEnemyFire's existing convention.
+        private IEnumerator ExecuteEnemyRecon(TacticalUnitState enemy, TacticalAiOrder order, bool visible)
+        {
+            if (!enemy.TrySpendActionPoints(order.ActionPointCost)) yield break;
+            TacticalReconMarker marker = null;
+            foreach (TacticalReconMarker existing in tacticalPlaReconMarkers)
+                if (existing.Hex.Equals(order.Destination)) { marker = existing; break; }
+            if (marker == null)
+            {
+                marker = new TacticalReconMarker { Hex = order.Destination, IsVisibleToUsmc = visible };
+                tacticalPlaReconMarkers.Add(marker);
+                tacticalBattlefield.ActivePlaReconMarkers.Add(marker);
+            }
+            else if (visible)
+            {
+                // Once the player has observed the tasking, keep that knowledge
+                // for the marker's remaining lifetime (including save/restore).
+                marker.IsVisibleToUsmc = true;
+            }
+            marker.TurnsRemaining = TacticalRecon.DurationTurns;
+            if (marker.IsVisibleToUsmc) BuildTacticalReconRing(order.Destination, tacticalPlaReconRings, PlaReconRingColor);
+            Debug.Log($"ALWAYS_FAITHFUL_PLA_RECON_EVENT unit={enemy.Id} hex={order.Destination} duration={TacticalRecon.DurationTurns}");
+            yield break;
         }
 
         private void RecordEnemyAction(TacticalUnitState enemy, TacticalAiOrder order, bool visible)
@@ -4160,16 +4307,18 @@ namespace AlwaysFaithful.Prototype
             board[mover.Position].OccupantId = mover.Id;
             board[opponent.Position].OccupantId = opponent.Id;
             var weapon = new TacticalWeaponState("enemy-rifle", "Rifle", 6);
+            TacticalContactState moverContact = TacticalObservation.Check(board, mover.Id, mover.Position,
+                opponent.Id, opponent.DisplayName, opponent.Position, 1);
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            TacticalAiOrder first = TacticalEnemyTurn.PlanOrder(board, mover, weapon, opponent.Position, opponent, 1, 404);
-            TacticalAiOrder replay = TacticalEnemyTurn.PlanOrder(board, mover, weapon, opponent.Position, opponent, 1, 404);
+            TacticalAiOrder first = TacticalEnemyTurn.PlanOrder(board, mover, weapon, opponent.Position, opponent, moverContact, 1, 404);
+            TacticalAiOrder replay = TacticalEnemyTurn.PlanOrder(board, mover, weapon, opponent.Position, opponent, moverContact, 1, 404);
             for (int index = 0; index < 100; index++)
-                TacticalEnemyTurn.PlanOrder(board, mover, weapon, opponent.Position, opponent, 1, 404 + index);
+                TacticalEnemyTurn.PlanOrder(board, mover, weapon, opponent.Position, opponent, moverContact, 1, 404 + index);
             watch.Stop();
             elapsedMilliseconds = watch.ElapsedMilliseconds;
             if (first.Kind != TacticalAiOrderKind.Move || JsonUtility.ToJson(first) != JsonUtility.ToJson(replay) ||
                 HexCoord.Distance(first.Destination, opponent.Position) >= HexCoord.Distance(mover.Position, opponent.Position) ||
-                !TacticalEnemyTurn.ValidateOrder(board, first, mover, weapon, opponent, 1, out _))
+                !TacticalEnemyTurn.ValidateOrder(board, first, mover, weapon, opponent, moverContact, 1, out _))
             {
                 failure = "objective movement or fixed-seed replay";
                 return false;
@@ -4183,7 +4332,7 @@ namespace AlwaysFaithful.Prototype
                 Destination = opponent.Position,
                 ActionPointCost = 1
             };
-            if (TacticalEnemyTurn.ValidateOrder(board, illegal, mover, weapon, opponent, 1, out _))
+            if (TacticalEnemyTurn.ValidateOrder(board, illegal, mover, weapon, opponent, moverContact, 1, out _))
             {
                 failure = "illegal AI order accepted";
                 return false;
@@ -4191,8 +4340,10 @@ namespace AlwaysFaithful.Prototype
 
             var recovering = new TacticalUnitState("recover", "Recovering", new HexCoord(1, 0), 4);
             recovering.ApplySuppressionPoints(TacticalSuppression.DisruptedThreshold);
+            TacticalContactState recoveringContact = TacticalObservation.Check(board, recovering.Id, recovering.Position,
+                opponent.Id, opponent.DisplayName, opponent.Position, 1);
             TacticalAiOrder recovery = TacticalEnemyTurn.PlanOrder(board, recovering, weapon,
-                opponent.Position, opponent, 1, 11);
+                opponent.Position, opponent, recoveringContact, 1, 11);
             if (recovery.Kind != TacticalAiOrderKind.Recover)
             {
                 failure = "recovery priority";
@@ -4200,21 +4351,50 @@ namespace AlwaysFaithful.Prototype
             }
 
             var firer = new TacticalUnitState("firer", "Firer", new HexCoord(13, 0), 4);
+            TacticalContactState firerContact = TacticalObservation.Check(board, firer.Id, firer.Position,
+                opponent.Id, opponent.DisplayName, opponent.Position, 1);
             TacticalAiOrder fire = TacticalEnemyTurn.PlanOrder(board, firer, weapon,
-                opponent.Position, opponent, 1, 12);
+                opponent.Position, opponent, firerContact, 1, 12);
             if (fire.Kind != TacticalAiOrderKind.Fire ||
-                !TacticalEnemyTurn.ValidateOrder(board, fire, firer, weapon, opponent, 1, out _))
+                !TacticalEnemyTurn.ValidateOrder(board, fire, firer, weapon, opponent, firerContact, 1, out _))
             {
                 failure = "legal direct-fire selection";
                 return false;
             }
 
             var observer = new TacticalUnitState("observer", "Observer", new HexCoord(6, 0), 4);
+            TacticalContactState observerContact = TacticalObservation.Check(board, observer.Id, observer.Position,
+                opponent.Id, opponent.DisplayName, opponent.Position, 1);
             TacticalAiOrder observe = TacticalEnemyTurn.PlanOrder(board, observer, weapon,
-                observer.Position, opponent, 1, 13);
+                observer.Position, opponent, observerContact, 1, 13);
             if (observe.Kind != TacticalAiOrderKind.Observe)
             {
                 failure = "observation fallback";
+                return false;
+            }
+
+            // A recently lost track (still within TacticalObservation.Check's
+            // one-turn stale-carryover window) should send the AI to reacquire
+            // it via Recon rather than blindly advancing toward the objective.
+            var reconMover = new TacticalUnitState("recon-mover", "ReconMover", new HexCoord(2, 0), 4);
+            var staleContact = new TacticalContactState
+            {
+                TargetId = opponent.Id,
+                DisplayName = opponent.DisplayName,
+                State = TacticalVisibilityState.Contact,
+                LastKnownPosition = new HexCoord(4, 0),
+                LastObservedTurn = 1,
+                IsStale = true,
+                ObserverId = reconMover.Id,
+                RangeHexes = 2,
+                LineOfSight = TacticalLosState.Blocked
+            };
+            TacticalAiOrder recon = TacticalEnemyTurn.PlanOrder(board, reconMover, weapon,
+                opponent.Position, opponent, staleContact, 2, 14);
+            if (recon.Kind != TacticalAiOrderKind.Recon || !recon.Destination.Equals(staleContact.LastKnownPosition) ||
+                !TacticalEnemyTurn.ValidateOrder(board, recon, reconMover, weapon, opponent, staleContact, 2, out _))
+            {
+                failure = "PLA recon reacquire selection";
                 return false;
             }
             if (elapsedMilliseconds > TacticalEnemyTurn.PlanningBudgetMilliseconds)
@@ -4909,6 +5089,7 @@ namespace AlwaysFaithful.Prototype
                 snapEnemyStatuses.Add(enemy.CombatStatus);
             }
             int snapContactCount = tacticalContacts.Count;
+            int snapEnemyContactCount = tacticalEnemyContacts.Count;
             int snapTurnNumber = turnState.TurnNumber;
             string snapActiveSide = turnState.ActiveSide;
             TacticalPosture snapPosture = tacticalObjective.Posture;
@@ -4935,9 +5116,10 @@ namespace AlwaysFaithful.Prototype
             TacticalBattleSaveState parsed = JsonUtility.FromJson<TacticalBattleSaveState>(File.ReadAllText(scratchPath));
             if (parsed == null || parsed.Battlefield.BattlefieldId != snapBattlefieldId || parsed.Turn.TurnNumber != snapTurnNumber ||
                 parsed.UsmcUnit.Id != tacticalUnitState.Id || parsed.EnemyUnits.Count != tacticalEnemyStates.Count ||
-                parsed.Contacts.Count != snapContactCount || parsed.EventSequence != snapEventSequence || parsed.HasActiveBattleRequest)
+                parsed.Contacts.Count != snapContactCount || parsed.EnemyContacts.Count != snapEnemyContactCount ||
+                parsed.EventSequence != snapEventSequence || parsed.HasActiveBattleRequest)
             {
-                Debug.LogError($"ALWAYS_FAITHFUL_SAVE_RESTORE_REGRESSION_FAILED parsed save mismatch battlefield={parsed?.Battlefield?.BattlefieldId} turn={parsed?.Turn?.TurnNumber} enemies={parsed?.EnemyUnits.Count} contacts={parsed?.Contacts.Count} sequence={parsed?.EventSequence}");
+                Debug.LogError($"ALWAYS_FAITHFUL_SAVE_RESTORE_REGRESSION_FAILED parsed save mismatch battlefield={parsed?.Battlefield?.BattlefieldId} turn={parsed?.Turn?.TurnNumber} enemies={parsed?.EnemyUnits.Count} contacts={parsed?.Contacts.Count} enemyContacts={parsed?.EnemyContacts.Count}/{snapEnemyContactCount} sequence={parsed?.EventSequence}");
                 Application.Quit(1);
                 yield break;
             }
@@ -4964,7 +5146,7 @@ namespace AlwaysFaithful.Prototype
 
             if (!tacticalUnitState.Position.Equals(snapUnitPosition) || tacticalUnitState.RemainingActionPoints != snapUnitAp ||
                 tacticalUnitState.CombatStatus != snapUnitStatus || tacticalUnitState.SuppressionPoints != snapUnitSuppression ||
-                !enemiesMatch || tacticalContacts.Count != snapContactCount ||
+                !enemiesMatch || tacticalContacts.Count != snapContactCount || tacticalEnemyContacts.Count != snapEnemyContactCount ||
                 turnState.TurnNumber != snapTurnNumber || turnState.ActiveSide != snapActiveSide ||
                 tacticalObjective.Posture != snapPosture || tacticalObjective.TurnLimit != snapTurnLimit ||
                 !tacticalObjective.ObjectiveHex.Equals(snapObjectiveHex) || tacticalObjective.Outcome != snapOutcome ||
@@ -4973,7 +5155,7 @@ namespace AlwaysFaithful.Prototype
                 tacticalEventSequence != snapEventSequence ||
                 tacticalContactViews.Count != tacticalEnemyStates.Count || !reconRingsOk || !occupancyOk)
             {
-                Debug.LogError($"ALWAYS_FAITHFUL_SAVE_RESTORE_REGRESSION_FAILED restored state mismatch unit={tacticalUnitState.Position}/{snapUnitPosition} ap={tacticalUnitState.RemainingActionPoints}/{snapUnitAp} enemiesMatch={enemiesMatch} contacts={tacticalContacts.Count}/{snapContactCount} turn={turnState.TurnNumber}/{snapTurnNumber} markers={tacticalReconMarkers.Count}/{snapReconMarkerCount} sequence={tacticalEventSequence}/{snapEventSequence} reconRingsOk={reconRingsOk} occupancyOk={occupancyOk}");
+                Debug.LogError($"ALWAYS_FAITHFUL_SAVE_RESTORE_REGRESSION_FAILED restored state mismatch unit={tacticalUnitState.Position}/{snapUnitPosition} ap={tacticalUnitState.RemainingActionPoints}/{snapUnitAp} enemiesMatch={enemiesMatch} contacts={tacticalContacts.Count}/{snapContactCount} enemyContacts={tacticalEnemyContacts.Count}/{snapEnemyContactCount} turn={turnState.TurnNumber}/{snapTurnNumber} markers={tacticalReconMarkers.Count}/{snapReconMarkerCount} sequence={tacticalEventSequence}/{snapEventSequence} reconRingsOk={reconRingsOk} occupancyOk={occupancyOk}");
                 Application.Quit(1);
                 yield break;
             }
@@ -5138,9 +5320,9 @@ namespace AlwaysFaithful.Prototype
 
         private static bool ValidateFeedbackRules(out string failure)
         {
-            if (TacticalBattlefieldState.CurrentSchemaVersion != 12)
+            if (TacticalBattlefieldState.CurrentSchemaVersion != 13)
             {
-                failure = $"expected schema version 12, got {TacticalBattlefieldState.CurrentSchemaVersion}";
+                failure = $"expected schema version 13, got {TacticalBattlefieldState.CurrentSchemaVersion}";
                 return false;
             }
             var battlefield = new TacticalBattlefieldState { BattlefieldId = "TEST" };
@@ -5260,9 +5442,9 @@ namespace AlwaysFaithful.Prototype
 
         private static bool ValidateScenarioRules(out string failure)
         {
-            if (TacticalBattlefieldState.CurrentSchemaVersion != 12)
+            if (TacticalBattlefieldState.CurrentSchemaVersion != 13)
             {
-                failure = $"expected schema version 12 after adding the support-card ISR field, got {TacticalBattlefieldState.CurrentSchemaVersion}";
+                failure = $"expected schema version 13 after adding support-card events and PLA recon markers, got {TacticalBattlefieldState.CurrentSchemaVersion}";
                 return false;
             }
             const string id = "TW-TEST-SCENARIO";
@@ -5803,6 +5985,12 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 yield break;
             }
+            if (!BuildTacticalEventLog(int.MaxValue).Exists(line => line.StartsWith("SUPPORT •", StringComparison.Ordinal)))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_CARDS_REGRESSION_FAILED playing a card did not produce a SUPPORT event-log line");
+                Application.Quit(1);
+                yield break;
+            }
             if (!TryLoadBattalionStatus(battalionStatusPath, out TacticalBattalionStatus roundTripped) || roundTripped.Hand.Count != 0)
             {
                 Debug.LogError("ALWAYS_FAITHFUL_CARDS_REGRESSION_FAILED status did not persist/round-trip correctly");
@@ -5812,6 +6000,192 @@ namespace AlwaysFaithful.Prototype
 
             Debug.Log("ALWAYS_FAITHFUL_CARDS_REGRESSION_OK");
             Application.Quit(0);
+        }
+
+        // PLA active recon is a core tactical mechanic (not standalone-only
+        // campaign meta like support cards), so this regression proves it
+        // fires identically for a plain standalone battle AND a BattleRequest-
+        // driven one, with no gating either way.
+        private IEnumerator RunPlaReconRegression()
+        {
+            yield return null;
+            EnterTacticalMap(FindHighReliefOperationalCell(), false);
+            fastEnemyAnimation = true;
+            tacticalObjective.TurnLimit = (turnState.TurnNumber - tacticalObjective.BattleStartTurn) + 20;
+
+            if (tacticalUnitSpottedTier == TacticalVisibilityState.Hidden)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_FAILED initial live enemy contact did not activate the tracking readout");
+                Application.Quit(1);
+                yield break;
+            }
+
+            if (!TryManufactureLostContact(tacticalEnemyStates[0], out TacticalUnitState targetEnemy))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_FAILED could not manufacture an out-of-range platoon position");
+                Application.Quit(1);
+                yield break;
+            }
+
+            int markersBefore = tacticalPlaReconMarkers.Count;
+            int actionsBefore = tacticalBattlefield.EnemyActionEvents.Count;
+            string targetEnemyId = targetEnemy.Id;
+            HexCoord expectedReconHex = targetEnemy.Position;
+            EndTacticalTurn();
+            float deadline = Time.realtimeSinceStartup + 5f;
+            do { yield return null; } while (tacticalEnemyTurnActive && Time.realtimeSinceStartup < deadline);
+
+            if (!EnemyIssuedRecon(targetEnemyId, actionsBefore) || tacticalPlaReconMarkers.Count != markersBefore + 1 ||
+                !tacticalPlaReconMarkers.Exists(marker => marker.Hex.Equals(expectedReconHex) && marker.IsVisibleToUsmc) ||
+                !tacticalPlaReconRings.ContainsKey(expectedReconHex))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_FAILED recon not issued, markers={tacticalPlaReconMarkers.Count}/{markersBefore + 1} rings={tacticalPlaReconRings.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+            if (tacticalUnitSpottedTier != TacticalVisibilityState.Hidden)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_FAILED stale-only enemy contact kept tracking readout active tier={tacticalUnitSpottedTier}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            string scratchDirectory = Path.Combine(Path.GetTempPath(), "AlwaysFaithfulPlaReconRegression");
+            Directory.CreateDirectory(scratchDirectory);
+            string savePath = Path.Combine(scratchDirectory, "battle-save.json");
+            SaveTacticalBattle(savePath);
+            TacticalBattleSaveState parsedSave = JsonUtility.FromJson<TacticalBattleSaveState>(File.ReadAllText(savePath));
+            if (parsedSave == null || parsedSave.EnemyContacts.Count != tacticalEnemyContacts.Count ||
+                parsedSave.Battlefield.ActivePlaReconMarkers.Count != markersBefore + 1)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_FAILED serialized save mismatch enemyContacts={parsedSave?.EnemyContacts.Count} markers={parsedSave?.Battlefield?.ActivePlaReconMarkers.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+            if (!TryLoadTacticalBattle(savePath, out string loadError) ||
+                !tacticalPlaReconMarkers.Exists(marker => marker.Hex.Equals(expectedReconHex) && marker.IsVisibleToUsmc) ||
+                !tacticalPlaReconRings.ContainsKey(expectedReconHex))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_FAILED restored save mismatch error={loadError} markers={tacticalPlaReconMarkers.Count} rings={tacticalPlaReconRings.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            // Two further enemy-turn-ends should decay the marker away (DurationTurns=2).
+            for (int index = 0; index < TacticalRecon.DurationTurns; index++)
+            {
+                EndTacticalTurn();
+                deadline = Time.realtimeSinceStartup + 5f;
+                do { yield return null; } while (tacticalEnemyTurnActive && Time.realtimeSinceStartup < deadline);
+            }
+            if (tacticalPlaReconMarkers.Count != markersBefore)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_FAILED marker did not decay, count={tacticalPlaReconMarkers.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            ReturnToIsland(false);
+            string requestPath = Path.Combine(scratchDirectory, "request.json");
+            var request = new BattleRequest
+            {
+                RequestId = "pla-recon-regression-request-1",
+                CampaignId = "pla-recon-regression-campaign-1",
+                Seed = 9191,
+                TheaterHex = FindHighReliefOperationalCell().Coord,
+                OutputPath = Path.Combine(scratchDirectory, "result.json")
+            };
+            File.WriteAllText(requestPath, JsonUtility.ToJson(request));
+            TryLoadBattleRequest(requestPath);
+            if (battleRequestError != null || activeBattleRequest == null)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_FAILED battle request setup rejected: " + battleRequestError);
+                Application.Quit(1);
+                yield break;
+            }
+            DismissCampaignBriefing();
+            tacticalObjective.TurnLimit = (turnState.TurnNumber - tacticalObjective.BattleStartTurn) + 20;
+
+            if (!TryManufactureLostContact(tacticalEnemyStates[0], out TacticalUnitState requestEnemy))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_FAILED could not manufacture a BattleRequest lost-contact fixture");
+                Application.Quit(1);
+                yield break;
+            }
+            int requestActionsBefore = tacticalBattlefield.EnemyActionEvents.Count;
+            EndTacticalTurn();
+            deadline = Time.realtimeSinceStartup + 5f;
+            do { yield return null; } while (tacticalEnemyTurnActive && Time.realtimeSinceStartup < deadline);
+            if (!EnemyIssuedRecon(requestEnemy.Id, requestActionsBefore))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_FAILED BattleRequest-driven battle did not allow PLA recon");
+                Application.Quit(1);
+                yield break;
+            }
+
+            Debug.Log("ALWAYS_FAITHFUL_PLA_RECON_REGRESSION_OK");
+            Application.Quit(0);
+        }
+
+        // Teleports the platoon to whichever board corner is farther from
+        // targetEnemy (guaranteed beyond even the most permissive obscured-
+        // contact range, so the enemy's next fresh observation check is
+        // unconditionally Hidden), then manufactures a recent non-stale
+        // contact in tacticalEnemyContacts so TacticalObservation.Check's
+        // one-turn stale-carryover fires — exactly the "just lost contact"
+        // condition PlanOrder's Recon branch looks for. Also manufactures the
+        // player's own contact on that enemy so the resulting order's
+        // presentation (ring, non-hidden log line) actually renders.
+        private bool TryManufactureLostContact(TacticalUnitState targetEnemy, out TacticalUnitState enemy)
+        {
+            enemy = targetEnemy;
+            HexCoord cornerA = new HexCoord(0, 0);
+            HexCoord cornerB = new HexCoord(tacticalBattlefield.Width - 1, tacticalBattlefield.Height - 1);
+            HexCoord farHex = HexCoord.Distance(cornerA, targetEnemy.Position) >= HexCoord.Distance(cornerB, targetEnemy.Position) ? cornerA : cornerB;
+            if (HexCoord.Distance(farHex, targetEnemy.Position) <= TacticalObservation.ObscuredContactRangeHexes) return false;
+
+            localMovementBoard[tacticalUnitState.Position].OccupantId = null;
+            tacticalUnitState.Position = farHex;
+            localMovementBoard[farHex].OccupantId = tacticalUnitState.Id;
+
+            // Isolate this fixture to one intended recon-capable formation.
+            // Without clearing the live pre-teleport picture, every formation
+            // legitimately inherits a stale contact and the regression tests a
+            // multi-unit sweep instead of the single order it is meant to prove.
+            tacticalEnemyContacts.Clear();
+            tacticalEnemyContacts[targetEnemy.Id] = new TacticalContactState
+            {
+                TargetId = tacticalUnitState.Id,
+                DisplayName = tacticalUnitState.DisplayName,
+                State = TacticalVisibilityState.Contact,
+                LastKnownPosition = targetEnemy.Position,
+                LastObservedTurn = turnState.TurnNumber,
+                IsStale = false,
+                ObserverId = targetEnemy.Id,
+                RangeHexes = 1,
+                LineOfSight = TacticalLosState.Clear
+            };
+            tacticalContacts[targetEnemy.Id] = new TacticalContactState
+            {
+                TargetId = targetEnemy.Id,
+                DisplayName = targetEnemy.DisplayName,
+                State = TacticalVisibilityState.Observed,
+                LastKnownPosition = targetEnemy.Position,
+                LastObservedTurn = turnState.TurnNumber,
+                IsStale = false,
+                ObserverId = tacticalUnitState.Id,
+                RangeHexes = 1,
+                LineOfSight = TacticalLosState.Clear
+            };
+            return true;
+        }
+
+        private bool EnemyIssuedRecon(string enemyId, int sinceIndex)
+        {
+            for (int index = sinceIndex; index < tacticalBattlefield.EnemyActionEvents.Count; index++)
+                if (tacticalBattlefield.EnemyActionEvents[index].UnitId == enemyId && tacticalBattlefield.EnemyActionEvents[index].Kind == TacticalAiOrderKind.Recon)
+                    return true;
+            return false;
         }
 
         private static bool ValidateFireRules(out string failure)
@@ -6655,7 +7029,8 @@ namespace AlwaysFaithful.Prototype
                 GUIStyle battalionStyle = new GUIStyle(badgeStyle) { alignment = TextAnchor.MiddleLeft };
                 battalionStyle.normal.textColor = TacticalBattalion.IsUnderStrength(battalionStatus) ? new Color(.94f, .60f, .30f) : new Color(.60f, .84f, .68f);
                 string battalionState = TacticalBattalion.IsUnderStrength(battalionStatus) ? "DEGRADED" : "READY";
-                GUI.Label(new Rect(38f, 254f, 348f, 20f), $"{battalionStatus.BattalionName.ToUpperInvariant()} • STRENGTH {battalionStatus.Strength}% • {battalionState}", battalionStyle);
+                string isrSuffix = tacticalBattlefield.IsrCardActive ? " • ISR ACTIVE" : string.Empty;
+                GUI.Label(new Rect(38f, 254f, 348f, 20f), $"{battalionStatus.BattalionName.ToUpperInvariant()} • STRENGTH {battalionStatus.Strength}% • {battalionState}{isrSuffix}", battalionStyle);
             }
 
             Rect tacticalSaveRect = new Rect(38f, 283f, 93f, 34f);
@@ -6670,7 +7045,8 @@ namespace AlwaysFaithful.Prototype
             if (GUI.Button(returnToIslandRect, "RETURN TO ISLAND", buttonStyle)) ReturnToIsland(true);
             GUI.enabled = true;
 
-            Rect intelligenceRect = new Rect(uiWidth - 355f, 18f, 335f, 151f + tacticalContacts.Count * 25f);
+            bool showSpottedBadge = tacticalUnitSpottedTier != TacticalVisibilityState.Hidden;
+            Rect intelligenceRect = new Rect(uiWidth - 355f, 18f, 335f, 151f + tacticalContacts.Count * 25f + (showSpottedBadge ? 30f : 0f));
             GUI.Box(intelligenceRect, GUIContent.none);
             GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 11f, 290f, 22f), "TACTICAL INTELLIGENCE", badgeStyle);
             GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 36f, 300f, 38f),
@@ -6691,6 +7067,13 @@ namespace AlwaysFaithful.Prototype
             Rect speedRect = new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 82f + tacticalContacts.Count * 25f, 300f, 28f);
             if (GUI.Button(speedRect, fastEnemyAnimation ? "ENEMY SPEED • FAST" : "ENEMY SPEED • CINEMATIC", buttonStyle))
                 fastEnemyAnimation = !fastEnemyAnimation;
+            if (showSpottedBadge)
+            {
+                GUIStyle spottedStyle = new GUIStyle(badgeStyle) { alignment = TextAnchor.MiddleLeft };
+                spottedStyle.normal.textColor = TacticalSpottedColor(tacticalUnitSpottedTier);
+                GUI.Label(new Rect(intelligenceRect.x + 16f, speedRect.y + 34f, 300f, 22f),
+                    $"ENEMY TRACKING YOU • {tacticalUnitSpottedTier.ToString().ToUpperInvariant()}", spottedStyle);
+            }
 
             if (tacticalReactionActive && !string.IsNullOrEmpty(tacticalReactionBannerText))
             {
@@ -6760,6 +7143,16 @@ namespace AlwaysFaithful.Prototype
                 case TacticalCombatStatus.Disrupted: return new Color(1f, .62f, .24f);
                 case TacticalCombatStatus.Suppressed: return new Color(1f, .84f, .30f);
                 default: return new Color(.48f, .78f, .58f);
+            }
+        }
+
+        private static Color TacticalSpottedColor(TacticalVisibilityState tier)
+        {
+            switch (tier)
+            {
+                case TacticalVisibilityState.Observed: return new Color(1f, .38f, .34f);
+                case TacticalVisibilityState.Identified: return new Color(1f, .62f, .24f);
+                default: return new Color(1f, .84f, .30f);
             }
         }
 

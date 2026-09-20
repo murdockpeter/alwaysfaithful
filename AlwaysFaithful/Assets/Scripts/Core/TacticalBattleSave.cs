@@ -18,7 +18,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattleSaveState
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string SavedAtUtc;
@@ -29,6 +29,10 @@ namespace AlwaysFaithful.Core
         public List<TacticalUnitState> EnemyUnits = new List<TacticalUnitState>();
         public List<TacticalEnemyWeaponEntry> EnemyWeapons = new List<TacticalEnemyWeaponEntry>();
         public List<TacticalContactState> Contacts = new List<TacticalContactState>();
+        // Schema 2: the AI's own per-unit contact memory on the platoon
+        // (TacticalContactState.ObserverId identifies which PLA unit each
+        // entry belongs to, since every entry shares the same TargetId).
+        public List<TacticalContactState> EnemyContacts = new List<TacticalContactState>();
         public int EventSequence;
 
         // JsonUtility can round-trip a null nested reference field as a

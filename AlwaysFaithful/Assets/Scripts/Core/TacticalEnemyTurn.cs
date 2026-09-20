@@ -9,7 +9,11 @@ namespace AlwaysFaithful.Core
         Recover,
         Fire,
         Move,
-        Hold
+        Hold,
+        // Appended, not inserted — TacticalEnemyActionEvent.Kind persists this
+        // enum in save files, and inserting a member earlier would silently
+        // renumber every already-saved historical Kind value.
+        Recon
     }
 
     [Serializable]
@@ -46,12 +50,18 @@ namespace AlwaysFaithful.Core
         public const int MaximumOrdersPerTurn = 16;
         public const int PlanningBudgetMilliseconds = 100;
 
+        // opponentContact is the AI's own already-computed, memory-carrying read
+        // on the opponent (built by the caller via TacticalObservation.Check with
+        // its own previous-turn contact passed in) — PlanOrder no longer computes
+        // this itself, so every caller (planning, validation, execution) reasons
+        // from the exact same contact rather than four independent fresh checks.
         public static TacticalAiOrder PlanOrder(
             IReadOnlyDictionary<HexCoord, TacticalMovementCell> board,
             TacticalUnitState unit,
             TacticalWeaponState weapon,
             HexCoord objective,
             TacticalUnitState opponent,
+            TacticalContactState opponentContact,
             int turn,
             int seed)
         {
@@ -62,7 +72,7 @@ namespace AlwaysFaithful.Core
                 Destination = unit?.Position ?? default,
                 Seed = seed
             };
-            if (unit == null || opponent == null || board == null)
+            if (unit == null || opponent == null || board == null || opponentContact == null)
                 return Hold(order, "Incomplete tactical state");
 
             if (unit.CanRally && unit.CombatStatus >= TacticalCombatStatus.Disrupted)
@@ -73,10 +83,8 @@ namespace AlwaysFaithful.Core
                 return order;
             }
 
-            TacticalContactState contact = TacticalObservation.Check(board, unit.Id, unit.Position,
-                opponent.Id, opponent.DisplayName, opponent.Position, turn);
             TacticalFirePreview fire = TacticalDirectFire.Preview(board, unit.Id, unit.Position,
-                contact, opponent.Position, weapon, unit.RemainingActionPoints);
+                opponentContact, opponent.Position, weapon, unit.RemainingActionPoints);
             if (unit.CanFire && fire.IsValid)
             {
                 order.Kind = TacticalAiOrderKind.Fire;
@@ -84,6 +92,23 @@ namespace AlwaysFaithful.Core
                 order.Destination = opponent.Position;
                 order.ActionPointCost = TacticalDirectFire.ActionPointCost;
                 order.Intent = "Engage observed opposing formation";
+                return order;
+            }
+
+            // A recently lost track (still within its one-turn stale-carryover
+            // window — see TacticalObservation.Check) is worth an active sensor
+            // sweep on its last-known hex before falling back to blind advance,
+            // the same reacquire-lost-contact behavior the player's own Recon
+            // order already lets the USMC platoon do.
+            if (opponentContact.IsStale && opponentContact.State != TacticalVisibilityState.Hidden &&
+                unit.RemainingActionPoints >= TacticalRecon.ActionPointCost &&
+                HexCoord.Distance(unit.Position, opponentContact.LastKnownPosition) <= TacticalRecon.MaximumRangeHexes)
+            {
+                order.Kind = TacticalAiOrderKind.Recon;
+                order.TargetId = opponent.Id;
+                order.Destination = opponentContact.LastKnownPosition;
+                order.ActionPointCost = TacticalRecon.ActionPointCost;
+                order.Intent = "Reacquire lost contact";
                 return order;
             }
 
@@ -136,6 +161,7 @@ namespace AlwaysFaithful.Core
             TacticalUnitState unit,
             TacticalWeaponState weapon,
             TacticalUnitState opponent,
+            TacticalContactState opponentContact,
             int turn,
             out string rejection)
         {
@@ -149,10 +175,8 @@ namespace AlwaysFaithful.Core
                         return Reject(out rejection, "Recovery is not legal");
                     return true;
                 case TacticalAiOrderKind.Fire:
-                    TacticalContactState contact = TacticalObservation.Check(board, unit.Id, unit.Position,
-                        opponent.Id, opponent.DisplayName, opponent.Position, turn);
                     TacticalFirePreview fire = TacticalDirectFire.Preview(board, unit.Id, unit.Position,
-                        contact, opponent.Position, weapon, unit.RemainingActionPoints);
+                        opponentContact, opponent.Position, weapon, unit.RemainingActionPoints);
                     if (!fire.IsValid || order.TargetId != opponent.Id || !order.Destination.Equals(opponent.Position))
                         return Reject(out rejection, fire.RejectionReason ?? "Fire target mismatch");
                     return true;
@@ -166,6 +190,11 @@ namespace AlwaysFaithful.Core
                     TacticalLosResult los = TacticalLineOfSight.Inspect(board, unit.Position, order.Destination);
                     if (!los.IsValid || order.TargetId != opponent.Id)
                         return Reject(out rejection, los.RejectionReason ?? "Observation target mismatch");
+                    return true;
+                case TacticalAiOrderKind.Recon:
+                    if (order.ActionPointCost != TacticalRecon.ActionPointCost ||
+                        HexCoord.Distance(unit.Position, order.Destination) > TacticalRecon.MaximumRangeHexes)
+                        return Reject(out rejection, "Recon target out of range");
                     return true;
                 case TacticalAiOrderKind.Hold:
                     return true;

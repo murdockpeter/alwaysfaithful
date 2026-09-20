@@ -8,6 +8,10 @@ namespace AlwaysFaithful.Core
     {
         public HexCoord Hex;
         public int TurnsRemaining;
+        // PLA tasking is only drawn when the player observed the order. Persist
+        // that knowledge so save/restore cannot reveal a previously hidden
+        // enemy action or erase a ring the player had already seen.
+        public bool IsVisibleToUsmc;
     }
 
     [Serializable]

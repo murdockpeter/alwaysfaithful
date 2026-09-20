@@ -135,6 +135,7 @@ Complete these in order unless a discovered dependency requires a documented reo
 - [x] Add randomized scenario generation for standalone play, so no two battles at a hex play the same.
 - [x] Add new mission types (Raid, Reconnaissance-in-Force, Withdrawal) and a persistent standalone Battalion status/campaign layer.
 - [x] Add an order-of-battle support-card resource pool (ISR, Fire Support, Reserve) with a pre-battle commitment modal (Pass A); an in-battle Call for Fire order spending the same pool is still to come (Pass B).
+- [x] Give the PLA an active sensor-tasking capability (Recon order) and real turn-to-turn contact memory, add a persistent "enemy tracking you" readout for the player, and close the event-log/status gaps left in the support-card system (ISR/Reserve plays were previously invisible once committed).
 - [ ] Run a clean-machine Windows build test and archive the exact executable plus test logs.
 - [ ] Conduct at least three no-instruction playtests and record confusion, misclicks, and unreadable states.
 - [ ] Resolve all blocking and high-severity findings before calling Phase I complete.

@@ -21,6 +21,19 @@ namespace AlwaysFaithful.Core
         public TacticalSupportAssetType AssetType;
     }
 
+    // A record of a card actually being played, for the in-battle/after-action
+    // event log — distinct from TacticalSupportCard (the persisted hand entry
+    // itself), the same split TacticalReconMarker/TacticalReconEvent already use.
+    [Serializable]
+    public sealed class TacticalSupportCardEvent
+    {
+        public int Sequence;
+        public string BattlefieldId;
+        public int Turn;
+        public TacticalSupportAssetType AssetType;
+        public string Summary;
+    }
+
     public static class TacticalSupportCardCatalog
     {
         public static string DisplayName(TacticalSupportAssetType type)
