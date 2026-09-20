@@ -1529,7 +1529,7 @@ namespace AlwaysFaithful.Prototype
                 File.WriteAllText(tempPath, JsonUtility.ToJson(settings, true));
                 if (File.Exists(settingsPath)) File.Delete(settingsPath);
                 File.Move(tempPath, settingsPath);
-                Debug.Log($"ALWAYS_FAITHFUL_SETTINGS_SAVED path={settingsPath} uiScale={settings.UiScale} cancel={settings.RemapCancelKey} resetCamera={settings.RemapResetCameraKey}");
+                Debug.Log($"ALWAYS_FAITHFUL_SETTINGS_SAVED path={settingsPath} uiScale={settings.UiScale} cancel={settings.RemapCancelKey} resetCamera={settings.RemapResetCameraKey} graphics={settings.GraphicsPreset} colorSafe={settings.ColorSafePalette} reducedMotion={settings.ReducedMotion} animSpeed={settings.AnimationSpeed}");
             }
             catch (Exception exception)
             {
@@ -1703,7 +1703,7 @@ namespace AlwaysFaithful.Prototype
                     ElevationMetres = source.ElevationMetres,
                     Cover = source.Cover
                 });
-                TacticalCoverView.Build(cellObject.transform, source.LocalCoord, source.Cover, source.IsBuiltUp, overlayShader);
+                TacticalCoverView.Build(cellObject.transform, source.LocalCoord, source.Cover, source.IsBuiltUp, overlayShader, settings.GraphicsPreset);
             }
             foreach (TacticalReconMarker marker in tacticalReconMarkers) BuildTacticalReconRing(marker.Hex, tacticalReconRings, TacticalReconRingColor);
             foreach (TacticalReconMarker marker in tacticalPlaReconMarkers)
@@ -2651,9 +2651,10 @@ namespace AlwaysFaithful.Prototype
             Destroy(impact.GetComponent<Collider>());
             tacticalAudio.Play(fireEvent.Outcome == TacticalFireOutcome.Hit ? TacticalSound.FireHit
                 : fireEvent.Outcome == TacticalFireOutcome.Suppressed ? TacticalSound.FireSuppressed : TacticalSound.FireMiss);
-            for (float elapsed = 0f; elapsed < .46f; elapsed += Time.deltaTime)
+            float fireDuration = .46f * AnimationTimeScale();
+            for (float elapsed = 0f; elapsed < fireDuration; elapsed += Time.deltaTime)
             {
-                float progress = Mathf.Clamp01(elapsed / .46f);
+                float progress = Mathf.Clamp01(elapsed / fireDuration);
                 tacticalFireLine.widthMultiplier = Mathf.Lerp(.18f, .035f, progress);
                 muzzle.transform.localScale = Vector3.one * Mathf.Lerp(.28f, .03f, progress);
                 impact.transform.localScale = Vector3.one * Mathf.Lerp(.12f, .62f, progress);
@@ -2814,8 +2815,14 @@ namespace AlwaysFaithful.Prototype
             tacticalLosResult = null;
         }
 
-        private static Color LosColor(TacticalLosState state, float alpha)
+        private Color LosColor(TacticalLosState state, float alpha)
         {
+            if (settings.ColorSafePalette)
+            {
+                if (state == TacticalLosState.Blocked) return new Color(.72f, .18f, .58f, alpha);
+                if (state == TacticalLosState.Obscured) return new Color(.90f, .55f, .12f, alpha);
+                return new Color(.30f, .62f, .95f, alpha);
+            }
             if (state == TacticalLosState.Blocked) return new Color(.92f, .17f, .13f, alpha);
             if (state == TacticalLosState.Obscured) return new Color(.98f, .66f, .16f, alpha);
             return new Color(.25f, .94f, .78f, alpha);
@@ -2877,11 +2884,12 @@ namespace AlwaysFaithful.Prototype
                 Vector3 end = LocalCounterPosition(stepCoord);
                 Vector3 direction = end - start;
                 if (direction.sqrMagnitude > .01f) tacticalUnit.transform.rotation = Quaternion.Euler(0f, Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg, 0f);
-                for (float elapsed = 0f; elapsed < .22f; elapsed += Time.deltaTime)
+                float stepDuration = .22f * AnimationTimeScale();
+                for (float elapsed = 0f; elapsed < stepDuration; elapsed += Time.deltaTime)
                 {
-                    float progress = Mathf.Clamp01(elapsed / .22f);
+                    float progress = Mathf.Clamp01(elapsed / stepDuration);
                     Vector3 position = Vector3.Lerp(start, end, Mathf.SmoothStep(0f, 1f, progress));
-                    position.y += Mathf.Sin(progress * Mathf.PI) * .16f;
+                    if (!settings.ReducedMotion) position.y += Mathf.Sin(progress * Mathf.PI) * .16f;
                     tacticalUnit.transform.position = position;
                     yield return null;
                 }
@@ -2931,15 +2939,25 @@ namespace AlwaysFaithful.Prototype
             Vector3 savedFocus = cameraFocus;
             float savedDistance = cameraDistance;
             Vector3 reactorFocus = LocalCounterPosition(reactor.Position);
-            float panElapsed = 0f;
-            while (panElapsed < .35f)
+            if (settings.ReducedMotion)
             {
-                panElapsed += Time.unscaledDeltaTime;
-                float progress = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(panElapsed / .35f));
-                cameraFocus = Vector3.Lerp(savedFocus, reactorFocus, progress);
-                cameraDistance = Mathf.Lerp(savedDistance, Mathf.Min(savedDistance, 16f), progress);
+                cameraFocus = reactorFocus;
+                cameraDistance = Mathf.Min(savedDistance, 16f);
                 ApplyCamera();
-                yield return null;
+            }
+            else
+            {
+                float panDuration = .35f * AnimationTimeScale();
+                float panElapsed = 0f;
+                while (panElapsed < panDuration)
+                {
+                    panElapsed += Time.unscaledDeltaTime;
+                    float progress = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(panElapsed / panDuration));
+                    cameraFocus = Vector3.Lerp(savedFocus, reactorFocus, progress);
+                    cameraDistance = Mathf.Lerp(savedDistance, Mathf.Min(savedDistance, 16f), progress);
+                    ApplyCamera();
+                    yield return null;
+                }
             }
 
             int sequence = tacticalEventSequence + 1;
@@ -2991,17 +3009,21 @@ namespace AlwaysFaithful.Prototype
             tacticalFormationView.Present(tacticalUnitState);
             Debug.Log($"ALWAYS_FAITHFUL_REACTION_EVENT sequence={reactionEvent.Sequence} reactor={reactionEvent.ReactorId} mover={reactionEvent.MoverId} seed={reactionEvent.Seed} hit={reactionEvent.HitChance} roll={reactionEvent.Roll} outcome={reactionEvent.Outcome} resolution={reactionEvent.Resolution}");
 
-            panElapsed = 0f;
-            Vector3 fromFocus = cameraFocus;
-            float fromDistance = cameraDistance;
-            while (panElapsed < .35f)
+            if (!settings.ReducedMotion)
             {
-                panElapsed += Time.unscaledDeltaTime;
-                float progress = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(panElapsed / .35f));
-                cameraFocus = Vector3.Lerp(fromFocus, savedFocus, progress);
-                cameraDistance = Mathf.Lerp(fromDistance, savedDistance, progress);
-                ApplyCamera();
-                yield return null;
+                Vector3 fromFocus = cameraFocus;
+                float fromDistance = cameraDistance;
+                float returnDuration = .35f * AnimationTimeScale();
+                float returnElapsed = 0f;
+                while (returnElapsed < returnDuration)
+                {
+                    returnElapsed += Time.unscaledDeltaTime;
+                    float progress = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(returnElapsed / returnDuration));
+                    cameraFocus = Vector3.Lerp(fromFocus, savedFocus, progress);
+                    cameraDistance = Mathf.Lerp(fromDistance, savedDistance, progress);
+                    ApplyCamera();
+                    yield return null;
+                }
             }
             cameraFocus = savedFocus;
             cameraDistance = savedDistance;
@@ -3033,9 +3055,10 @@ namespace AlwaysFaithful.Prototype
             tacticalAudio.Play(reactionEvent.Outcome == TacticalFireOutcome.Hit ? TacticalSound.FireHit
                 : reactionEvent.Outcome == TacticalFireOutcome.Suppressed ? TacticalSound.FireSuppressed : TacticalSound.FireMiss);
             tacticalUnit.CueIncomingFire(reactionEvent.Outcome);
-            for (float elapsed = 0f; elapsed < .46f; elapsed += Time.deltaTime)
+            float reactionFireDuration = .46f * AnimationTimeScale();
+            for (float elapsed = 0f; elapsed < reactionFireDuration; elapsed += Time.deltaTime)
             {
-                float progress = Mathf.Clamp01(elapsed / .46f);
+                float progress = Mathf.Clamp01(elapsed / reactionFireDuration);
                 tacticalFireLine.widthMultiplier = Mathf.Lerp(.18f, .035f, progress);
                 muzzle.transform.localScale = Vector3.one * Mathf.Lerp(.28f, .03f, progress);
                 impact.transform.localScale = Vector3.one * Mathf.Lerp(.12f, .62f, progress);
@@ -3912,7 +3935,7 @@ namespace AlwaysFaithful.Prototype
                 if (!visible) continue;
                 Vector3 start = marker.transform.position;
                 Vector3 end = LocalCounterPosition(order.Path[index]) + Vector3.up * .03f;
-                float duration = fastEnemyAnimation ? .035f : .18f;
+                float duration = fastEnemyAnimation ? .035f : .18f * AnimationTimeScale();
                 for (float elapsed = 0f; elapsed < duration; elapsed += Time.unscaledDeltaTime)
                 {
                     marker.transform.position = Vector3.Lerp(start, end, Mathf.SmoothStep(0f, 1f, elapsed / duration));
@@ -4010,7 +4033,7 @@ namespace AlwaysFaithful.Prototype
         }
 
         private object EnemyDelay(float normalSeconds)
-            => new WaitForSecondsRealtime(fastEnemyAnimation ? Mathf.Min(.04f, normalSeconds) : normalSeconds);
+            => new WaitForSecondsRealtime(fastEnemyAnimation ? Mathf.Min(.04f, normalSeconds) : normalSeconds * AnimationTimeScale());
 
         private void SelectCell(HexCellView cell)
         {
@@ -4085,9 +4108,10 @@ namespace AlwaysFaithful.Prototype
             {
                 Vector3 start = unit.transform.position;
                 Vector3 end = cells[path[index]].transform.position + Vector3.up * (CellSurfaceOffset + CounterClearance);
-                for (float elapsed = 0f; elapsed < .20f; elapsed += Time.deltaTime)
+                float operationalStepDuration = .20f * AnimationTimeScale();
+                for (float elapsed = 0f; elapsed < operationalStepDuration; elapsed += Time.deltaTime)
                 {
-                    float blend = Mathf.SmoothStep(0f, 1f, elapsed / .20f);
+                    float blend = Mathf.SmoothStep(0f, 1f, elapsed / operationalStepDuration);
                     unit.transform.position = Vector3.Lerp(start, end, blend);
                     yield return null;
                 }
@@ -6226,6 +6250,12 @@ namespace AlwaysFaithful.Prototype
                 failure = $"expected default settings (Auto/Escape/R), got {fresh.UiScale}/{fresh.RemapCancelKey}/{fresh.RemapResetCameraKey}";
                 return false;
             }
+            if (fresh.GraphicsPreset != GraphicsPresetTier.Medium || fresh.ColorSafePalette || fresh.ReducedMotion ||
+                fresh.AnimationSpeed != AnimationSpeedTier.Normal)
+            {
+                failure = $"expected default graphics settings (Medium/off/off/Normal), got {fresh.GraphicsPreset}/{fresh.ColorSafePalette}/{fresh.ReducedMotion}/{fresh.AnimationSpeed}";
+                return false;
+            }
             if (AlwaysFaithfulSettingsRules.Validate(null, out _))
             {
                 failure = "a null settings state was accepted";
@@ -6285,12 +6315,18 @@ namespace AlwaysFaithful.Prototype
             settings = AlwaysFaithfulSettingsRules.CreateDefault();
             settings.UiScale = UiScaleTier.Large;
             settings.RemapResetCameraKey = KeyCode.T;
+            settings.GraphicsPreset = GraphicsPresetTier.Low;
+            settings.ColorSafePalette = true;
+            settings.ReducedMotion = true;
+            settings.AnimationSpeed = AnimationSpeedTier.Fast;
             SaveSettings();
 
             if (!TryLoadSettings(settingsPath, out AlwaysFaithfulSettings roundTripped) ||
-                roundTripped.UiScale != UiScaleTier.Large || roundTripped.RemapResetCameraKey != KeyCode.T || roundTripped.RemapCancelKey != KeyCode.Escape)
+                roundTripped.UiScale != UiScaleTier.Large || roundTripped.RemapResetCameraKey != KeyCode.T || roundTripped.RemapCancelKey != KeyCode.Escape ||
+                roundTripped.GraphicsPreset != GraphicsPresetTier.Low || !roundTripped.ColorSafePalette || !roundTripped.ReducedMotion ||
+                roundTripped.AnimationSpeed != AnimationSpeedTier.Fast)
             {
-                Debug.LogError($"ALWAYS_FAITHFUL_SETTINGS_REGRESSION_FAILED persistence round trip failed scale={roundTripped?.UiScale} resetKey={roundTripped?.RemapResetCameraKey}");
+                Debug.LogError($"ALWAYS_FAITHFUL_SETTINGS_REGRESSION_FAILED persistence round trip failed scale={roundTripped?.UiScale} resetKey={roundTripped?.RemapResetCameraKey} graphics={roundTripped?.GraphicsPreset} colorSafe={roundTripped?.ColorSafePalette} reducedMotion={roundTripped?.ReducedMotion} animSpeed={roundTripped?.AnimationSpeed}");
                 Application.Quit(1);
                 yield break;
             }
@@ -6298,6 +6334,12 @@ namespace AlwaysFaithful.Prototype
             if (Mathf.Abs(GetUiScale() - 1.2f) > .0001f)
             {
                 Debug.LogError($"ALWAYS_FAITHFUL_SETTINGS_REGRESSION_FAILED GetUiScale did not reflect the loaded Large tier, got {GetUiScale()}");
+                Application.Quit(1);
+                yield break;
+            }
+            if (Mathf.Abs(AnimationTimeScale() - AnimationTimeScaleFor(AnimationSpeedTier.Fast)) > .0001f)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_SETTINGS_REGRESSION_FAILED AnimationTimeScale did not reflect the loaded Fast tier, got {AnimationTimeScale()}");
                 Application.Quit(1);
                 yield break;
             }
@@ -7473,6 +7515,12 @@ namespace AlwaysFaithful.Prototype
         private static readonly UiScaleTier[] UiScaleTierOptions =
             { UiScaleTier.Auto, UiScaleTier.Small, UiScaleTier.Normal, UiScaleTier.Large, UiScaleTier.ExtraLarge };
         private static readonly string[] UiScaleTierLabels = { "AUTO", "SMALL", "NORMAL", "LARGE", "X-LARGE" };
+        private static readonly GraphicsPresetTier[] GraphicsPresetOptions =
+            { GraphicsPresetTier.Low, GraphicsPresetTier.Medium, GraphicsPresetTier.High };
+        private static readonly string[] GraphicsPresetLabels = { "LOW", "MEDIUM", "HIGH" };
+        private static readonly AnimationSpeedTier[] AnimationSpeedOptions =
+            { AnimationSpeedTier.Normal, AnimationSpeedTier.Fast, AnimationSpeedTier.Skip };
+        private static readonly string[] AnimationSpeedLabels = { "NORMAL", "FAST", "SKIP" };
 
         private OperationalContactState OperationalContactAt(HexCoord hex)
         {
@@ -7653,7 +7701,7 @@ namespace AlwaysFaithful.Prototype
                 awaitingRemapFor = null;
             }
 
-            Rect panel = new Rect(uiWidth / 2f - 260f, uiHeight / 2f - 200f, 520f, 400f);
+            Rect panel = new Rect(uiWidth / 2f - 260f, uiHeight / 2f - 280f, 520f, 560f);
             GUI.Box(panel, GUIContent.none);
             GUI.Label(new Rect(panel.x + 20f, panel.y + 14f, 300f, 30f), "SETTINGS", titleStyle);
             if (GUI.Button(new Rect(panel.x + panel.width - 44f, panel.y + 14f, 28f, 28f), "X", buttonStyle))
@@ -7701,6 +7749,36 @@ namespace AlwaysFaithful.Prototype
                 GUIStyle rejectionStyle = new GUIStyle(bodyStyle) { normal = { textColor = new Color(.96f, .32f, .28f) } };
                 GUI.Label(new Rect(panel.x + 20f, rowY, panel.width - 40f, 22f), remapRejectionText, rejectionStyle);
             }
+
+            rowY += 40f;
+            GUI.Label(new Rect(panel.x + 20f, rowY, 150f, 22f), "GRAPHICS PRESET", badgeStyle);
+            for (int index = 0; index < GraphicsPresetOptions.Length; index++)
+            {
+                Rect optionRect = new Rect(panel.x + 180f + index * 88f, rowY - 4f, 84f, 30f);
+                bool active = settings.GraphicsPreset == GraphicsPresetOptions[index];
+                string label = active ? $"[{GraphicsPresetLabels[index]}]" : GraphicsPresetLabels[index];
+                if (GUI.Button(optionRect, label, buttonStyle)) settings.GraphicsPreset = GraphicsPresetOptions[index];
+            }
+
+            rowY += 40f;
+            GUI.Label(new Rect(panel.x + 20f, rowY, 150f, 22f), "ANIMATION SPEED", badgeStyle);
+            for (int index = 0; index < AnimationSpeedOptions.Length; index++)
+            {
+                Rect optionRect = new Rect(panel.x + 180f + index * 88f, rowY - 4f, 84f, 30f);
+                bool active = settings.AnimationSpeed == AnimationSpeedOptions[index];
+                string label = active ? $"[{AnimationSpeedLabels[index]}]" : AnimationSpeedLabels[index];
+                if (GUI.Button(optionRect, label, buttonStyle)) settings.AnimationSpeed = AnimationSpeedOptions[index];
+            }
+
+            rowY += 40f;
+            GUI.Label(new Rect(panel.x + 20f, rowY, 220f, 22f), "COLOR-SAFE PALETTE", badgeStyle);
+            if (GUI.Button(new Rect(panel.x + 340f, rowY - 4f, 140f, 30f), settings.ColorSafePalette ? "ON" : "OFF", buttonStyle))
+                settings.ColorSafePalette = !settings.ColorSafePalette;
+
+            rowY += 40f;
+            GUI.Label(new Rect(panel.x + 20f, rowY, 220f, 22f), "REDUCED MOTION", badgeStyle);
+            if (GUI.Button(new Rect(panel.x + 340f, rowY - 4f, 140f, 30f), settings.ReducedMotion ? "ON" : "OFF", buttonStyle))
+                settings.ReducedMotion = !settings.ReducedMotion;
 
             rowY += 40f;
             if (GUI.Button(new Rect(panel.x + 20f, rowY, panel.width - 40f, 34f), "RESET TO DEFAULTS", buttonStyle))
@@ -7929,8 +8007,23 @@ namespace AlwaysFaithful.Prototype
             GUI.Label(new Rect(uiWidth - 294f, uiHeight - 70f, 256f, 45f), "RMB Orders  •  LMB Confirm\nMove / LOS / Fire / Recon  •  RMB/Escape Cancel", bodyStyle);
         }
 
-        private static Color TacticalStatusColor(TacticalCombatStatus status)
+        // Default ramp is a single warm hue (red-orange-yellow), which reads
+        // as pure lightness to red-green color-vision deficiency and loses
+        // the severity distinction. The color-safe ramp swaps to a
+        // blue-orange-magenta spread (Okabe-Ito-inspired) so each tier keeps
+        // a distinct hue rather than only a brightness difference.
+        private Color TacticalStatusColor(TacticalCombatStatus status)
         {
+            if (settings.ColorSafePalette)
+            {
+                switch (status)
+                {
+                    case TacticalCombatStatus.Reduced: return new Color(.72f, .18f, .58f);
+                    case TacticalCombatStatus.Disrupted: return new Color(.90f, .55f, .12f);
+                    case TacticalCombatStatus.Suppressed: return new Color(.30f, .62f, .95f);
+                    default: return new Color(.48f, .78f, .58f);
+                }
+            }
             switch (status)
             {
                 case TacticalCombatStatus.Reduced: return new Color(1f, .38f, .34f);
@@ -7940,8 +8033,17 @@ namespace AlwaysFaithful.Prototype
             }
         }
 
-        private static Color TacticalSpottedColor(TacticalVisibilityState tier)
+        private Color TacticalSpottedColor(TacticalVisibilityState tier)
         {
+            if (settings.ColorSafePalette)
+            {
+                switch (tier)
+                {
+                    case TacticalVisibilityState.Observed: return new Color(.72f, .18f, .58f);
+                    case TacticalVisibilityState.Identified: return new Color(.90f, .55f, .12f);
+                    default: return new Color(.30f, .62f, .95f);
+                }
+            }
             switch (tier)
             {
                 case TacticalVisibilityState.Observed: return new Color(1f, .38f, .34f);
@@ -8180,6 +8282,24 @@ namespace AlwaysFaithful.Prototype
             }
         }
 
+        private float AnimationTimeScale() => AnimationTimeScaleFor(settings.AnimationSpeed);
+
+        // Pure lookup, split out so a static regression can assert the exact
+        // per-tier value without needing a live instance. Multiplies every
+        // fixed-duration presentation animation (movement steps, fire lines,
+        // reaction-fire camera pans); it never changes what happens, only how
+        // long it takes to watch. Skip is a small nonzero scale rather than 0
+        // so duration-driven loops still resolve in a frame instead of stalling.
+        private static float AnimationTimeScaleFor(AnimationSpeedTier tier)
+        {
+            switch (tier)
+            {
+                case AnimationSpeedTier.Fast: return .35f;
+                case AnimationSpeedTier.Skip: return .08f;
+                default: return 1f;
+            }
+        }
+
         private float TacticalWidthKilometres()
             => ((tacticalBattlefield.Width - 1) * Mathf.Sqrt(3f) * .5f + 1f) * tacticalBattlefield.CellSizeMetres / 1000f;
 
@@ -8240,7 +8360,20 @@ namespace AlwaysFaithful.Prototype
             return new Material(shader) { color = color };
         }
 
-        private static Color LandColor(float metres)
+        // Low drops elevation-contour shading entirely (fewer blended draw
+        // calls' worth of visual complexity, plainer flat bands); High
+        // deepens it for extra terrain definition. Medium is the original.
+        private float ContourStrengthMultiplier()
+        {
+            switch (settings.GraphicsPreset)
+            {
+                case GraphicsPresetTier.Low: return 0f;
+                case GraphicsPresetTier.High: return 1.35f;
+                default: return 1f;
+            }
+        }
+
+        private Color LandColor(float metres)
         {
             float height = Mathf.InverseLerp(0f, 3900f, Mathf.Max(0f, metres));
             Color color;
@@ -8252,7 +8385,7 @@ namespace AlwaysFaithful.Prototype
                 color = Color.Lerp(new Color(.46f, .39f, .29f), new Color(.72f, .69f, .60f), (height - .68f) / .32f);
             float contourDistance = Mathf.Abs(Mathf.Repeat(Mathf.Max(0f, metres) + 125f, 250f) - 125f);
             float contour = 1f - Mathf.SmoothStep(0f, 48f, contourDistance);
-            return Color.Lerp(color, color * .68f, contour * .30f);
+            return Color.Lerp(color, color * .68f, contour * .30f * ContourStrengthMultiplier());
         }
 
         private Color LocalLandColor(float metres)
@@ -8263,7 +8396,7 @@ namespace AlwaysFaithful.Prototype
             Color color = Color.Lerp(low, high, relief);
             float contourDistance = Mathf.Abs(Mathf.Repeat(metres + 12.5f, 25f) - 12.5f);
             float contour = 1f - Mathf.SmoothStep(0f, 3.5f, contourDistance);
-            return Color.Lerp(color, color * .69f, contour * .34f);
+            return Color.Lerp(color, color * .69f, contour * .34f * ContourStrengthMultiplier());
         }
 
         // Gives cover-bearing hexes a subtle color signal even before the
@@ -8279,7 +8412,7 @@ namespace AlwaysFaithful.Prototype
             }
         }
 
-        private static Color WaterColor(float metres)
+        private Color WaterColor(float metres)
         {
             float depth = Mathf.Max(0f, -metres);
             Color color;
@@ -8292,7 +8425,7 @@ namespace AlwaysFaithful.Prototype
             float interval = depth < 500f ? 100f : depth < 2000f ? 500f : 1000f;
             float contourDistance = Mathf.Abs(Mathf.Repeat(depth + interval * .5f, interval) - interval * .5f);
             float contour = 1f - Mathf.SmoothStep(0f, interval * .10f, contourDistance);
-            return Color.Lerp(color, color * .70f, contour * .20f);
+            return Color.Lerp(color, color * .70f, contour * .20f * ContourStrengthMultiplier());
         }
 
         private static TacticalTerrain ClassifyTerrain(bool isLand, float metres)

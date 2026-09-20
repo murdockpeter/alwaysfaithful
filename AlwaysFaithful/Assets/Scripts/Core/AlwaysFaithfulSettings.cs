@@ -12,6 +12,25 @@ namespace AlwaysFaithful.Core
         ExtraLarge
     }
 
+    // Low/Medium/High trade decorative density (cover/built-up prop count,
+    // terrain contour shading) for draw calls; never touches gameplay values.
+    public enum GraphicsPresetTier
+    {
+        Low,
+        Medium,
+        High
+    }
+
+    // Normal/Fast/Skip scale every timed presentation animation (movement
+    // steps, fire lines, reaction-fire camera pans, enemy-turn pacing)
+    // without changing what happens, only how long it takes to watch.
+    public enum AnimationSpeedTier
+    {
+        Normal,
+        Fast,
+        Skip
+    }
+
     // App-level presentation/input preference, not tactical-battle domain
     // state (deliberately not prefixed Tactical, unlike every other Core
     // persisted type). File-persisted the same way TacticalBattalionStatus
@@ -19,12 +38,16 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class AlwaysFaithfulSettings
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public UiScaleTier UiScale = UiScaleTier.Auto;
         public KeyCode RemapCancelKey = KeyCode.Escape;
         public KeyCode RemapResetCameraKey = KeyCode.R;
+        public GraphicsPresetTier GraphicsPreset = GraphicsPresetTier.Medium;
+        public bool ColorSafePalette;
+        public bool ReducedMotion;
+        public AnimationSpeedTier AnimationSpeed = AnimationSpeedTier.Normal;
     }
 
     public static class AlwaysFaithfulSettingsRules

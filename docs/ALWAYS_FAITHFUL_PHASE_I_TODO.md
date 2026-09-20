@@ -32,7 +32,7 @@ Required slice:
 ## Phase I polish and release gate
 
 - [ ] Profile overview and tactical maps on the target Windows hardware; establish frame-time, memory, load-time, and draw-call budgets.
-- [ ] Settings/accessibility pass B (graphics presets, color-safe overlays, reduced motion, animation speed) — tracked in [`GRAPHICAL_ENHANCEMENTS_TODO.md`](GRAPHICAL_ENHANCEMENTS_TODO.md); Pass A (persistence, UI scaling, remappable keys) already shipped.
+- [x] Settings/accessibility pass B (graphics presets, color-safe overlays, reduced motion, animation speed) — see [`GRAPHICAL_ENHANCEMENTS_TODO.md`](GRAPHICAL_ENHANCEMENTS_TODO.md) Group A.
 - [x] Save and restore an in-progress standalone battle.
 - [x] Ensure every important action has visible feedback and an event-log explanation.
 - [x] Add randomized scenario generation for standalone play, so no two battles at a hex play the same.

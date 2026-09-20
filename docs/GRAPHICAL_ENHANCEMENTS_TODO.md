@@ -5,12 +5,12 @@ Scope: presentation-layer work only — HUD, symbology, feedback, and accessibil
 
 ## Group A — Settings pass B (accessibility & display)
 
-Second half of the Settings panel; Pass A (persistence, UI scale, remappable Cancel/Reset Camera keys) already shipped.
+Second half of the Settings panel; Pass A (persistence, UI scale, remappable Cancel/Reset Camera keys) already shipped. **Complete.**
 
-- [ ] Graphics presets (e.g., low/medium/high visual fidelity tiers).
-- [ ] Color-safe (colorblind-friendly) overlay palette option.
-- [ ] Reduced-motion / reduced-screen-shake mode.
-- [ ] Adjustable animation speed, with a fast/skip setting for enemy-turn and movement animation.
+- [x] Graphics presets (Low/Medium/High): scales cover/built-up prop density and terrain contour shading strength.
+- [x] Color-safe (colorblind-friendly) overlay palette option: swaps unit-status, spotted-tier, and LOS colors from a red/orange/yellow ramp to a blue/orange/magenta one.
+- [x] Reduced-motion mode: removes the movement bob and snaps the reaction-fire camera pan instead of easing it.
+- [x] Adjustable animation speed (Normal/Fast/Skip): scales movement steps, fire-line animation, and reaction-fire camera pans; also feeds the existing enemy-turn pacing.
 
 ## Group B — HUD and information density
 

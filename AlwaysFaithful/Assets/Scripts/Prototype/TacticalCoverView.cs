@@ -11,16 +11,29 @@ namespace AlwaysFaithful.Prototype
     {
         private const float SurfaceOffset = .10f;
 
-        public static void Build(Transform cellTransform, HexCoord coord, TacticalCover cover, bool isBuiltUp, Shader shader)
+        public static void Build(Transform cellTransform, HexCoord coord, TacticalCover cover, bool isBuiltUp, Shader shader, GraphicsPresetTier preset)
         {
             if (cover == TacticalCover.None) return;
-            if (isBuiltUp) BuildBuiltUp(cellTransform, coord, cover, shader);
-            else BuildNatural(cellTransform, coord, cover, shader);
+            if (isBuiltUp) BuildBuiltUp(cellTransform, coord, cover, shader, preset);
+            else BuildNatural(cellTransform, coord, cover, shader, preset);
         }
 
-        private static void BuildNatural(Transform cellTransform, HexCoord coord, TacticalCover cover, Shader shader)
+        // Low trims a prop off every cell (floor of 1, so cover is never
+        // invisible); High adds one for denser clutter. Medium is the
+        // original, unscaled density.
+        private static int ScaledPropCount(int baseCount, GraphicsPresetTier preset)
         {
-            int count = cover == TacticalCover.Light ? 1 : cover == TacticalCover.Medium ? 2 : 3;
+            switch (preset)
+            {
+                case GraphicsPresetTier.Low: return Mathf.Max(1, baseCount - 1);
+                case GraphicsPresetTier.High: return baseCount + 1;
+                default: return baseCount;
+            }
+        }
+
+        private static void BuildNatural(Transform cellTransform, HexCoord coord, TacticalCover cover, Shader shader, GraphicsPresetTier preset)
+        {
+            int count = ScaledPropCount(cover == TacticalCover.Light ? 1 : cover == TacticalCover.Medium ? 2 : 3, preset);
             Color color = cover == TacticalCover.Light
                 ? new Color(.32f, .42f, .23f)
                 : cover == TacticalCover.Medium
@@ -37,9 +50,9 @@ namespace AlwaysFaithful.Prototype
             }
         }
 
-        private static void BuildBuiltUp(Transform cellTransform, HexCoord coord, TacticalCover cover, Shader shader)
+        private static void BuildBuiltUp(Transform cellTransform, HexCoord coord, TacticalCover cover, Shader shader, GraphicsPresetTier preset)
         {
-            int count = cover == TacticalCover.Heavy ? 3 : 2;
+            int count = ScaledPropCount(cover == TacticalCover.Heavy ? 3 : 2, preset);
             Color wallColor = new Color(.53f, .50f, .43f);
             Color roofColor = new Color(.37f, .28f, .22f);
             for (int index = 0; index < count; index++)
