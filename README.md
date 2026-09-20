@@ -23,4 +23,4 @@ Open `AlwaysFaithful/Assets/Scenes/HexAndCounterPrototype.unity` and enter Play 
 
 ## Planning
 
-Use [`docs/ALWAYS_FAITHFUL_PHASE_I_TODO.md`](docs/ALWAYS_FAITHFUL_PHASE_I_TODO.md) as the active functionality/release-gate execution plan and [`docs/GRAPHICAL_ENHANCEMENTS_TODO.md`](docs/GRAPHICAL_ENHANCEMENTS_TODO.md) as the active graphics/presentation execution plan. See [`docs/USMC_Tactical_Battle_Game_TODO.md`](docs/USMC_Tactical_Battle_Game_TODO.md) for the broader product roadmap.
+Use [`docs/ALWAYS_FAITHFUL_PHASE_I_TODO.md`](docs/ALWAYS_FAITHFUL_PHASE_I_TODO.md) as the active functionality/release-gate execution plan and [`docs/GRAPHICAL_ENHANCEMENTS_TODO.md`](docs/GRAPHICAL_ENHANCEMENTS_TODO.md) as the active graphics/presentation execution plan.

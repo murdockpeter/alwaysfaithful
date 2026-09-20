@@ -1,7 +1,7 @@
 # Always Faithful — Graphical Enhancements TODO
 
 Status: active near-term list  
-Scope: presentation-layer work only — HUD, symbology, feedback, and accessibility/animation polish for the existing tactical and operational maps. This is not a replacement for [`ALWAYS_FAITHFUL_PHASE_I_TODO.md`](ALWAYS_FAITHFUL_PHASE_I_TODO.md) (rules/function work and the release gate) or [`USMC_Tactical_Battle_Game_TODO.md`](USMC_Tactical_Battle_Game_TODO.md) (long-range product design) — it pulls the graphics-specific items already called for in those documents into one actionable list so presentation work doesn't get lost between them.
+Scope: presentation-layer work only — HUD, symbology, feedback, and accessibility/animation polish for the existing tactical and operational maps. This is not a replacement for [`ALWAYS_FAITHFUL_PHASE_I_TODO.md`](ALWAYS_FAITHFUL_PHASE_I_TODO.md) (rules/function work and the release gate) — it collects the graphics-specific items called for there into one actionable list so presentation work doesn't get lost.
 
 ## Group A — Settings pass B (accessibility & display)
 
