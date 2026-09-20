@@ -136,6 +136,7 @@ Complete these in order unless a discovered dependency requires a documented reo
 - [x] Add new mission types (Raid, Reconnaissance-in-Force, Withdrawal) and a persistent standalone Battalion status/campaign layer.
 - [x] Add an order-of-battle support-card resource pool (ISR, Fire Support, Reserve) with a pre-battle commitment modal (Pass A); an in-battle Call for Fire order spending the same pool is still to come (Pass B).
 - [x] Give the PLA an active sensor-tasking capability (Recon order) and real turn-to-turn contact memory, add a persistent "enemy tracking you" readout for the player, and close the event-log/status gaps left in the support-card system (ISR/Reserve plays were previously invisible once committed).
+- [x] Replace the disconnected overview sandbox with a full first-launch operational scenario: two tracked USMC battalions versus three tracked PLA battalions, a complete operations-order/OOB briefing, persistent both-side position and strength, maneuver-level fog/contact memory, active operational Recon, hidden PLA movement, and a selected-parent-battalion handoff into tactical resolution.
 - [ ] Run a clean-machine Windows build test and archive the exact executable plus test logs.
 - [ ] Conduct at least three no-instruction playtests and record confusion, misclicks, and unreadable states.
 - [ ] Resolve all blocking and high-severity findings before calling Phase I complete.

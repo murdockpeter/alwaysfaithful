@@ -15,6 +15,7 @@ namespace AlwaysFaithful.Prototype
         private TacticalFormationView formationView;
         private LineRenderer uncertaintyRing;
         private Vector3 settledScale = Vector3.one;
+        private float displayScale = 1f;
         private GameObject statusBadge;
         private MeshRenderer statusBadgeRenderer;
 
@@ -182,9 +183,14 @@ namespace AlwaysFaithful.Prototype
             uncertaintyRing.endColor = uncertaintyRing.startColor;
         }
 
+        public void SetDisplayScale(float scale)
+        {
+            displayScale = Mathf.Max(.1f, scale);
+        }
+
         private void Update()
         {
-            transform.localScale = Vector3.Lerp(transform.localScale, settledScale, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 9f));
+            transform.localScale = Vector3.Lerp(transform.localScale, settledScale * displayScale, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 9f));
             if (statusBadge != null && statusBadge.activeSelf)
                 statusBadge.transform.localScale = Vector3.one * TacticalStatusVisuals.PulseScale(PresentedStatus, .16f);
         }
