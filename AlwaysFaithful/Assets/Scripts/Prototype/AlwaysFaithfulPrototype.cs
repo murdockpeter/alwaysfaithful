@@ -145,6 +145,9 @@ namespace AlwaysFaithful.Prototype
         private bool automatedBattalionRegression;
         private TacticalBattalionStatus battalionStatus;
         private string battalionStatusPath;
+        private bool supportCardModalActive;
+        private bool supportPanelOpen;
+        private bool automatedCardsRegression;
         private AlwaysFaithfulSettings settings;
         private string settingsPath;
         private bool settingsPanelOpen;
@@ -243,6 +246,7 @@ namespace AlwaysFaithful.Prototype
             automatedScenarioRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--scenario-regression") >= 0;
             automatedBattalionRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--battalion-regression") >= 0;
             automatedSettingsRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--settings-regression") >= 0;
+            automatedCardsRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--cards-regression") >= 0;
             string scenarioSeedArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--scenario-seed=", StringComparison.Ordinal));
             scenarioSeedOverride = scenarioSeedArgument != null && int.TryParse(scenarioSeedArgument.Substring("--scenario-seed=".Length), out int parsedScenarioSeed) && parsedScenarioSeed > 0
                 ? parsedScenarioSeed
@@ -385,6 +389,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedScenarioRegression) StartCoroutine(RunScenarioRegression());
             if (automatedBattalionRegression) StartCoroutine(RunBattalionRegression());
             if (automatedSettingsRegression) StartCoroutine(RunSettingsRegression());
+            if (automatedCardsRegression) StartCoroutine(RunCardsRegression());
             StartCoroutine(CaptureScreenshotWhenRequested());
         }
 
@@ -401,7 +406,7 @@ namespace AlwaysFaithful.Prototype
                automatedObservationCapture || automatedFireCapture || automatedSuppressionCapture || automatedReactionCapture ||
                automatedEnemyTurnCapture || automatedResultCapture || automatedReconCapture || automatedCampaignCapture ||
                automatedSaveRestoreRegression || automatedSaveRestoreCapture || automatedFeedbackRegression || automatedScenarioRegression ||
-               automatedBattalionRegression || automatedSettingsRegression;
+               automatedBattalionRegression || automatedSettingsRegression || automatedCardsRegression;
 
         private void Update()
         {
@@ -1013,6 +1018,53 @@ namespace AlwaysFaithful.Prototype
             }
         }
 
+        // Pass argument null for "skip"; otherwise a card already present in
+        // battalionStatus.Hand. Either way, the normal mission briefing still
+        // plays afterward exactly as it would with an empty hand.
+        private void DismissSupportCardModal(TacticalSupportCard playedCard)
+        {
+            if (playedCard != null)
+            {
+                battalionStatus.Hand.Remove(playedCard);
+                ApplySupportCardEffect(playedCard.AssetType);
+                SaveBattalionStatus();
+                Debug.Log($"ALWAYS_FAITHFUL_SUPPORT_CARD_PLAYED type={playedCard.AssetType}");
+            }
+            supportCardModalActive = false;
+            campaignBriefingActive = true;
+            StartCoroutine(ShowCampaignBriefingThenDismiss());
+        }
+
+        // Whole-battle pre-battle effects. Called only after BuildTacticalBattlefield
+        // has already constructed tacticalObjective/tacticalEnemyStates/tacticalUnitState,
+        // so each effect safely mutates already-built in-memory battle state.
+        private void ApplySupportCardEffect(TacticalSupportAssetType assetType)
+        {
+            switch (assetType)
+            {
+                case TacticalSupportAssetType.Isr:
+                    tacticalBattlefield.IsrCardActive = true;
+                    break;
+                case TacticalSupportAssetType.FireSupport:
+                    foreach (TacticalUnitState enemy in tacticalEnemyStates)
+                    {
+                        if (HexCoord.Distance(enemy.Position, tacticalObjective.ObjectiveHex) > TacticalSupportCards.FireSupportRadiusHexes) continue;
+                        TacticalSuppressionEvent suppressionEvent = TacticalSuppression.ApplyFireOutcome(enemy, TacticalFireOutcome.Suppressed);
+                        if (suppressionEvent == null) continue;
+                        suppressionEvent.Cause = "SupportCard:FireSupport";
+                        suppressionEvent.Sequence = ++tacticalEventSequence;
+                        suppressionEvent.BattlefieldId = tacticalBattlefield.BattlefieldId;
+                        suppressionEvent.Turn = turnState.TurnNumber;
+                        tacticalBattlefield.SuppressionEvents.Add(suppressionEvent);
+                    }
+                    break;
+                default:
+                    tacticalUnitState.MaximumActionPoints += TacticalSupportCards.ReserveActionPointBonus;
+                    tacticalUnitState.RemainingActionPoints += TacticalSupportCards.ReserveActionPointBonus;
+                    break;
+            }
+        }
+
         private void SaveTacticalBattle(string outputPath = null)
         {
             outputPath ??= saveFilePath;
@@ -1230,10 +1282,20 @@ namespace AlwaysFaithful.Prototype
             // BattleRequest launch already announces posture/objective/turn
             // limit — but never during an automated regression/capture run,
             // which would otherwise stall on the ~2.9s fade-in/hold/fade-out.
+            // A non-empty support-card hand gets first say: the player may
+            // commit one card for a whole-battle effect before the usual
+            // mission briefing plays.
             if (freshStandaloneScenario && !IsAutomatedRun())
             {
-                campaignBriefingActive = true;
-                StartCoroutine(ShowCampaignBriefingThenDismiss());
+                if (battalionStatus != null && battalionStatus.Hand.Count > 0)
+                {
+                    supportCardModalActive = true;
+                }
+                else
+                {
+                    campaignBriefingActive = true;
+                    StartCoroutine(ShowCampaignBriefingThenDismiss());
+                }
             }
             Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_ENTER battlefield={tacticalBattlefield.BattlefieldId} parent={tacticalBattlefield.ParentHex} center={tacticalBattlefield.CenterLatitude:0.00000},{tacticalBattlefield.CenterLongitude:0.00000}");
         }
@@ -1254,6 +1316,7 @@ namespace AlwaysFaithful.Prototype
             resultScreenOpacity = 0f;
             campaignBriefingActive = false;
             campaignBriefingOpacity = 0f;
+            supportCardModalActive = false;
             lastBattleResultPath = null;
             tacticalRoot.SetActive(false);
             overviewRoot.SetActive(true);
@@ -1832,7 +1895,8 @@ namespace AlwaysFaithful.Prototype
                 tacticalContacts.TryGetValue(enemy.Id, out TacticalContactState previous);
                 TacticalContactState report = TacticalObservation.Check(localMovementBoard, tacticalUnitState.Id,
                     tacticalUnitState.Position, enemy.Id, enemy.DisplayName, enemy.Position, turnState.TurnNumber, previous);
-                report.State = TacticalRecon.ApplyBonus(report.State, TacticalRecon.IsUnderActiveRecon(tacticalReconMarkers, enemy.Position));
+                bool underIsrCard = tacticalBattlefield != null && tacticalBattlefield.IsrCardActive;
+                report.State = TacticalRecon.ApplyBonus(report.State, TacticalRecon.IsUnderActiveRecon(tacticalReconMarkers, enemy.Position) || underIsrCard);
                 tacticalContacts[enemy.Id] = report;
                 if (previous != null)
                 {
@@ -1867,7 +1931,7 @@ namespace AlwaysFaithful.Prototype
 
         private void UpdateTacticalPointer()
         {
-            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive || campaignBriefingActive || settingsPanelOpen) return;
+            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive || campaignBriefingActive || settingsPanelOpen || supportCardModalActive) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
             if (returnToIslandRect.Contains(guiPointer) || tacticalMenuOpen && tacticalMenuRect.Contains(guiPointer) ||
                 new Rect(20f, 18f, 405f, 318f).Contains(guiPointer)) return;
@@ -2724,7 +2788,7 @@ namespace AlwaysFaithful.Prototype
         {
             // Do not let hover bookkeeping clear the committed route while its
             // movement coroutine is animating the counter.
-            if (mapCamera == null || unitMoving || campaignBriefingActive || settingsPanelOpen) return;
+            if (mapCamera == null || unitMoving || campaignBriefingActive || settingsPanelOpen || supportCardModalActive) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
             if (endTurnRect.Contains(guiPointer) || enterTacticalRect.Contains(guiPointer) || counterMenuOpen && counterMenuRect.Contains(guiPointer)) return;
             bool leftClick = Input.GetMouseButtonDown(0);
@@ -2971,7 +3035,7 @@ namespace AlwaysFaithful.Prototype
 
         private void EndTacticalTurn()
         {
-            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive || campaignBriefingActive || settingsPanelOpen) return;
+            if (tacticalUnitMoving || tacticalFireResolving || tacticalEnemyTurnActive || resultScreenActive || campaignBriefingActive || settingsPanelOpen || supportCardModalActive) return;
             CancelTacticalInteraction(false);
             tacticalAudio.Play(TacticalSound.EndTurn);
             StartCoroutine(RunEnemyTurn());
@@ -3078,6 +3142,17 @@ namespace AlwaysFaithful.Prototype
                     StrengthAfter = battalionStatus.Strength,
                     CompletedAtUtc = DateTime.UtcNow.ToString("o")
                 });
+                if (battalionStatus.Hand.Count < TacticalSupportCards.MaximumHandSize)
+                {
+                    int cardSeed = TacticalSupportCards.CreateSeed(tacticalBattlefield.BattlefieldId, turnState.TurnNumber, battalionStatus.EngagementsCompleted);
+                    TacticalSupportAssetType drawnType = TacticalSupportCards.RollAssetType(cardSeed);
+                    battalionStatus.Hand.Add(new TacticalSupportCard { CardId = ++battalionStatus.NextCardId, AssetType = drawnType });
+                    Debug.Log($"ALWAYS_FAITHFUL_SUPPORT_CARD_DRAWN type={drawnType} handSize={battalionStatus.Hand.Count}");
+                }
+                else
+                {
+                    Debug.Log("ALWAYS_FAITHFUL_SUPPORT_CARD_HAND_FULL");
+                }
                 SaveBattalionStatus();
                 Debug.Log($"ALWAYS_FAITHFUL_BATTALION_STATUS_UPDATED strength={battalionStatus.Strength} engagements={battalionStatus.EngagementsCompleted}");
             }
@@ -5063,9 +5138,9 @@ namespace AlwaysFaithful.Prototype
 
         private static bool ValidateFeedbackRules(out string failure)
         {
-            if (TacticalBattlefieldState.CurrentSchemaVersion != 11)
+            if (TacticalBattlefieldState.CurrentSchemaVersion != 12)
             {
-                failure = $"expected schema version 11, got {TacticalBattlefieldState.CurrentSchemaVersion}";
+                failure = $"expected schema version 12, got {TacticalBattlefieldState.CurrentSchemaVersion}";
                 return false;
             }
             var battlefield = new TacticalBattlefieldState { BattlefieldId = "TEST" };
@@ -5185,9 +5260,9 @@ namespace AlwaysFaithful.Prototype
 
         private static bool ValidateScenarioRules(out string failure)
         {
-            if (TacticalBattlefieldState.CurrentSchemaVersion != 11)
+            if (TacticalBattlefieldState.CurrentSchemaVersion != 12)
             {
-                failure = $"expected schema version 11 after adding mission-type fields, got {TacticalBattlefieldState.CurrentSchemaVersion}";
+                failure = $"expected schema version 12 after adding the support-card ISR field, got {TacticalBattlefieldState.CurrentSchemaVersion}";
                 return false;
             }
             const string id = "TW-TEST-SCENARIO";
@@ -5573,6 +5648,169 @@ namespace AlwaysFaithful.Prototype
             }
 
             Debug.Log("ALWAYS_FAITHFUL_SETTINGS_REGRESSION_OK");
+            Application.Quit(0);
+        }
+
+        private static bool ValidateCardRules(out string failure)
+        {
+            TacticalBattalionStatus fresh = TacticalBattalion.CreateFresh();
+            if (fresh.Hand.Count != 0)
+            {
+                failure = $"expected a fresh battalion status to start with an empty hand, got {fresh.Hand.Count}";
+                return false;
+            }
+            for (int seed = 1; seed <= 50; seed++)
+            {
+                TacticalSupportAssetType rolled = TacticalSupportCards.RollAssetType(seed);
+                if (!Enum.IsDefined(typeof(TacticalSupportAssetType), rolled))
+                {
+                    failure = $"RollAssetType returned an undefined asset type {rolled} for seed {seed}";
+                    return false;
+                }
+            }
+            var overfull = TacticalBattalion.CreateFresh();
+            for (int index = 0; index <= TacticalSupportCards.MaximumHandSize; index++)
+                overfull.Hand.Add(new TacticalSupportCard { CardId = index + 1, AssetType = TacticalSupportAssetType.Isr });
+            if (TacticalBattalion.Validate(overfull, out _))
+            {
+                failure = "a hand exceeding the maximum size was accepted";
+                return false;
+            }
+            var badCardId = TacticalBattalion.CreateFresh();
+            badCardId.Hand.Add(new TacticalSupportCard { CardId = 0, AssetType = TacticalSupportAssetType.Reserve });
+            if (TacticalBattalion.Validate(badCardId, out _))
+            {
+                failure = "a card with a non-positive CardId was accepted";
+                return false;
+            }
+            var badAssetType = TacticalBattalion.CreateFresh();
+            badAssetType.Hand.Add(new TacticalSupportCard { CardId = 1, AssetType = (TacticalSupportAssetType)99 });
+            if (TacticalBattalion.Validate(badAssetType, out _))
+            {
+                failure = "a card with an undefined asset type was accepted";
+                return false;
+            }
+            var wellFormed = TacticalBattalion.CreateFresh();
+            wellFormed.Hand.Add(new TacticalSupportCard { CardId = 1, AssetType = TacticalSupportAssetType.FireSupport });
+            if (!TacticalBattalion.Validate(wellFormed, out string validError))
+            {
+                failure = "a structurally valid hand was rejected: " + validError;
+                return false;
+            }
+            failure = null;
+            return true;
+        }
+
+        private IEnumerator RunCardsRegression()
+        {
+            yield return null;
+            if (!ValidateCardRules(out string ruleFailure))
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_CARDS_REGRESSION_FAILED rules=" + ruleFailure);
+                Application.Quit(1);
+                yield break;
+            }
+
+            // Isolate this regression from whatever real Battalion status
+            // might already exist at the default persistentDataPath location.
+            string scratchDirectory = Path.Combine(Path.GetTempPath(), "AlwaysFaithfulCardsRegression");
+            Directory.CreateDirectory(scratchDirectory);
+            battalionStatusPath = Path.Combine(scratchDirectory, "battalion-status.json");
+            battalionStatus = TacticalBattalion.CreateFresh();
+            SaveBattalionStatus();
+
+            HexCellView parent = FindHighReliefOperationalCell();
+            fastEnemyAnimation = true;
+            EnterTacticalMap(parent, false);
+            tacticalObjective.TurnLimit = 1;
+            EndTacticalTurn();
+            float deadline = Time.realtimeSinceStartup + 5f;
+            do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
+            if (battalionStatus.Hand.Count != 1)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_CARDS_REGRESSION_FAILED expected exactly one drawn card after the first engagement, got {battalionStatus.Hand.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            // A BattleRequest-driven battle must never touch the hand.
+            int handCountBeforeRequest = battalionStatus.Hand.Count;
+            ReturnToIsland(false);
+            string requestPath = Path.Combine(scratchDirectory, "request.json");
+            var request = new BattleRequest
+            {
+                RequestId = "cards-regression-request-1",
+                CampaignId = "cards-regression-campaign-1",
+                Seed = 8181,
+                TheaterHex = parent.Coord,
+                TurnLimitOverride = 1,
+                OutputPath = Path.Combine(scratchDirectory, "result.json")
+            };
+            File.WriteAllText(requestPath, JsonUtility.ToJson(request));
+            TryLoadBattleRequest(requestPath);
+            if (battleRequestError != null || activeBattleRequest == null)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_CARDS_REGRESSION_FAILED battle request setup rejected: " + battleRequestError);
+                Application.Quit(1);
+                yield break;
+            }
+            DismissCampaignBriefing();
+            EndTacticalTurn();
+            deadline = Time.realtimeSinceStartup + 5f;
+            do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
+            if (battalionStatus.Hand.Count != handCountBeforeRequest)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_CARDS_REGRESSION_FAILED battle-request path touched the hand count={battalionStatus.Hand.Count}/{handCountBeforeRequest}");
+                Application.Quit(1);
+                yield break;
+            }
+            ReturnToIsland(false);
+
+            // Pre-seed the hand with a single FireSupport card, force an
+            // enemy onto the objective hex (guaranteeing it is within the
+            // prep-fire radius), then play the card through the same
+            // DismissSupportCardModal method the PLAY button calls, and
+            // confirm both the whole-battle effect and hand consumption.
+            // (The modal itself only opens outside an automated run, exactly
+            // like the campaign-briefing toast it stands in front of, so this
+            // regression drives the effect directly rather than the OnGUI
+            // button — matching this codebase's existing posture that
+            // presentation-only behavior is eyeballed via capture, not
+            // asserted headlessly.)
+            battalionStatus.Hand.Clear();
+            battalionStatus.Hand.Add(new TacticalSupportCard { CardId = ++battalionStatus.NextCardId, AssetType = TacticalSupportAssetType.FireSupport });
+            SaveBattalionStatus();
+            EnterTacticalMap(parent, false);
+            if (battalionStatus.Hand.Count != 1)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_CARDS_REGRESSION_FAILED pre-seeded hand was altered by EnterTacticalMap, count={battalionStatus.Hand.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+            TacticalUnitState targetEnemy = tacticalEnemyStates[0];
+            targetEnemy.Position = tacticalObjective.ObjectiveHex;
+            TacticalSupportCard cardToPlay = battalionStatus.Hand[0];
+            DismissSupportCardModal(cardToPlay);
+            if (battalionStatus.Hand.Count != 0)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_CARDS_REGRESSION_FAILED playing a card did not remove it from the hand, count={battalionStatus.Hand.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+            if (targetEnemy.CombatStatus == TacticalCombatStatus.Ready)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_CARDS_REGRESSION_FAILED FireSupport card did not suppress the enemy at the objective");
+                Application.Quit(1);
+                yield break;
+            }
+            if (!TryLoadBattalionStatus(battalionStatusPath, out TacticalBattalionStatus roundTripped) || roundTripped.Hand.Count != 0)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_CARDS_REGRESSION_FAILED status did not persist/round-trip correctly");
+                Application.Quit(1);
+                yield break;
+            }
+
+            Debug.Log("ALWAYS_FAITHFUL_CARDS_REGRESSION_OK");
             Application.Quit(0);
         }
 
@@ -6124,7 +6362,9 @@ namespace AlwaysFaithful.Prototype
                 DrawTransitionOverlay(uiWidth, uiHeight);
                 DrawResultScreen(uiWidth, uiHeight);
                 DrawCampaignBriefing(uiWidth, uiHeight);
+                DrawSupportCardModal(uiWidth, uiHeight);
                 DrawSettingsButtonAndPanel(uiWidth, uiHeight);
+                DrawSupportButtonAndPanel(uiWidth, uiHeight);
                 GUI.matrix = Matrix4x4.identity;
                 return;
             }
@@ -6207,7 +6447,9 @@ namespace AlwaysFaithful.Prototype
             }
             DrawTransitionOverlay(uiWidth, uiHeight);
             DrawCampaignBriefing(uiWidth, uiHeight);
+            DrawSupportCardModal(uiWidth, uiHeight);
             DrawSettingsButtonAndPanel(uiWidth, uiHeight);
+            DrawSupportButtonAndPanel(uiWidth, uiHeight);
             GUI.matrix = Matrix4x4.identity;
         }
 
@@ -6309,6 +6551,74 @@ namespace AlwaysFaithful.Prototype
             }
         }
 
+        // Read-only order-of-battle view of the Battalion's support-card
+        // hand. Cards are only ever played through the pre-battle modal
+        // (DrawSupportCardModal) — this panel exists so the player can check
+        // what they're holding at any time, on either map.
+        private void DrawSupportButtonAndPanel(float uiWidth, float uiHeight)
+        {
+            int handCount = battalionStatus?.Hand.Count ?? 0;
+            Rect supportButtonRect = new Rect(124f, uiHeight - 44f, 96f, 34f);
+            if (GUI.Button(supportButtonRect, $"SUPPORT • {handCount}", buttonStyle)) supportPanelOpen = !supportPanelOpen;
+            if (!supportPanelOpen) return;
+
+            Rect panel = new Rect(uiWidth / 2f - 260f, uiHeight / 2f - 200f, 520f, 400f);
+            GUI.Box(panel, GUIContent.none);
+            GUI.Label(new Rect(panel.x + 20f, panel.y + 14f, 300f, 30f), "ORDER OF BATTLE • SUPPORT", titleStyle);
+            if (GUI.Button(new Rect(panel.x + panel.width - 44f, panel.y + 14f, 28f, 28f), "X", buttonStyle)) supportPanelOpen = false;
+
+            float rowY = panel.y + 64f;
+            if (handCount == 0)
+            {
+                GUI.Label(new Rect(panel.x + 20f, rowY, panel.width - 40f, 22f), "No support cards on hand. A new card is drawn after each engagement.", bodyStyle);
+            }
+            else
+            {
+                foreach (TacticalSupportCard card in battalionStatus.Hand)
+                {
+                    GUI.Label(new Rect(panel.x + 20f, rowY, panel.width - 40f, 22f), TacticalSupportCardCatalog.DisplayName(card.AssetType), badgeStyle);
+                    rowY += 24f;
+                    GUI.Label(new Rect(panel.x + 20f, rowY, panel.width - 40f, 22f), TacticalSupportCardCatalog.Description(card.AssetType), bodyStyle);
+                    rowY += 36f;
+                }
+            }
+
+            rowY = panel.y + panel.height - 54f;
+            if (GUI.Button(new Rect(panel.x + 20f, rowY, panel.width - 40f, 34f), "CLOSE", buttonStyle)) supportPanelOpen = false;
+        }
+
+        // Blocking pre-battle modal offered at the start of a fresh standalone
+        // scenario whenever the Battalion's hand is non-empty. No fade timer
+        // like DrawCampaignBriefing — this one waits on a player choice, not
+        // a clock, so it shows/hides instantly.
+        private void DrawSupportCardModal(float uiWidth, float uiHeight)
+        {
+            if (!supportCardModalActive || battalionStatus == null) return;
+
+            GUI.color = new Color(.02f, .03f, .05f, .82f);
+            GUI.DrawTexture(new Rect(0f, 0f, uiWidth, uiHeight), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            float panelHeight = 120f + battalionStatus.Hand.Count * 60f;
+            Rect panel = new Rect(uiWidth / 2f - 260f, uiHeight / 2f - panelHeight / 2f, 520f, panelHeight);
+            GUI.Box(panel, GUIContent.none);
+            GUI.Label(new Rect(panel.x + 20f, panel.y + 14f, panel.width - 40f, 30f), "COMMIT SUPPORT?", titleStyle);
+            GUI.Label(new Rect(panel.x + 20f, panel.y + 46f, panel.width - 40f, 20f), "Play one card for this battle, or skip.", bodyStyle);
+
+            float rowY = panel.y + 78f;
+            foreach (TacticalSupportCard card in battalionStatus.Hand)
+            {
+                GUI.Label(new Rect(panel.x + 20f, rowY + 6f, 300f, 22f), TacticalSupportCardCatalog.DisplayName(card.AssetType), badgeStyle);
+                GUI.Label(new Rect(panel.x + 20f, rowY + 26f, 300f, 20f), TacticalSupportCardCatalog.Description(card.AssetType), bodyStyle);
+                if (GUI.Button(new Rect(panel.x + panel.width - 140f, rowY + 10f, 120f, 34f), "PLAY", buttonStyle))
+                    DismissSupportCardModal(card);
+                rowY += 60f;
+            }
+
+            if (GUI.Button(new Rect(panel.x + 20f, panel.y + panel.height - 44f, panel.width - 40f, 34f), "SKIP", buttonStyle))
+                DismissSupportCardModal(null);
+        }
+
         private void DrawTacticalInterface(float uiWidth, float uiHeight)
         {
             GUI.Box(new Rect(20f, 18f, 405f, 318f), GUIContent.none);
@@ -6351,7 +6661,7 @@ namespace AlwaysFaithful.Prototype
             Rect tacticalSaveRect = new Rect(38f, 283f, 93f, 34f);
             Rect tacticalEndTurnRect = new Rect(137f, 283f, 104f, 34f);
             returnToIslandRect = new Rect(244f, 283f, 161f, 34f);
-            bool tacticalControlsEnabled = !mapTransitionActive && !tacticalUnitMoving && !tacticalFireResolving && !tacticalEnemyTurnActive && !campaignBriefingActive && !settingsPanelOpen;
+            bool tacticalControlsEnabled = !mapTransitionActive && !tacticalUnitMoving && !tacticalFireResolving && !tacticalEnemyTurnActive && !campaignBriefingActive && !settingsPanelOpen && !supportCardModalActive;
             GUI.enabled = tacticalControlsEnabled && !resultScreenActive && tacticalObjective != null && tacticalObjective.Outcome == TacticalBattleOutcome.InProgress;
             if (GUI.Button(tacticalSaveRect, "SAVE", buttonStyle)) SaveTacticalBattle();
             GUI.enabled = tacticalControlsEnabled && !resultScreenActive;

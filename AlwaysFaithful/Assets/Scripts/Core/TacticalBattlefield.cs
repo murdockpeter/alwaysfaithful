@@ -19,7 +19,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 11;
+        public const int CurrentSchemaVersion = 12;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;
@@ -46,6 +46,12 @@ namespace AlwaysFaithful.Core
         public List<TacticalObjectiveEvent> ObjectiveEvents = new List<TacticalObjectiveEvent>();
         public List<TacticalReconMarker> ActiveReconMarkers = new List<TacticalReconMarker>();
         public TacticalObjectiveState Objective;
+
+        // Schema 12: set for the whole battle when the player commits an ISR
+        // support card before this scenario begins (AlwaysFaithfulPrototype's
+        // pre-battle support-card modal). Read by RefreshTacticalObservation
+        // alongside the existing recon-marker bonus.
+        public bool IsrCardActive;
 
         public bool Contains(double longitude, double latitude)
             => longitude >= West && longitude <= East && latitude >= South && latitude <= North;

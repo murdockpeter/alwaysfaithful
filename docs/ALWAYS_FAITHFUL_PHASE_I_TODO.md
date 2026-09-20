@@ -134,6 +134,7 @@ Complete these in order unless a discovered dependency requires a documented reo
 - [x] Ensure every important action has visible feedback and an event-log explanation.
 - [x] Add randomized scenario generation for standalone play, so no two battles at a hex play the same.
 - [x] Add new mission types (Raid, Reconnaissance-in-Force, Withdrawal) and a persistent standalone Battalion status/campaign layer.
+- [x] Add an order-of-battle support-card resource pool (ISR, Fire Support, Reserve) with a pre-battle commitment modal (Pass A); an in-battle Call for Fire order spending the same pool is still to come (Pass B).
 - [ ] Run a clean-machine Windows build test and archive the exact executable plus test logs.
 - [ ] Conduct at least three no-instruction playtests and record confusion, misclicks, and unreadable states.
 - [ ] Resolve all blocking and high-severity findings before calling Phase I complete.

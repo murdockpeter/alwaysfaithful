@@ -23,7 +23,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattalionStatus
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattalionName = "1st Battalion, Rifle Regiment";
@@ -32,6 +32,13 @@ namespace AlwaysFaithful.Core
         public TacticalBattleOutcome LastOutcome = TacticalBattleOutcome.InProgress;
         public string LastSummary;
         public List<TacticalBattalionEngagementRecord> History = new List<TacticalBattalionEngagementRecord>();
+
+        // Order-of-battle support cards (schema 2): a drawable/playable hand
+        // of abstract support assets, spent for a pre-battle whole-battle
+        // effect. NextCardId is a monotonic counter so cards keep a stable
+        // identity across draws/plays within the same campaign.
+        public List<TacticalSupportCard> Hand = new List<TacticalSupportCard>();
+        public int NextCardId;
     }
 
     public static class TacticalBattalion
@@ -110,6 +117,24 @@ namespace AlwaysFaithful.Core
             {
                 error = "Battalion status is missing a battalion name";
                 return false;
+            }
+            if (status.Hand == null)
+            {
+                error = "Battalion status has a missing support-card hand";
+                return false;
+            }
+            if (status.Hand.Count > TacticalSupportCards.MaximumHandSize)
+            {
+                error = $"Battalion status hand of {status.Hand.Count} exceeds the maximum of {TacticalSupportCards.MaximumHandSize}";
+                return false;
+            }
+            foreach (TacticalSupportCard card in status.Hand)
+            {
+                if (card == null || card.CardId <= 0 || !Enum.IsDefined(typeof(TacticalSupportAssetType), card.AssetType))
+                {
+                    error = "Battalion status hand contains a malformed support card";
+                    return false;
+                }
             }
             error = null;
             return true;
