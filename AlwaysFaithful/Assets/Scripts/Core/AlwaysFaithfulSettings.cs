@@ -31,6 +31,16 @@ namespace AlwaysFaithful.Core
         Skip
     }
 
+    // Illustrated is the hand-built Broken Front-style counter (deck,
+    // maneuver elements, command node); Symbol is a NATO/MIL-STD-2525-
+    // inspired alternate skin (blue/red frame, infantry-cross or
+    // support-dot icon) over the exact same underlying units.
+    public enum CounterSkinTier
+    {
+        Illustrated,
+        Symbol
+    }
+
     // App-level presentation/input preference, not tactical-battle domain
     // state (deliberately not prefixed Tactical, unlike every other Core
     // persisted type). File-persisted the same way TacticalBattalionStatus
@@ -38,7 +48,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class AlwaysFaithfulSettings
     {
-        public const int CurrentSchemaVersion = 2;
+        public const int CurrentSchemaVersion = 3;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public UiScaleTier UiScale = UiScaleTier.Auto;
@@ -48,6 +58,7 @@ namespace AlwaysFaithful.Core
         public bool ColorSafePalette;
         public bool ReducedMotion;
         public AnimationSpeedTier AnimationSpeed = AnimationSpeedTier.Normal;
+        public CounterSkinTier CounterSkin = CounterSkinTier.Illustrated;
     }
 
     public static class AlwaysFaithfulSettingsRules

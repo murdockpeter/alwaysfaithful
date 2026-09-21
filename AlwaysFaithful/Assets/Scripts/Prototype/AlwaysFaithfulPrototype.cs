@@ -99,6 +99,9 @@ namespace AlwaysFaithful.Prototype
         private HexCellView hoveredLocalCell;
         private UnitCounterView tacticalUnit;
         private TacticalFormationView tacticalFormationView;
+        private NatoSymbolView tacticalSymbolView;
+        private GameObject tacticalIllustratedDetail;
+        private GameObject tacticalSymbolDetail;
         private TacticalUnitState tacticalUnitState;
         private LineRenderer tacticalRouteLine;
         private GameObject tacticalDestinationGhost;
@@ -354,14 +357,7 @@ namespace AlwaysFaithful.Prototype
                 EnterTacticalMap(FindCoastalOperationalCell(), false);
                 BeginTacticalMovePlanning();
                 DisplayTacticalCaptureRoute();
-                // Dev-only zoom override for visual review captures (e.g. checking
-                // close-in terrain/counter detail); normal play is unaffected.
-                string cameraDistanceArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-camera-distance=", StringComparison.Ordinal));
-                if (cameraDistanceArgument != null && float.TryParse(cameraDistanceArgument.Substring("--capture-camera-distance=".Length), out float overrideDistance))
-                {
-                    cameraDistance = overrideDistance;
-                    ApplyCamera();
-                }
+                ApplyDevCaptureOverrides();
                 StartCoroutine(CaptureTacticalScreenshotWhenRequested());
             }
             if (automatedLosCapture)
@@ -383,6 +379,7 @@ namespace AlwaysFaithful.Prototype
                 FrameObservationContacts();
                 BeginTacticalFirePlanning();
                 PreviewTacticalFire(FindObservedEnemyCell());
+                ApplyDevCaptureOverrides();
                 StartCoroutine(CaptureFireScreenshotWhenRequested());
             }
             if (automatedSuppressionCapture)
@@ -412,6 +409,7 @@ namespace AlwaysFaithful.Prototype
                 tacticalFireLine.SetPosition(1, localCells[tacticalUnitState.Position].transform.position + Vector3.up * (CellSurfaceOffset + .38f));
                 tacticalContactViews[reactor.Id].CueReactionSource();
                 tacticalUnit.CueIncomingFire(TacticalFireOutcome.Suppressed);
+                tacticalSymbolView.FlashIcon(IncomingFireFlashColor(TacticalFireOutcome.Suppressed));
                 cameraFocus = Vector3.Lerp(tacticalContactViews[reactor.Id].transform.position, tacticalUnit.transform.position, .5f);
                 cameraDistance = 13f;
                 ApplyCamera();
@@ -1543,7 +1541,7 @@ namespace AlwaysFaithful.Prototype
                 File.WriteAllText(tempPath, JsonUtility.ToJson(settings, true));
                 if (File.Exists(settingsPath)) File.Delete(settingsPath);
                 File.Move(tempPath, settingsPath);
-                Debug.Log($"ALWAYS_FAITHFUL_SETTINGS_SAVED path={settingsPath} uiScale={settings.UiScale} cancel={settings.RemapCancelKey} resetCamera={settings.RemapResetCameraKey} graphics={settings.GraphicsPreset} colorSafe={settings.ColorSafePalette} reducedMotion={settings.ReducedMotion} animSpeed={settings.AnimationSpeed}");
+                Debug.Log($"ALWAYS_FAITHFUL_SETTINGS_SAVED path={settingsPath} uiScale={settings.UiScale} cancel={settings.RemapCancelKey} resetCamera={settings.RemapResetCameraKey} graphics={settings.GraphicsPreset} colorSafe={settings.ColorSafePalette} reducedMotion={settings.ReducedMotion} animSpeed={settings.AnimationSpeed} counterSkin={settings.CounterSkin}");
             }
             catch (Exception exception)
             {
@@ -1732,6 +1730,7 @@ namespace AlwaysFaithful.Prototype
             BuildTacticalLosVisuals();
             BuildTacticalFireVisuals();
             BuildTacticalContacts(restore);
+            ApplyCounterSkin();
             BuildTacticalObjective(restore);
             RefreshTacticalObservation();
             tacticalOrderFeedback = restore != null ? "BATTLE RESTORED • RMB platoon for orders" : "RMB platoon for tactical orders";
@@ -2004,13 +2003,60 @@ namespace AlwaysFaithful.Prototype
                 tacticalWeapon = new TacticalWeaponState("m27-small-arms", "M27 Small Arms", 6);
             }
             tacticalUnit.Initialize(tacticalUnitState.DisplayName);
-            tacticalFormationView = root.AddComponent<TacticalFormationView>();
+            tacticalIllustratedDetail = new GameObject("Illustrated Detail");
+            tacticalIllustratedDetail.transform.SetParent(root.transform, false);
+            tacticalFormationView = tacticalIllustratedDetail.AddComponent<TacticalFormationView>();
             tacticalFormationView.Initialize(TacticalFormationAffiliation.Usmc, "USMC", "RIFLE PLT");
             tacticalUnit.BindRenderers(tacticalFormationView.CommandDeckRenderer, tacticalFormationView.DesignationRenderer);
+            tacticalSymbolDetail = new GameObject("Symbol Detail");
+            tacticalSymbolDetail.transform.SetParent(root.transform, false);
+            tacticalSymbolView = tacticalSymbolDetail.AddComponent<NatoSymbolView>();
+            tacticalSymbolView.Initialize(true, false, "USMC\nRIFLE PLT");
+            tacticalSymbolView.BindReactive(tacticalUnitState, new Color(.22f, .55f, .95f), new Color(.22f, .55f, .95f));
             tacticalUnit.Present(tacticalUnitState);
             tacticalFormationView.Present(tacticalUnitState);
+            ApplyCounterSkin();
             localMovementBoard[tacticalUnitState.Position].OccupantId = tacticalUnitState.Id;
         }
+
+        // Toggles between the illustrated and NATO/MIL-STD-symbol skins for
+        // the player's own counter and every PLA contact marker; called
+        // after either is (re)built and whenever the Settings panel's
+        // Counter Skin control changes.
+        private void ApplyCounterSkin()
+        {
+            if (tacticalIllustratedDetail != null) tacticalIllustratedDetail.SetActive(settings.CounterSkin == CounterSkinTier.Illustrated);
+            if (tacticalSymbolDetail != null) tacticalSymbolDetail.SetActive(settings.CounterSkin == CounterSkinTier.Symbol);
+            foreach (ContactMarkerView marker in tacticalContactViews.Values) marker.ApplySkin(settings.CounterSkin);
+        }
+
+        // Dev-only overrides for visual review captures (e.g. checking
+        // close-in terrain/counter detail, or the alternate counter skin);
+        // normal play never passes these flags, so it is unaffected.
+        private void ApplyDevCaptureOverrides()
+        {
+            string cameraDistanceArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-camera-distance=", StringComparison.Ordinal));
+            if (cameraDistanceArgument != null && float.TryParse(cameraDistanceArgument.Substring("--capture-camera-distance=".Length), out float overrideDistance))
+            {
+                cameraDistance = overrideDistance;
+                ApplyCamera();
+            }
+            string counterSkinArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-counter-skin=", StringComparison.Ordinal));
+            if (counterSkinArgument != null)
+            {
+                settings.CounterSkin = counterSkinArgument.Substring("--capture-counter-skin=".Length).Equals("symbol", StringComparison.OrdinalIgnoreCase)
+                    ? CounterSkinTier.Symbol
+                    : CounterSkinTier.Illustrated;
+                ApplyCounterSkin();
+            }
+        }
+
+        // Matches UnitCounterView.CueIncomingFire's own flash mapping so the
+        // symbol skin's momentary flash reads the same as the illustrated
+        // skin's.
+        private static Color IncomingFireFlashColor(TacticalFireOutcome outcome)
+            => outcome == TacticalFireOutcome.Hit ? new Color(1f, .20f, .12f, 1f)
+                : outcome == TacticalFireOutcome.Suppressed ? new Color(1f, .62f, .14f, 1f) : new Color(.62f, .72f, .68f, 1f);
 
         // Lets an imported BattleRequest override a fixed roster slot's ID/name
         // without turning this into a data-driven roster (out of scope for the
@@ -3110,6 +3156,7 @@ namespace AlwaysFaithful.Prototype
             tacticalAudio.Play(reactionEvent.Outcome == TacticalFireOutcome.Hit ? TacticalSound.FireHit
                 : reactionEvent.Outcome == TacticalFireOutcome.Suppressed ? TacticalSound.FireSuppressed : TacticalSound.FireMiss);
             tacticalUnit.CueIncomingFire(reactionEvent.Outcome);
+            tacticalSymbolView.FlashIcon(IncomingFireFlashColor(reactionEvent.Outcome));
             float reactionFireDuration = .46f * AnimationTimeScale();
             for (float elapsed = 0f; elapsed < reactionFireDuration; elapsed += Time.deltaTime)
             {
@@ -4027,6 +4074,7 @@ namespace AlwaysFaithful.Prototype
             tacticalUnit.Present(tacticalUnitState);
             tacticalFormationView.Present(tacticalUnitState);
             tacticalUnit.CueIncomingFire(fire.Outcome);
+            tacticalSymbolView.FlashIcon(IncomingFireFlashColor(fire.Outcome));
             tacticalFireLine.enabled = true;
             tacticalFireLine.startColor = visible ? new Color(1f, .36f, .20f, .96f) : new Color(1f, .58f, .20f, .72f);
             tacticalFireLine.endColor = tacticalFireLine.startColor;
@@ -6378,9 +6426,9 @@ namespace AlwaysFaithful.Prototype
                 return false;
             }
             if (fresh.GraphicsPreset != GraphicsPresetTier.Medium || fresh.ColorSafePalette || fresh.ReducedMotion ||
-                fresh.AnimationSpeed != AnimationSpeedTier.Normal)
+                fresh.AnimationSpeed != AnimationSpeedTier.Normal || fresh.CounterSkin != CounterSkinTier.Illustrated)
             {
-                failure = $"expected default graphics settings (Medium/off/off/Normal), got {fresh.GraphicsPreset}/{fresh.ColorSafePalette}/{fresh.ReducedMotion}/{fresh.AnimationSpeed}";
+                failure = $"expected default graphics settings (Medium/off/off/Normal/Illustrated), got {fresh.GraphicsPreset}/{fresh.ColorSafePalette}/{fresh.ReducedMotion}/{fresh.AnimationSpeed}/{fresh.CounterSkin}";
                 return false;
             }
             if (AlwaysFaithfulSettingsRules.Validate(null, out _))
@@ -6446,14 +6494,15 @@ namespace AlwaysFaithful.Prototype
             settings.ColorSafePalette = true;
             settings.ReducedMotion = true;
             settings.AnimationSpeed = AnimationSpeedTier.Fast;
+            settings.CounterSkin = CounterSkinTier.Symbol;
             SaveSettings();
 
             if (!TryLoadSettings(settingsPath, out AlwaysFaithfulSettings roundTripped) ||
                 roundTripped.UiScale != UiScaleTier.Large || roundTripped.RemapResetCameraKey != KeyCode.T || roundTripped.RemapCancelKey != KeyCode.Escape ||
                 roundTripped.GraphicsPreset != GraphicsPresetTier.Low || !roundTripped.ColorSafePalette || !roundTripped.ReducedMotion ||
-                roundTripped.AnimationSpeed != AnimationSpeedTier.Fast)
+                roundTripped.AnimationSpeed != AnimationSpeedTier.Fast || roundTripped.CounterSkin != CounterSkinTier.Symbol)
             {
-                Debug.LogError($"ALWAYS_FAITHFUL_SETTINGS_REGRESSION_FAILED persistence round trip failed scale={roundTripped?.UiScale} resetKey={roundTripped?.RemapResetCameraKey} graphics={roundTripped?.GraphicsPreset} colorSafe={roundTripped?.ColorSafePalette} reducedMotion={roundTripped?.ReducedMotion} animSpeed={roundTripped?.AnimationSpeed}");
+                Debug.LogError($"ALWAYS_FAITHFUL_SETTINGS_REGRESSION_FAILED persistence round trip failed scale={roundTripped?.UiScale} resetKey={roundTripped?.RemapResetCameraKey} graphics={roundTripped?.GraphicsPreset} colorSafe={roundTripped?.ColorSafePalette} reducedMotion={roundTripped?.ReducedMotion} animSpeed={roundTripped?.AnimationSpeed} counterSkin={roundTripped?.CounterSkin}");
                 Application.Quit(1);
                 yield break;
             }
@@ -7649,6 +7698,9 @@ namespace AlwaysFaithful.Prototype
         private static readonly AnimationSpeedTier[] AnimationSpeedOptions =
             { AnimationSpeedTier.Normal, AnimationSpeedTier.Fast, AnimationSpeedTier.Skip };
         private static readonly string[] AnimationSpeedLabels = { "NORMAL", "FAST", "SKIP" };
+        private static readonly CounterSkinTier[] CounterSkinOptions =
+            { CounterSkinTier.Illustrated, CounterSkinTier.Symbol };
+        private static readonly string[] CounterSkinLabels = { "ILLUSTRATED", "NATO SYMBOL" };
 
         private OperationalContactState OperationalContactAt(HexCoord hex)
         {
@@ -7829,7 +7881,7 @@ namespace AlwaysFaithful.Prototype
                 awaitingRemapFor = null;
             }
 
-            Rect panel = new Rect(uiWidth / 2f - 260f, uiHeight / 2f - 280f, 520f, 560f);
+            Rect panel = new Rect(uiWidth / 2f - 260f, uiHeight / 2f - 300f, 520f, 600f);
             GUI.Box(panel, GUIContent.none);
             GUI.Label(new Rect(panel.x + 20f, panel.y + 14f, 300f, 30f), "SETTINGS", titleStyle);
             if (GUI.Button(new Rect(panel.x + panel.width - 44f, panel.y + 14f, 28f, 28f), "X", buttonStyle))
@@ -7909,11 +7961,26 @@ namespace AlwaysFaithful.Prototype
                 settings.ReducedMotion = !settings.ReducedMotion;
 
             rowY += 40f;
+            GUI.Label(new Rect(panel.x + 20f, rowY, 150f, 22f), "COUNTER SKIN", badgeStyle);
+            for (int index = 0; index < CounterSkinOptions.Length; index++)
+            {
+                Rect optionRect = new Rect(panel.x + 180f + index * 130f, rowY - 4f, 126f, 30f);
+                bool active = settings.CounterSkin == CounterSkinOptions[index];
+                string label = active ? $"[{CounterSkinLabels[index]}]" : CounterSkinLabels[index];
+                if (GUI.Button(optionRect, label, buttonStyle))
+                {
+                    settings.CounterSkin = CounterSkinOptions[index];
+                    ApplyCounterSkin();
+                }
+            }
+
+            rowY += 40f;
             if (GUI.Button(new Rect(panel.x + 20f, rowY, panel.width - 40f, 34f), "RESET TO DEFAULTS", buttonStyle))
             {
                 settings = AlwaysFaithfulSettingsRules.CreateDefault();
                 awaitingRemapFor = null;
                 remapRejectionText = null;
+                ApplyCounterSkin();
             }
 
             rowY += 44f;

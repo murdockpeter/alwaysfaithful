@@ -29,9 +29,12 @@ namespace AlwaysFaithful.Prototype
         public MeshRenderer DesignationRenderer => designationRenderer;
         public TacticalCombatStatus PresentedStatus { get; private set; }
 
+        public bool IsSupportRole { get; private set; }
+
         public void Initialize(TacticalFormationAffiliation affiliation, string formationCode, string echelon)
         {
             Affiliation = affiliation;
+            IsSupportRole = echelon != null && echelon.ToUpperInvariant().Contains("SUPPORT");
             bodyColor = affiliation == TacticalFormationAffiliation.Usmc
                 ? new Color(.28f, .43f, .31f) : new Color(.49f, .15f, .11f);
             deckColor = affiliation == TacticalFormationAffiliation.Usmc
@@ -70,6 +73,17 @@ namespace AlwaysFaithful.Prototype
                 elementCap.transform.localScale = new Vector3(.34f, .20f, .26f);
             }
             ManeuverElementCount = elementPositions.Length;
+
+            // Crew-served support teams get a distinct protruding barrel over
+            // the center element so they read differently from a rifle
+            // squad's uniform three-element wedge, even before the label text.
+            if (IsSupportRole)
+            {
+                GameObject barrel = Primitive(PrimitiveType.Cylinder, "Support Weapon Barrel", transform, solid, plateColor);
+                barrel.transform.localPosition = new Vector3(0f, .33f, .34f);
+                barrel.transform.localRotation = Quaternion.Euler(80f, 0f, 0f);
+                barrel.transform.localScale = new Vector3(.045f, .30f, .045f);
+            }
 
             GameObject commandNode = Primitive(PrimitiveType.Cylinder, "Formation Command Node", transform, solid, plateColor);
             commandNode.transform.localPosition = new Vector3(0f, .24f, -.08f);

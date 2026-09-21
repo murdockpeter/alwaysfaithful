@@ -30,9 +30,11 @@ Second half of the Settings panel; Pass A (persistence, UI scale, remappable Can
 
 ## Group C — Symbology and skins
 
-- [ ] Add an illustrated-counter and NATO/MIL-STD-symbol option, switchable as an interchangeable presentation skin over the same underlying units.
-  - [x] Counters, cover clumps, and buildings now render with real directional shading (new `MapSolid` shader) instead of completely flat/unlit color, so spheres and cubes read as actual 3D shapes rather than flat blobs — confirmed by side-by-side capture at close tactical zoom. This is a rendering-quality fix to the existing illustrated counter, not the NATO/MIL-STD alternate skin itself, which is still undone.
-  - PLA rifle squads and support teams still look identical (same red `TacticalFormationView` model) — no per-role visual distinction yet.
+- [x] Add an illustrated-counter and NATO/MIL-STD-symbol option, switchable as an interchangeable presentation skin over the same underlying units. **Complete.**
+  - [x] Counters, cover clumps, and buildings now render with real directional shading (new `MapSolid` shader) instead of completely flat/unlit color, so spheres and cubes read as actual 3D shapes rather than flat blobs — confirmed by side-by-side capture at close tactical zoom.
+  - [x] New `CounterSkinTier` setting (Illustrated/Symbol) in the Settings panel, persisted like every other display setting. Symbol is a `NatoSymbolView` alternate skin — a doctrinal blue-friendly/red-hostile frame with an infantry-cross or support-dot icon — switchable live for the player's platoon and every PLA contact marker without losing detection-tier or combat-status coloring. Confirmed by side-by-side capture (player counter blue-framed with cross, Identified PLA contact red-framed with cross, both labeled).
+  - [x] PLA rifle squads vs. support teams are now visually distinct in both skins: the illustrated model gets a protruding barrel prop over its center element, the symbol skin swaps the infantry cross for a solid dot — derived from the same "SUPPORT" role string in both places. Not verified by screenshot this pass (the default scenario's support team stayed at Contact/uncertain-diamond tier in every capture attempt), only by code inspection — worth a follow-up look once a scenario reliably identifies a support team.
+  - Not full MIL-STD-2525 fidelity: no size/echelon glyph, no mobility/equipment modifiers — a simplified stand-in, documented as such in `NatoSymbolView`.
 
 ## Group F — Terrain fidelity at close zoom
 

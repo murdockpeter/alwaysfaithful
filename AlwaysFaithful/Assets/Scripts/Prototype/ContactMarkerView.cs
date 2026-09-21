@@ -10,9 +10,13 @@ namespace AlwaysFaithful.Prototype
         private TextMesh label;
         private GameObject labelObject;
         private GameObject formationDetail;
+        private GameObject illustratedDetail;
+        private GameObject symbolDetail;
         private GameObject contactGlyph;
         private MeshRenderer contactGlyphRenderer;
         private TacticalFormationView formationView;
+        private NatoSymbolView symbolView;
+        private CounterSkinTier currentSkin = CounterSkinTier.Illustrated;
         private LineRenderer uncertaintyRing;
         private Vector3 settledScale = Vector3.one;
         private float displayScale = 1f;
@@ -35,10 +39,20 @@ namespace AlwaysFaithful.Prototype
             Shader solid = Resources.Load<Shader>("Shaders/MapSolid") ?? overlay;
             formationDetail = new GameObject("Identified Formation Detail");
             formationDetail.transform.SetParent(transform, false);
-            formationView = formationDetail.AddComponent<TacticalFormationView>();
+
+            illustratedDetail = new GameObject("Illustrated Detail");
+            illustratedDetail.transform.SetParent(formationDetail.transform, false);
+            formationView = illustratedDetail.AddComponent<TacticalFormationView>();
             formationView.Initialize(TacticalFormationAffiliation.Pla, "PLA", echelon);
             baseRenderer = formationView.CommandDeckRenderer;
             faceRenderer = formationView.DesignationRenderer;
+
+            symbolDetail = new GameObject("Symbol Detail");
+            symbolDetail.transform.SetParent(formationDetail.transform, false);
+            symbolView = symbolDetail.AddComponent<NatoSymbolView>();
+            bool isSupportRole = echelon != null && echelon.ToUpperInvariant().Contains("SUPPORT");
+            symbolView.Initialize(false, isSupportRole, "PLA\n" + echelon);
+            ApplySkin(currentSkin);
 
             contactGlyph = GameObject.CreatePrimitive(PrimitiveType.Cube);
             contactGlyph.name = "Uncertain Contact Diamond";
@@ -147,6 +161,7 @@ namespace AlwaysFaithful.Prototype
             baseRenderer.material.color = TacticalStatusVisuals.Desaturate(baseColor, desaturation);
             faceRenderer.material.color = TacticalStatusVisuals.Desaturate(faceColor, desaturation);
             contactGlyphRenderer.material.color = faceColor;
+            symbolView.SetColors(TacticalStatusVisuals.Desaturate(baseColor, desaturation), TacticalStatusVisuals.Desaturate(faceColor, desaturation));
             label.color = new Color(.10f, .07f, .05f, 1f);
             uncertaintyRing.startColor = ringColor;
             uncertaintyRing.endColor = ringColor;
@@ -154,11 +169,22 @@ namespace AlwaysFaithful.Prototype
             UpdateStatusBadge(statusKnown && PresentedStatus != TacticalCombatStatus.Ready);
         }
 
+        // Toggles which child of formationDetail renders once the tier
+        // logic above decides a detailed formation should be visible at
+        // all; independent of that tier gating, which is untouched.
+        public void ApplySkin(CounterSkinTier tier)
+        {
+            currentSkin = tier;
+            if (illustratedDetail != null) illustratedDetail.SetActive(tier == CounterSkinTier.Illustrated);
+            if (symbolDetail != null) symbolDetail.SetActive(tier == CounterSkinTier.Symbol);
+        }
+
         private void UpdateStatusBadge(bool visible)
         {
             if (statusBadge == null) return;
             statusBadge.SetActive(visible);
             if (visible) statusBadgeRenderer.material.color = TacticalStatusVisuals.BadgeColor(PresentedStatus);
+            symbolView.UpdateStatusBadge(visible, PresentedStatus);
         }
 
         public void CueFireOutcome(TacticalFireOutcome outcome)
@@ -166,9 +192,10 @@ namespace AlwaysFaithful.Prototype
             LastFireOutcome = outcome;
             FireCueCount++;
             transform.localScale = settledScale * 1.22f;
-            if (outcome == TacticalFireOutcome.Hit) faceRenderer.material.color = new Color(1f, .24f, .14f, 1f);
-            else if (outcome == TacticalFireOutcome.Suppressed) faceRenderer.material.color = new Color(1f, .68f, .16f, 1f);
-            else faceRenderer.material.color = new Color(.62f, .66f, .61f, 1f);
+            Color flash = outcome == TacticalFireOutcome.Hit ? new Color(1f, .24f, .14f, 1f)
+                : outcome == TacticalFireOutcome.Suppressed ? new Color(1f, .68f, .16f, 1f) : new Color(.62f, .66f, .61f, 1f);
+            faceRenderer.material.color = flash;
+            symbolView.FlashIcon(flash);
         }
 
         public int ReactionCueCount { get; private set; }
@@ -179,6 +206,7 @@ namespace AlwaysFaithful.Prototype
             gameObject.SetActive(true);
             transform.localScale = settledScale * 1.30f;
             faceRenderer.material.color = new Color(1f, .90f, .40f, 1f);
+            symbolView.FlashIcon(new Color(1f, .90f, .40f, 1f));
             uncertaintyRing.enabled = true;
             uncertaintyRing.startColor = new Color(1f, .90f, .30f, .95f);
             uncertaintyRing.endColor = uncertaintyRing.startColor;
