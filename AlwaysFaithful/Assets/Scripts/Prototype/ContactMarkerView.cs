@@ -32,6 +32,7 @@ namespace AlwaysFaithful.Prototype
         public void Initialize(string echelon)
         {
             Shader overlay = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
+            Shader solid = Resources.Load<Shader>("Shaders/MapSolid") ?? overlay;
             formationDetail = new GameObject("Identified Formation Detail");
             formationDetail.transform.SetParent(transform, false);
             formationView = formationDetail.AddComponent<TacticalFormationView>();
@@ -47,7 +48,7 @@ namespace AlwaysFaithful.Prototype
             contactGlyph.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
             contactGlyph.transform.localScale = new Vector3(.48f, .08f, .48f);
             contactGlyphRenderer = contactGlyph.GetComponent<MeshRenderer>();
-            contactGlyphRenderer.sharedMaterial = new Material(overlay);
+            contactGlyphRenderer.sharedMaterial = new Material(solid);
             Destroy(contactGlyph.GetComponent<Collider>());
 
             labelObject = new GameObject("Contact Label");
@@ -83,7 +84,7 @@ namespace AlwaysFaithful.Prototype
             statusBadge.transform.localPosition = new Vector3(0f, .47f, .12f);
             statusBadge.transform.localScale = Vector3.one * .16f;
             statusBadgeRenderer = statusBadge.GetComponent<MeshRenderer>();
-            statusBadgeRenderer.sharedMaterial = new Material(overlay);
+            statusBadgeRenderer.sharedMaterial = new Material(solid);
             Destroy(statusBadge.GetComponent<Collider>());
             statusBadge.SetActive(false);
 

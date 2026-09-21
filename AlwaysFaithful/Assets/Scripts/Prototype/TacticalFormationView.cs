@@ -39,12 +39,13 @@ namespace AlwaysFaithful.Prototype
             plateColor = affiliation == TacticalFormationAffiliation.Usmc
                 ? new Color(.79f, .74f, .55f) : new Color(.80f, .38f, .27f);
             Shader overlay = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
+            Shader solid = Resources.Load<Shader>("Shaders/MapSolid") ?? overlay;
 
             GameObject shadow = Primitive(PrimitiveType.Cylinder, "Formation Soft Shadow", transform, overlay, new Color(.01f, .025f, .023f, .42f));
             shadow.transform.localPosition = Vector3.up * .025f;
             shadow.transform.localScale = new Vector3(.86f, .012f, .69f);
 
-            GameObject deck = Primitive(PrimitiveType.Cylinder, "Formation Command Deck", transform, overlay, deckColor);
+            GameObject deck = Primitive(PrimitiveType.Cylinder, "Formation Command Deck", transform, solid, deckColor);
             deck.transform.localPosition = Vector3.up * .09f;
             deck.transform.localScale = new Vector3(.73f, .045f, .59f);
             commandDeckRenderer = deck.GetComponent<MeshRenderer>();
@@ -58,34 +59,34 @@ namespace AlwaysFaithful.Prototype
             float[] yaws = { -14f, 0f, 14f };
             for (int index = 0; index < elementPositions.Length; index++)
             {
-                GameObject element = Primitive(PrimitiveType.Cube, $"Maneuver Element {index + 1}", transform, overlay, bodyColor);
+                GameObject element = Primitive(PrimitiveType.Cube, $"Maneuver Element {index + 1}", transform, solid, bodyColor);
                 element.transform.localPosition = elementPositions[index];
                 element.transform.localRotation = Quaternion.Euler(0f, yaws[index], 0f);
                 element.transform.localScale = new Vector3(.22f, .11f, .37f);
                 elementRenderers.Add(element.GetComponent<MeshRenderer>());
 
-                GameObject elementCap = Primitive(PrimitiveType.Sphere, $"Element Node {index + 1}", element.transform, overlay, plateColor);
+                GameObject elementCap = Primitive(PrimitiveType.Sphere, $"Element Node {index + 1}", element.transform, solid, plateColor);
                 elementCap.transform.localPosition = new Vector3(0f, .58f, .16f);
                 elementCap.transform.localScale = new Vector3(.34f, .20f, .26f);
             }
             ManeuverElementCount = elementPositions.Length;
 
-            GameObject commandNode = Primitive(PrimitiveType.Cylinder, "Formation Command Node", transform, overlay, plateColor);
+            GameObject commandNode = Primitive(PrimitiveType.Cylinder, "Formation Command Node", transform, solid, plateColor);
             commandNode.transform.localPosition = new Vector3(0f, .24f, -.08f);
             commandNode.transform.localScale = new Vector3(.13f, .12f, .13f);
-            GameObject commandCap = Primitive(PrimitiveType.Sphere, "Command Node Cap", transform, overlay, plateColor);
+            GameObject commandCap = Primitive(PrimitiveType.Sphere, "Command Node Cap", transform, solid, plateColor);
             commandCap.transform.localPosition = new Vector3(0f, .39f, -.08f);
             commandCap.transform.localScale = Vector3.one * .16f;
             HasCommandNode = true;
 
             Color recognitionColor = affiliation == TacticalFormationAffiliation.Usmc
                 ? new Color(.26f, .94f, .79f) : new Color(1f, .55f, .19f);
-            GameObject stripe = Primitive(PrimitiveType.Cube, "Side Recognition Stripe", transform, overlay, recognitionColor);
+            GameObject stripe = Primitive(PrimitiveType.Cube, "Side Recognition Stripe", transform, solid, recognitionColor);
             stripe.transform.localPosition = new Vector3(0f, .235f, -.30f);
             stripe.transform.localScale = new Vector3(.72f, .025f, .055f);
             HasRecognitionStripe = true;
 
-            GameObject plate = Primitive(PrimitiveType.Cube, "Formation Designation Plate", transform, overlay, plateColor);
+            GameObject plate = Primitive(PrimitiveType.Cube, "Formation Designation Plate", transform, solid, plateColor);
             plate.transform.localPosition = new Vector3(0f, .19f, -.42f);
             plate.transform.localScale = new Vector3(.70f, .055f, .20f);
             designationRenderer = plate.GetComponent<MeshRenderer>();
@@ -114,7 +115,7 @@ namespace AlwaysFaithful.Prototype
             frontage.SetPosition(1, new Vector3(0f, .275f, .48f));
             frontage.SetPosition(2, new Vector3(.54f, .275f, .24f));
 
-            statusBadge = Primitive(PrimitiveType.Sphere, "Suppression Status Badge", transform, overlay, new Color(1f, 1f, 1f, 0f));
+            statusBadge = Primitive(PrimitiveType.Sphere, "Suppression Status Badge", transform, solid, new Color(1f, 1f, 1f, 0f));
             statusBadge.transform.localPosition = new Vector3(0f, .47f, .12f);
             statusBadge.transform.localScale = Vector3.one * .16f;
             statusBadgeRenderer = statusBadge.GetComponent<MeshRenderer>();

@@ -31,6 +31,16 @@ Second half of the Settings panel; Pass A (persistence, UI scale, remappable Can
 ## Group C — Symbology and skins
 
 - [ ] Add an illustrated-counter and NATO/MIL-STD-symbol option, switchable as an interchangeable presentation skin over the same underlying units.
+  - [x] Counters, cover clumps, and buildings now render with real directional shading (new `MapSolid` shader) instead of completely flat/unlit color, so spheres and cubes read as actual 3D shapes rather than flat blobs — confirmed by side-by-side capture at close tactical zoom. This is a rendering-quality fix to the existing illustrated counter, not the NATO/MIL-STD alternate skin itself, which is still undone.
+  - PLA rifle squads and support teams still look identical (same red `TacticalFormationView` model) — no per-role visual distinction yet.
+
+## Group F — Terrain fidelity at close zoom
+
+Added after a close-zoom (low camera distance) capture showed the tactical ground as one perfectly flat, unlit color per hex with near-black hex-wall edges.
+
+- [x] Procedural per-hex grain in `MapTerrain.shader` (world-position hash noise, no texture asset) so the ground isn't a single flat swatch up close; verified it still reads as plain flat color at whole-island overview scale.
+- [x] Softened the hex side-wall shading floor so raised-hex edges read as a subtle rim rather than a near-black outline.
+- Not attempted: reshaping the vegetation-clump/building geometry itself (the new lighting alone made them read as real 3D bumps rather than flat smears, which was the main problem) or blending color across adjacent hex edges.
 
 ## Group D — Combat preview and feedback
 

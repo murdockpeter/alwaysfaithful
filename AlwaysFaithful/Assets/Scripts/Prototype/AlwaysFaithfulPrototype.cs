@@ -354,6 +354,14 @@ namespace AlwaysFaithful.Prototype
                 EnterTacticalMap(FindCoastalOperationalCell(), false);
                 BeginTacticalMovePlanning();
                 DisplayTacticalCaptureRoute();
+                // Dev-only zoom override for visual review captures (e.g. checking
+                // close-in terrain/counter detail); normal play is unaffected.
+                string cameraDistanceArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-camera-distance=", StringComparison.Ordinal));
+                if (cameraDistanceArgument != null && float.TryParse(cameraDistanceArgument.Substring("--capture-camera-distance=".Length), out float overrideDistance))
+                {
+                    cameraDistance = overrideDistance;
+                    ApplyCamera();
+                }
                 StartCoroutine(CaptureTacticalScreenshotWhenRequested());
             }
             if (automatedLosCapture)
@@ -1684,7 +1692,7 @@ namespace AlwaysFaithful.Prototype
 
             Mesh sharedMesh = CreateHexMesh(HexRadius * .985f, .12f);
             Material sharedMaterial = NewMaterial(Color.white);
-            Shader overlayShader = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
+            Shader coverShader = Resources.Load<Shader>("Shaders/MapSolid") ?? Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
             foreach (TacticalBattlefieldCell source in tacticalBattlefield.Cells)
             {
                 Vector3 position = LocalHexToWorld(source.LocalCoord);
@@ -1711,7 +1719,7 @@ namespace AlwaysFaithful.Prototype
                     ElevationMetres = source.ElevationMetres,
                     Cover = source.Cover
                 });
-                TacticalCoverView.Build(cellObject.transform, source.LocalCoord, source.Cover, source.IsBuiltUp, overlayShader, settings.GraphicsPreset);
+                TacticalCoverView.Build(cellObject.transform, source.LocalCoord, source.Cover, source.IsBuiltUp, coverShader, settings.GraphicsPreset);
             }
             foreach (TacticalReconMarker marker in tacticalReconMarkers) BuildTacticalReconRing(marker.Hex, tacticalReconRings, TacticalReconRingColor);
             foreach (TacticalReconMarker marker in tacticalPlaReconMarkers)
