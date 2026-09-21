@@ -15,9 +15,18 @@ Second half of the Settings panel; Pass A (persistence, UI scale, remappable Can
 ## Group B — HUD and information density
 
 - [ ] Restrained map-first HUD: selected-unit panel, turn/objective strip, contextual action bar, collapsible event log.
+  - [x] Live, collapsible event log panel ("LOG" button) reusing the same chronological log the after-action screen builds — previously only visible once a battle had already ended.
+  - [x] Contextual action bar already existed (the per-unit order popup); extended with the LOS-overlay toggle below rather than rebuilt.
+  - [ ] The selected-unit panel and turn/objective strip are still the original always-on command card, not a restrained redesign — no layout change attempted this pass.
 - [ ] Complete the selected-unit preview with posture, LOS, visible threats, and predicted exposure (reachable highlights and hover-driven path preview already exist).
-- [ ] Surface suppression, degradation, dug-in, fired/moved, passenger, ammunition-concern, and reaction-eligibility state without requiring a panel to be opened.
+  - Untouched this pass — "posture" isn't an implemented mechanic yet (see the retired product TODO's still-open movement-posture decision), and "predicted exposure" needs a real danger-zone computation, not just a badge.
+- [x] Surface suppression, degradation, fired/moved, ammunition-concern, and reaction-eligibility state without requiring a panel to be opened.
+  - Suppression/degradation (combat status) and fired/moved (Readiness) were already always-visible on the command card. New this pass: the AMMO badge now colors orange/red when low/empty, and a "REACTION FIRE • READY/UNAVAILABLE" badge reflects the same eligibility gate `TacticalReactionFire` itself checks.
+  - "Dug-in" and "passenger" states don't exist as mechanics yet (no entrenchment or embark/transport system) — nothing to surface until those land.
 - [ ] Add next-unit, next-actionable-unit, and objective-focus navigation, plus toggleable LOS and threat overlays and map labels/pins.
+  - [x] Objective-focus: a "FOCUS OBJECTIVE" button snaps the camera to the objective hex.
+  - [x] Toggleable LOS overlay: a tactical-menu button tints every in-range hex Clear/Obscured/Blocked from the selected unit's current position, kept mutually exclusive with the pre-existing single-target INSPECT LOS tool since both drive the same per-cell tint.
+  - Next-unit/next-actionable-unit navigation is not meaningful yet at Phase I's one-controllable-unit-per-side scale; a threat overlay and map labels/pins remain undone.
 
 ## Group C — Symbology and skins
 

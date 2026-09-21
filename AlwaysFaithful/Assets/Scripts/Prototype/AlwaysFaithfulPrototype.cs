@@ -134,6 +134,7 @@ namespace AlwaysFaithful.Prototype
         private bool automatedTacticalMovementRegression;
         private bool automatedLosRegression;
         private bool automatedLosCapture;
+        private bool automatedHudRegression;
         private bool automatedObservationRegression;
         private bool automatedObservationCapture;
         private bool automatedFireRegression;
@@ -186,6 +187,9 @@ namespace AlwaysFaithful.Prototype
         private RemapTarget? awaitingRemapFor;
         private string remapRejectionText;
         private bool automatedSettingsRegression;
+        private bool eventLogPanelOpen;
+        private bool tacticalLosOverlayActive;
+        private readonly List<HexCoord> tacticalLosOverlayCells = new List<HexCoord>();
         private string battleRequestError;
         private string campaignErrorTitle = "BATTLE REQUEST REJECTED";
         private string lastBattleResultPath;
@@ -254,6 +258,7 @@ namespace AlwaysFaithful.Prototype
             automatedTacticalCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--tactical-capture-path=", StringComparison.Ordinal));
             automatedTacticalMovementRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--tactical-movement-regression") >= 0;
             automatedLosRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--los-regression") >= 0;
+            automatedHudRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--hud-regression") >= 0;
             automatedLosCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--los-capture-path=", StringComparison.Ordinal));
             automatedObservationRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--observation-regression") >= 0;
             automatedObservationCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--observation-capture-path=", StringComparison.Ordinal));
@@ -334,6 +339,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedTacticalRegression) StartCoroutine(RunTacticalRegression());
             if (automatedTacticalMovementRegression) StartCoroutine(RunTacticalMovementRegression());
             if (automatedLosRegression) StartCoroutine(RunLosRegression());
+            if (automatedHudRegression) StartCoroutine(RunHudRegression());
             if (automatedObservationRegression) StartCoroutine(RunObservationRegression());
             if (automatedFireRegression) StartCoroutine(RunFireRegression());
             if (automatedSuppressionRegression) StartCoroutine(RunSuppressionRegression());
@@ -1550,6 +1556,8 @@ namespace AlwaysFaithful.Prototype
                 overviewCameraDistance = cameraDistance;
             }
             CancelUnitInteraction();
+            tacticalLosOverlayActive = false;
+            tacticalLosOverlayCells.Clear();
 
             if (activeBattleRequest == null && activeOperationalBattalion != null && battalionStatus != null)
             {
@@ -2365,8 +2373,8 @@ namespace AlwaysFaithful.Prototype
             tacticalUnit.Present(tacticalUnitState);
             tacticalMenuRect = new Rect(
                 Mathf.Clamp(pointer.x, 8f, Screen.width / GetUiScale() - 190f),
-                Mathf.Clamp(pointer.y, 8f, Screen.height / GetUiScale() - 223f),
-                178f, 205f);
+                Mathf.Clamp(pointer.y, 8f, Screen.height / GetUiScale() - 256f),
+                178f, 238f);
             tacticalMenuOpen = true;
             tacticalOrderFeedback = "Choose a tactical order.";
             tacticalAudio.Play(TacticalSound.MenuOpen);
@@ -2399,6 +2407,7 @@ namespace AlwaysFaithful.Prototype
             tacticalMenuOpen = false;
             tacticalMovePlanning = false;
             tacticalFirePlanning = false;
+            if (tacticalLosOverlayActive) ClearTacticalLosOverlay();
             ClearTacticalFirePreview();
             ClearTacticalReachable();
             ClearTacticalPreview();
@@ -2815,6 +2824,43 @@ namespace AlwaysFaithful.Prototype
             tacticalLosResult = null;
         }
 
+        // A persistent "what can I see from here" picture, independent of the
+        // single-target INSPECT LOS tool above — same per-cell tint channel
+        // (HexCellView.SetLineOfSight), so the two are kept mutually
+        // exclusive rather than fighting over the same cells.
+        private void ToggleTacticalLosOverlay()
+        {
+            if (tacticalLosOverlayActive)
+            {
+                ClearTacticalLosOverlay();
+                return;
+            }
+            if (tacticalLosPlanning)
+            {
+                tacticalLosPlanning = false;
+                ClearTacticalLineOfSight();
+            }
+            foreach (HexCoord coord in localMovementBoard.Keys)
+            {
+                if (coord.Equals(tacticalUnitState.Position)) continue;
+                TacticalLosResult result = TacticalLineOfSight.Inspect(localMovementBoard, tacticalUnitState.Position, coord, TacticalLineOfSight.MaximumInspectionRangeHexes);
+                if (!result.IsValid || result.State == TacticalLosState.None) continue;
+                if (!localCells.TryGetValue(coord, out HexCellView cell)) continue;
+                cell.SetLineOfSight(result.State);
+                tacticalLosOverlayCells.Add(coord);
+            }
+            tacticalLosOverlayActive = true;
+            tacticalAudio.Play(TacticalSound.Inspect);
+        }
+
+        private void ClearTacticalLosOverlay()
+        {
+            foreach (HexCoord coord in tacticalLosOverlayCells)
+                if (localCells.TryGetValue(coord, out HexCellView cell)) cell.SetLineOfSight(TacticalLosState.None);
+            tacticalLosOverlayCells.Clear();
+            tacticalLosOverlayActive = false;
+        }
+
         private Color LosColor(TacticalLosState state, float alpha)
         {
             if (settings.ColorSafePalette)
@@ -2844,6 +2890,7 @@ namespace AlwaysFaithful.Prototype
                 tacticalAudio.Play(TacticalSound.OrderCancel);
                 return false;
             }
+            if (tacticalLosOverlayActive) ClearTacticalLosOverlay();
             tacticalUnit.Present(tacticalUnitState);
             ClearTacticalReachable();
             DisplayCommittedTacticalRoute(route);
@@ -4461,6 +4508,78 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
             Debug.Log($"ALWAYS_FAITHFUL_LOS_REGRESSION_OK state={inspectedState} range={inspectedRange} segments={inspectedRange} modifiers={modifierCount} maxRange={TacticalLineOfSight.MaximumInspectionRangeHexes}");
+            Application.Quit(0);
+        }
+
+        // Group B proof: the LOS overlay populates and clears correctly and
+        // stays mutually exclusive with the pre-existing single-target
+        // INSPECT LOS tool (both drive the same HexCellView.SetLineOfSight
+        // channel), and the live event log reflects a freshly recorded event.
+        private IEnumerator RunHudRegression()
+        {
+            yield return null;
+            EnterTacticalMap(FindHighReliefOperationalCell(), false);
+
+            if (tacticalLosOverlayActive || tacticalLosOverlayCells.Count != 0)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_HUD_REGRESSION_FAILED overlay was already active on battle entry");
+                Application.Quit(1);
+                yield break;
+            }
+
+            ToggleTacticalLosOverlay();
+            int overlayCellsAfterToggleOn = tacticalLosOverlayCells.Count;
+            if (!tacticalLosOverlayActive || overlayCellsAfterToggleOn == 0)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_HUD_REGRESSION_FAILED overlay did not populate active={tacticalLosOverlayActive} cells={overlayCellsAfterToggleOn}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            BeginTacticalLosPlanning();
+            if (tacticalLosOverlayActive || tacticalLosOverlayCells.Count != 0 || !tacticalLosPlanning)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_HUD_REGRESSION_FAILED overlay did not yield to single-target LOS planning");
+                Application.Quit(1);
+                yield break;
+            }
+
+            ToggleTacticalLosOverlay();
+            if (tacticalLosPlanning || !tacticalLosOverlayActive || tacticalLosOverlayCells.Count == 0)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_HUD_REGRESSION_FAILED single-target LOS planning did not yield back to the overlay");
+                Application.Quit(1);
+                yield break;
+            }
+
+            ToggleTacticalLosOverlay();
+            if (tacticalLosOverlayActive || tacticalLosOverlayCells.Count != 0)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_HUD_REGRESSION_FAILED overlay did not clear on toggle-off");
+                Application.Quit(1);
+                yield break;
+            }
+
+            int logEntriesBefore = BuildTacticalEventLog(int.MaxValue).Count;
+            BeginTacticalMovePlanning();
+            TryIssueTacticalMove(tacticalUnitState.Position);
+            List<string> logAfter = BuildTacticalEventLog(int.MaxValue);
+            if (logAfter.Count <= logEntriesBefore || !logAfter[logAfter.Count - 1].StartsWith("MOVE •", StringComparison.Ordinal))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_HUD_REGRESSION_FAILED event log did not record the rejected move before={logEntriesBefore} after={logAfter.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            bool reactionReady = tacticalUnitState.CanFire && tacticalWeapon.RemainingAmmunition > 0;
+            if (!reactionReady)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_HUD_REGRESSION_FAILED fresh platoon should read reaction-ready");
+                Application.Quit(1);
+                yield break;
+            }
+
+            Debug.Log($"ALWAYS_FAITHFUL_HUD_REGRESSION_OK overlayCells={overlayCellsAfterToggleOn} logEntries={logAfter.Count} reactionReady={reactionReady}");
             Application.Quit(0);
         }
 
@@ -7394,6 +7513,7 @@ namespace AlwaysFaithful.Prototype
                 DrawSupportCardModal(uiWidth, uiHeight);
                 DrawSettingsButtonAndPanel(uiWidth, uiHeight);
                 DrawSupportButtonAndPanel(uiWidth, uiHeight);
+                DrawEventLogButtonAndPanel(uiWidth, uiHeight);
                 GUI.matrix = Matrix4x4.identity;
                 return;
             }
@@ -7833,6 +7953,29 @@ namespace AlwaysFaithful.Prototype
             if (GUI.Button(new Rect(panel.x + 20f, rowY, panel.width - 40f, 34f), "CLOSE", buttonStyle)) supportPanelOpen = false;
         }
 
+        // Live, collapsible view of the same chronological event log the
+        // after-action screen builds from tacticalBattlefield's typed event
+        // lists (BuildTacticalEventLog) — previously only visible once a
+        // battle had already ended.
+        private void DrawEventLogButtonAndPanel(float uiWidth, float uiHeight)
+        {
+            Rect logButtonRect = new Rect(228f, uiHeight - 44f, 96f, 34f);
+            if (GUI.Button(logButtonRect, "LOG", buttonStyle)) eventLogPanelOpen = !eventLogPanelOpen;
+            if (!eventLogPanelOpen) return;
+
+            Rect panel = new Rect(uiWidth / 2f - 260f, uiHeight / 2f - 220f, 520f, 440f);
+            GUI.Box(panel, GUIContent.none);
+            GUI.Label(new Rect(panel.x + 20f, panel.y + 14f, 300f, 30f), "EVENT LOG", titleStyle);
+            if (GUI.Button(new Rect(panel.x + panel.width - 44f, panel.y + 14f, 28f, 28f), "X", buttonStyle)) eventLogPanelOpen = false;
+
+            List<string> entries = BuildTacticalEventLog(16);
+            string logText = entries.Count > 0 ? string.Join("\n", entries) : "No events recorded yet this battle.";
+            GUI.Label(new Rect(panel.x + 20f, panel.y + 56f, panel.width - 40f, panel.height - 110f), logText, bodyStyle);
+
+            if (GUI.Button(new Rect(panel.x + 20f, panel.y + panel.height - 44f, panel.width - 40f, 34f), "CLOSE", buttonStyle))
+                eventLogPanelOpen = false;
+        }
+
         // Blocking pre-battle modal offered at the start of a fresh standalone
         // scenario whenever the Battalion's hand is non-empty. No fade timer
         // like DrawCampaignBriefing — this one waits on a player choice, not
@@ -7893,7 +8036,13 @@ namespace AlwaysFaithful.Prototype
             }
             GUI.Label(new Rect(38f, 199f, 70f, 22f), "ACTION", badgeStyle);
             DrawActionPointPips(new Rect(105f, 199f, 168f, 20f), tacticalUnitState);
-            GUI.Label(new Rect(324f, 199f, 72f, 22f), $"AMMO {tacticalWeapon.RemainingAmmunition}/{tacticalWeapon.MaximumAmmunition}", badgeStyle);
+            GUIStyle ammoStyle = new GUIStyle(badgeStyle);
+            bool ammoConcern = tacticalWeapon.MaximumAmmunition > 0 &&
+                tacticalWeapon.RemainingAmmunition <= Mathf.Max(1, tacticalWeapon.MaximumAmmunition / 4);
+            ammoStyle.normal.textColor = tacticalWeapon.RemainingAmmunition <= 0
+                ? new Color(1f, .34f, .28f)
+                : ammoConcern ? new Color(1f, .68f, .24f) : ammoStyle.normal.textColor;
+            GUI.Label(new Rect(324f, 199f, 72f, 22f), $"AMMO {tacticalWeapon.RemainingAmmunition}/{tacticalWeapon.MaximumAmmunition}", ammoStyle);
             GUI.Label(new Rect(38f, 228f, 348f, 26f), tacticalOrderFeedback, bodyStyle);
 
             if (battalionStatus != null)
@@ -7918,7 +8067,7 @@ namespace AlwaysFaithful.Prototype
             GUI.enabled = true;
 
             bool showSpottedBadge = tacticalUnitSpottedTier != TacticalVisibilityState.Hidden;
-            Rect intelligenceRect = new Rect(uiWidth - 355f, 18f, 335f, 151f + tacticalContacts.Count * 25f + (showSpottedBadge ? 30f : 0f));
+            Rect intelligenceRect = new Rect(uiWidth - 355f, 18f, 335f, 151f + tacticalContacts.Count * 25f + (showSpottedBadge ? 30f : 0f) + 68f);
             GUI.Box(intelligenceRect, GUIContent.none);
             GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 11f, 290f, 22f), "TACTICAL INTELLIGENCE", badgeStyle);
             GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 36f, 300f, 38f),
@@ -7939,12 +8088,28 @@ namespace AlwaysFaithful.Prototype
             Rect speedRect = new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 82f + tacticalContacts.Count * 25f, 300f, 28f);
             if (GUI.Button(speedRect, fastEnemyAnimation ? "ENEMY SPEED • FAST" : "ENEMY SPEED • CINEMATIC", buttonStyle))
                 fastEnemyAnimation = !fastEnemyAnimation;
+            float nextRowY = speedRect.y + 34f;
             if (showSpottedBadge)
             {
                 GUIStyle spottedStyle = new GUIStyle(badgeStyle) { alignment = TextAnchor.MiddleLeft };
                 spottedStyle.normal.textColor = TacticalSpottedColor(tacticalUnitSpottedTier);
-                GUI.Label(new Rect(intelligenceRect.x + 16f, speedRect.y + 34f, 300f, 22f),
+                GUI.Label(new Rect(intelligenceRect.x + 16f, nextRowY, 300f, 22f),
                     $"ENEMY TRACKING YOU • {tacticalUnitSpottedTier.ToString().ToUpperInvariant()}", spottedStyle);
+                nextRowY += 30f;
+            }
+
+            bool reactionReady = tacticalUnitState.CanFire && tacticalWeapon.RemainingAmmunition > 0;
+            GUIStyle reactionStyle = new GUIStyle(badgeStyle) { alignment = TextAnchor.MiddleLeft };
+            reactionStyle.normal.textColor = reactionReady ? new Color(.48f, .78f, .58f) : new Color(.62f, .62f, .60f);
+            GUI.Label(new Rect(intelligenceRect.x + 16f, nextRowY, 300f, 22f),
+                reactionReady ? "REACTION FIRE • READY" : "REACTION FIRE • UNAVAILABLE", reactionStyle);
+            nextRowY += 30f;
+
+            if (tacticalObjective != null &&
+                GUI.Button(new Rect(intelligenceRect.x + 16f, nextRowY, 300f, 28f), "FOCUS OBJECTIVE", buttonStyle))
+            {
+                cameraFocus = LocalCounterPosition(tacticalObjective.ObjectiveHex);
+                ApplyCamera();
             }
 
             if (tacticalReactionActive && !string.IsNullOrEmpty(tacticalReactionBannerText))
@@ -8002,6 +8167,9 @@ namespace AlwaysFaithful.Prototype
                         $"RECON • {TacticalRecon.ActionPointCost} AP", buttonStyle))
                     BeginTacticalReconPlanning();
                 GUI.enabled = true;
+                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 199f, 158f, 28f),
+                        tacticalLosOverlayActive ? "LOS OVERLAY • ON" : "LOS OVERLAY • OFF", buttonStyle))
+                    ToggleTacticalLosOverlay();
             }
             GUI.Box(new Rect(uiWidth - 310f, uiHeight - 83f, 288f, 61f), GUIContent.none);
             GUI.Label(new Rect(uiWidth - 294f, uiHeight - 70f, 256f, 45f), "RMB Orders  •  LMB Confirm\nMove / LOS / Fire / Recon  •  RMB/Escape Cancel", bodyStyle);
