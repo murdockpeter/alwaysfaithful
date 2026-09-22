@@ -20,17 +20,35 @@ namespace AlwaysFaithful.Prototype
         // is already a multi-figure crew, not a lone soldier. Tuned
         // empirically against a capture, not derived from any real-world
         // scale — a wargame counter convention, not a diorama.
-        private const float ClusterMemberScale = .38f;
+        //
+        // Spread widely enough to read as a small tabletop vignette rather
+        // than a tight clump — deliberately allowed to overhang the hex a
+        // little, matching how the NATO billboard and cluster footprint
+        // already read a bit larger than the hex itself at this game's
+        // "counter," not literal, scale.
+        private const float ClusterMemberScale = .34f;
         private const float SoloModelScale = .62f;
 
         private static readonly Vector3[] ClusterOffsets =
         {
-            new Vector3(-.30f, 0f, -.20f),
-            new Vector3(.24f, 0f, -.30f),
-            new Vector3(-.12f, 0f, .26f),
-            new Vector3(.30f, 0f, .10f)
+            new Vector3(-.52f, 0f, -.34f),
+            new Vector3(.40f, 0f, -.50f),
+            new Vector3(-.20f, 0f, .46f),
+            new Vector3(.50f, 0f, .18f)
         };
         private static readonly float[] ClusterYaw = { 168f, 194f, 152f, 208f };
+
+        // USMC has no ground vehicle in the source pack, only a drone; PLA's
+        // vehicles (EQ2050 light utility, ZBL-09 IFV) exist but only the
+        // support role gets one here, pairing naturally with the same
+        // role's already-distinct barrel prop/dot icon rather than
+        // appearing on a plain rifle squad.
+        private const string UsmcVignettePath = "Models/OneStar/USMC Black Hornet";
+        private const string PlaSupportVignettePath = "Models/OneStar/PLANMC ZBL-09";
+        private const float DroneVignetteScale = .17f;
+        private const float VehicleVignetteScale = .155f;
+        private static readonly Vector3 DroneVignetteOffset = new Vector3(.10f, .58f, -.08f);
+        private static readonly Vector3 VehicleVignetteOffset = new Vector3(.58f, 0f, -.62f);
 
         // Slightly above white: this scene's two directional lights plus a
         // fully matte (zero-glossiness) material still rendered these
@@ -82,6 +100,30 @@ namespace AlwaysFaithful.Prototype
                     SpawnFigure(prefab, clusterRoot.transform, ClusterOffsets[index], ClusterYaw[index], ClusterMemberScale, texture, litShader);
                 badgeHeight = ClusterMemberScale * 1.15f;
             }
+
+            // Vignette prop: a drone hovering over the USMC scene, or a
+            // vehicle beside the PLA support crew — set dressing for the
+            // "small tabletop scene" look, not a separate gameplay unit.
+            string vignettePath = friendly ? UsmcVignettePath : isSupportRole ? PlaSupportVignettePath : null;
+            if (vignettePath != null)
+            {
+                GameObject vignettePrefab = Resources.Load<GameObject>(vignettePath);
+                if (vignettePrefab != null)
+                {
+                    Texture2D vignetteTexture = Resources.Load<Texture2D>(vignettePath + " Texture");
+                    bool isDrone = friendly;
+                    SpawnFigure(vignettePrefab, clusterRoot.transform,
+                        isDrone ? DroneVignetteOffset : VehicleVignetteOffset,
+                        isDrone ? 40f : 205f,
+                        isDrone ? DroneVignetteScale : VehicleVignetteScale,
+                        vignetteTexture, litShader);
+                }
+                else
+                {
+                    Debug.LogWarning($"ALWAYS_FAITHFUL_MINIATURE_MISSING {vignettePath}");
+                }
+            }
+
             renderers = clusterRoot.GetComponentsInChildren<Renderer>();
             loaded = true;
 

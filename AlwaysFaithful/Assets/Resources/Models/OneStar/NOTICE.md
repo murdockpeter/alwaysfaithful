@@ -1,6 +1,6 @@
 # OneStar model attribution and license notice
 
-The USMC and PLANMC miniature figures in this folder (`USMC Rifleman`, `PLANMC Rifleman`, `PLANMC Mortar Team` — OBJ mesh, MTL material, and PNG texture per figure) are © Nicholas Royer, from the **Down Range** tabletop game's **One Star** miniature collection, reused here with permission of the license terms below. They were originally brought into a Unity project in the sibling `down_range_campaign` project and copied into Always Faithful from there.
+The USMC and PLANMC miniature figures and vehicles in this folder (`USMC Rifleman`, `PLANMC Rifleman`, `PLANMC Mortar Team`, `USMC Black Hornet`, `PLANMC ZBL-09` — OBJ mesh, MTL material, and PNG texture per model) are © Nicholas Royer, from the **Down Range** tabletop game's **One Star** miniature collection, reused here with permission of the license terms below. They were originally brought into a Unity project in the sibling `down_range_campaign` project and copied into Always Faithful from there.
 
 - License: **CC BY-NC-SA 4.0** (Creative Commons Attribution-NonCommercial-ShareAlike 4.0) — <https://creativecommons.org/licenses/by-nc-sa/4.0/>. Full terms are in `LICENSE-Down-Range-Models.txt` alongside these files.
 - Attribution: Down Range / One Star models © Nicholas Royer (<https://downrangewargame.com>). Original miniature sources on Printables.com include the LPM Rifleman, LPM Officer, LPM Mortar Team, and LPM Automatic Rifleman prints; the USMC/PLANMC paint schemes and Unity conversions build on those.
