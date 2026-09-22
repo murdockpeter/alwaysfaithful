@@ -11,19 +11,32 @@ namespace AlwaysFaithful.Prototype
     // Standard shader rather than a flat/unlit overlay shader.
     public sealed class MiniatureCounterView : MonoBehaviour
     {
-        // Native models are ~2 world units tall (a standing human figure);
-        // scaled down to read as a counter on a 1-unit-radius hex rather
-        // than a literal-scale figure. Tuned empirically against a capture,
-        // not derived from any real-world scale — this is a wargame counter
-        // convention (grossly oversized icon per unit), not a diorama.
-        private const float ModelScale = .62f;
+        // Native models are ~2 world units tall (a standing human figure).
+        // A rifle role is represented by a small cluster of this same
+        // figure — matching TacticalFormationView's own three-element wedge
+        // convention, and how a real tabletop stand usually mounts several
+        // identical sculpts rather than one giant soldier — while a support
+        // role uses its single Mortar Team model as-is, since that sculpt
+        // is already a multi-figure crew, not a lone soldier. Tuned
+        // empirically against a capture, not derived from any real-world
+        // scale — a wargame counter convention, not a diorama.
+        private const float ClusterMemberScale = .38f;
+        private const float SoloModelScale = .62f;
+
+        private static readonly Vector3[] ClusterOffsets =
+        {
+            new Vector3(-.30f, 0f, -.20f),
+            new Vector3(.24f, 0f, -.30f),
+            new Vector3(-.12f, 0f, .26f),
+            new Vector3(.30f, 0f, .10f)
+        };
+        private static readonly float[] ClusterYaw = { 168f, 194f, 152f, 208f };
 
         // Slightly above white: this scene's two directional lights plus a
         // fully matte (zero-glossiness) material still rendered these
         // painted textures darker than expected at full brightness.
         public static readonly Color FullBrightTint = new Color(1.25f, 1.25f, 1.25f);
 
-        private GameObject modelInstance;
         private Renderer[] renderers;
         private GameObject statusBadge;
         private MeshRenderer statusBadgeRenderer;
@@ -52,17 +65,48 @@ namespace AlwaysFaithful.Prototype
                 Debug.LogWarning($"ALWAYS_FAITHFUL_MINIATURE_MISSING {path}");
                 return;
             }
-            modelInstance = Instantiate(prefab, transform);
-            modelInstance.name = "Miniature Model";
-            modelInstance.transform.localPosition = Vector3.zero;
-            modelInstance.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
-            modelInstance.transform.localScale = Vector3.one * ModelScale;
-            foreach (Collider stale in modelInstance.GetComponentsInChildren<Collider>()) Destroy(stale);
-
             Texture2D texture = Resources.Load<Texture2D>(path + " Texture");
             Shader litShader = Shader.Find("Standard") ?? Shader.Find("Diffuse");
-            renderers = modelInstance.GetComponentsInChildren<Renderer>();
-            foreach (Renderer renderer in renderers)
+
+            GameObject clusterRoot = new GameObject("Miniature Cluster");
+            clusterRoot.transform.SetParent(transform, false);
+            float badgeHeight;
+            if (isSupportRole)
+            {
+                SpawnFigure(prefab, clusterRoot.transform, Vector3.zero, 180f, SoloModelScale, texture, litShader);
+                badgeHeight = SoloModelScale * 1.05f;
+            }
+            else
+            {
+                for (int index = 0; index < ClusterOffsets.Length; index++)
+                    SpawnFigure(prefab, clusterRoot.transform, ClusterOffsets[index], ClusterYaw[index], ClusterMemberScale, texture, litShader);
+                badgeHeight = ClusterMemberScale * 1.15f;
+            }
+            renderers = clusterRoot.GetComponentsInChildren<Renderer>();
+            loaded = true;
+
+            Shader overlay = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
+            statusBadge = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            statusBadge.name = "Miniature Status Badge";
+            statusBadge.layer = LayerMask.NameToLayer("Ignore Raycast");
+            statusBadge.transform.SetParent(transform, false);
+            statusBadge.transform.localPosition = new Vector3(0f, badgeHeight, .10f);
+            statusBadge.transform.localScale = Vector3.one * .13f;
+            statusBadgeRenderer = statusBadge.GetComponent<MeshRenderer>();
+            statusBadgeRenderer.sharedMaterial = new Material(overlay);
+            Destroy(statusBadge.GetComponent<Collider>());
+            statusBadge.SetActive(false);
+        }
+
+        private static void SpawnFigure(GameObject prefab, Transform parent, Vector3 localOffset, float yaw, float scale, Texture2D texture, Shader litShader)
+        {
+            GameObject instance = Instantiate(prefab, parent);
+            instance.name = "Miniature Figure";
+            instance.transform.localPosition = localOffset;
+            instance.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
+            instance.transform.localScale = Vector3.one * scale;
+            foreach (Collider stale in instance.GetComponentsInChildren<Collider>()) Destroy(stale);
+            foreach (Renderer renderer in instance.GetComponentsInChildren<Renderer>())
             {
                 Material material = new Material(litShader);
                 if (texture != null) material.mainTexture = texture;
@@ -76,19 +120,6 @@ namespace AlwaysFaithful.Prototype
                 renderer.receiveShadows = false;
                 renderer.sharedMaterial = material;
             }
-            loaded = true;
-
-            Shader overlay = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
-            statusBadge = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            statusBadge.name = "Miniature Status Badge";
-            statusBadge.layer = LayerMask.NameToLayer("Ignore Raycast");
-            statusBadge.transform.SetParent(transform, false);
-            statusBadge.transform.localPosition = new Vector3(0f, .78f, .10f);
-            statusBadge.transform.localScale = Vector3.one * .13f;
-            statusBadgeRenderer = statusBadge.GetComponent<MeshRenderer>();
-            statusBadgeRenderer.sharedMaterial = new Material(overlay);
-            Destroy(statusBadge.GetComponent<Collider>());
-            statusBadge.SetActive(false);
         }
 
         // Tints multiply the Standard shader's albedo texture (unlike the
