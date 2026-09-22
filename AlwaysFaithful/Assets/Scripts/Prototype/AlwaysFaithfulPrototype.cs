@@ -154,6 +154,7 @@ namespace AlwaysFaithful.Prototype
         private bool automatedLosRegression;
         private bool automatedLosCapture;
         private bool automatedHudRegression;
+        private bool automatedNoContactRegression;
         private bool automatedObservationRegression;
         private bool automatedObservationCapture;
         private bool automatedFireRegression;
@@ -278,6 +279,7 @@ namespace AlwaysFaithful.Prototype
             automatedTacticalMovementRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--tactical-movement-regression") >= 0;
             automatedLosRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--los-regression") >= 0;
             automatedHudRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--hud-regression") >= 0;
+            automatedNoContactRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--no-contact-regression") >= 0;
             automatedLosCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--los-capture-path=", StringComparison.Ordinal));
             automatedObservationRegression = Array.IndexOf(Environment.GetCommandLineArgs(), "--observation-regression") >= 0;
             automatedObservationCapture = Array.Exists(Environment.GetCommandLineArgs(), value => value.StartsWith("--observation-capture-path=", StringComparison.Ordinal));
@@ -359,6 +361,7 @@ namespace AlwaysFaithful.Prototype
             if (automatedTacticalMovementRegression) StartCoroutine(RunTacticalMovementRegression());
             if (automatedLosRegression) StartCoroutine(RunLosRegression());
             if (automatedHudRegression) StartCoroutine(RunHudRegression());
+            if (automatedNoContactRegression) StartCoroutine(RunNoContactRegression());
             if (automatedObservationRegression) StartCoroutine(RunObservationRegression());
             if (automatedFireRegression) StartCoroutine(RunFireRegression());
             if (automatedSuppressionRegression) StartCoroutine(RunSuppressionRegression());
@@ -1060,18 +1063,18 @@ namespace AlwaysFaithful.Prototype
             Application.Quit(0);
         }
 
-        private void RequestTacticalMap(HexCellView parentCell)
+        private void RequestTacticalMap(HexCellView parentCell, bool hasKnownEnemyContact = true)
         {
             if (parentCell == null || !parentCell.IsLand || mapTransitionActive) return;
             tacticalAudio.Play(TacticalSound.MapTransition);
-            StartCoroutine(TransitionToTactical(parentCell));
+            StartCoroutine(TransitionToTactical(parentCell, hasKnownEnemyContact));
         }
 
-        private IEnumerator TransitionToTactical(HexCellView parentCell)
+        private IEnumerator TransitionToTactical(HexCellView parentCell, bool hasKnownEnemyContact = true)
         {
             mapTransitionActive = true;
             yield return FadeMapTransition(0f, 1f, .22f);
-            EnterTacticalMap(parentCell, false);
+            EnterTacticalMap(parentCell, false, null, hasKnownEnemyContact);
             yield return FadeMapTransition(1f, 0f, .36f);
             mapTransitionActive = false;
         }
@@ -1567,11 +1570,11 @@ namespace AlwaysFaithful.Prototype
             }
         }
 
-        private void EnterTacticalMap(HexCellView parentCell, bool animate, TacticalBattleSaveState restore = null)
+        private void EnterTacticalMap(HexCellView parentCell, bool animate, TacticalBattleSaveState restore = null, bool hasKnownEnemyContact = true)
         {
             if (animate)
             {
-                RequestTacticalMap(parentCell);
+                RequestTacticalMap(parentCell, hasKnownEnemyContact);
                 return;
             }
             if (!tacticalMode)
@@ -1608,7 +1611,7 @@ namespace AlwaysFaithful.Prototype
 
             string requestedId = TacticalBattlefieldExtractor.BuildBattlefieldId(parentCell.Coord, activeBattleRequest?.Seed ?? standaloneScenarioSeed);
             if (restore != null || tacticalBattlefield == null || tacticalBattlefield.BattlefieldId != requestedId)
-                BuildTacticalBattlefield(parentCell, restore);
+                BuildTacticalBattlefield(parentCell, restore, hasKnownEnemyContact);
             tacticalMode = true;
             overviewRoot.SetActive(false);
             tacticalRoot.SetActive(true);
@@ -1671,7 +1674,7 @@ namespace AlwaysFaithful.Prototype
             Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_EXIT battlefield={tacticalBattlefield.BattlefieldId} parent={tacticalBattlefield.ParentHex}");
         }
 
-        private void BuildTacticalBattlefield(HexCellView parentCell, TacticalBattleSaveState restore = null)
+        private void BuildTacticalBattlefield(HexCellView parentCell, TacticalBattleSaveState restore = null, bool hasKnownEnemyContact = true)
         {
             if (tacticalRoot != null) Destroy(tacticalRoot);
             localCells.Clear();
@@ -1753,7 +1756,7 @@ namespace AlwaysFaithful.Prototype
             BuildTacticalMovementVisuals();
             BuildTacticalLosVisuals();
             BuildTacticalFireVisuals();
-            BuildTacticalContacts(restore);
+            BuildTacticalContacts(restore, hasKnownEnemyContact);
             ApplyCounterSkin();
             BuildTacticalObjective(restore);
             RefreshTacticalObservation();
@@ -2184,7 +2187,7 @@ namespace AlwaysFaithful.Prototype
             tacticalFireReticle.SetActive(false);
         }
 
-        private void BuildTacticalContacts(TacticalBattleSaveState restore = null)
+        private void BuildTacticalContacts(TacticalBattleSaveState restore = null, bool hasKnownEnemyContact = true)
         {
             tacticalEnemyStates.Clear();
             tacticalContacts.Clear();
@@ -2237,9 +2240,15 @@ namespace AlwaysFaithful.Prototype
                 // Standalone: a hash-driven roster of 1-3 units, first slot always
                 // the "main" rifle squad deployed at Observed range, the rest at
                 // Contact range, exactly like the legacy path's two
-                // FindObservationDeployment calls.
+                // FindObservationDeployment calls. Only rolled at all when the
+                // operational layer actually has a detected contact here
+                // ("RESOLVE CONTACT") -- "OPEN LOCAL MAP" on a hex with no known
+                // enemy should show a clear, uncontested local map, not a
+                // manufactured encounter.
                 var occupied = new HashSet<HexCoord> { tacticalUnitState.Position };
-                List<string> roster = TacticalScenario.ChooseEnemyRoster(tacticalBattlefield.BattlefieldId);
+                List<string> roster = hasKnownEnemyContact
+                    ? TacticalScenario.ChooseEnemyRoster(tacticalBattlefield.BattlefieldId)
+                    : new List<string>();
                 var roleCounts = new Dictionary<string, int>();
                 for (int slot = 0; slot < roster.Count; slot++)
                 {
@@ -4681,6 +4690,39 @@ namespace AlwaysFaithful.Prototype
             }
 
             Debug.Log($"ALWAYS_FAITHFUL_HUD_REGRESSION_OK overlayCells={overlayCellsAfterToggleOn} logEntries={logAfter.Count} reactionReady={reactionReady}");
+            Application.Quit(0);
+        }
+
+        // Proof for the OPEN LOCAL MAP / RESOLVE CONTACT distinction: entering
+        // a hex the operational layer has no detected contact at must not
+        // manufacture an encounter, while a genuine RESOLVE CONTACT entry
+        // keeps rolling the usual hash-driven roster.
+        private IEnumerator RunNoContactRegression()
+        {
+            yield return null;
+            EnterTacticalMap(FindHighReliefOperationalCell(), false, null, false);
+            if (tacticalEnemyStates.Count != 0)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_NO_CONTACT_REGRESSION_FAILED expected an empty roster with no known contact, got {tacticalEnemyStates.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+            if (tacticalObjective == null || tacticalObjective.Outcome != TacticalBattleOutcome.InProgress)
+            {
+                Debug.LogError("ALWAYS_FAITHFUL_NO_CONTACT_REGRESSION_FAILED an enemy-free battle should still set up a normal in-progress objective");
+                Application.Quit(1);
+                yield break;
+            }
+
+            EnterTacticalMap(FindCoastalOperationalCell(), false, null, true);
+            if (tacticalEnemyStates.Count < TacticalScenario.MinRosterSize || tacticalEnemyStates.Count > TacticalScenario.MaxRosterSize)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_NO_CONTACT_REGRESSION_FAILED a known-contact entry should still roll the usual roster, got {tacticalEnemyStates.Count}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            Debug.Log($"ALWAYS_FAITHFUL_NO_CONTACT_REGRESSION_OK knownContactRoster={tacticalEnemyStates.Count}");
             Application.Quit(0);
         }
 
@@ -7720,7 +7762,7 @@ namespace AlwaysFaithful.Prototype
                         enterTacticalRect = new Rect(198f, 340f, 172f, 30f);
                         string tacticalLabel = inspectedContact != null ? "RESOLVE CONTACT" : "OPEN LOCAL MAP";
                         if (GUI.Button(enterTacticalRect, tacticalLabel, buttonStyle))
-                            OpenOperationalTacticalMap(inspected, resolvingBattalion);
+                            OpenOperationalTacticalMap(inspected, resolvingBattalion, inspectedContact != null);
                     }
                     else if (inspectedContact != null)
                     {
@@ -7794,10 +7836,10 @@ namespace AlwaysFaithful.Prototype
             return bestDistance <= 1 ? best : null;
         }
 
-        private void OpenOperationalTacticalMap(HexCellView inspected, OperationalBattalionState parentBattalion)
+        private void OpenOperationalTacticalMap(HexCellView inspected, OperationalBattalionState parentBattalion, bool hasKnownEnemyContact)
         {
             if (parentBattalion != null) SelectOperationalBattalion(operationalFriendlyViews[parentBattalion.Id]);
-            RequestTacticalMap(inspected);
+            RequestTacticalMap(inspected, hasKnownEnemyContact);
         }
 
         private void DrawOperationalBriefing(float uiWidth, float uiHeight)
