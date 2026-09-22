@@ -100,8 +100,10 @@ namespace AlwaysFaithful.Prototype
         private UnitCounterView tacticalUnit;
         private TacticalFormationView tacticalFormationView;
         private NatoSymbolView tacticalSymbolView;
+        private MiniatureCounterView tacticalMiniatureView;
         private GameObject tacticalIllustratedDetail;
         private GameObject tacticalSymbolDetail;
+        private GameObject tacticalMiniatureDetail;
         private TacticalUnitState tacticalUnitState;
         private LineRenderer tacticalRouteLine;
         private GameObject tacticalDestinationGhost;
@@ -410,6 +412,7 @@ namespace AlwaysFaithful.Prototype
                 tacticalContactViews[reactor.Id].CueReactionSource();
                 tacticalUnit.CueIncomingFire(TacticalFireOutcome.Suppressed);
                 tacticalSymbolView.FlashIcon(IncomingFireFlashColor(TacticalFireOutcome.Suppressed));
+                tacticalMiniatureView.FlashTint(IncomingFireFlashColor(TacticalFireOutcome.Suppressed));
                 cameraFocus = Vector3.Lerp(tacticalContactViews[reactor.Id].transform.position, tacticalUnit.transform.position, .5f);
                 cameraDistance = 13f;
                 ApplyCamera();
@@ -2013,20 +2016,26 @@ namespace AlwaysFaithful.Prototype
             tacticalSymbolView = tacticalSymbolDetail.AddComponent<NatoSymbolView>();
             tacticalSymbolView.Initialize(true, false, "USMC\nRIFLE PLT");
             tacticalSymbolView.BindReactive(tacticalUnitState, new Color(.22f, .55f, .95f), new Color(.22f, .55f, .95f));
+            tacticalMiniatureDetail = new GameObject("Miniature Detail");
+            tacticalMiniatureDetail.transform.SetParent(root.transform, false);
+            tacticalMiniatureView = tacticalMiniatureDetail.AddComponent<MiniatureCounterView>();
+            tacticalMiniatureView.Initialize(true, false, "USMC\nRIFLE PLT");
+            tacticalMiniatureView.BindReactive(tacticalUnitState);
             tacticalUnit.Present(tacticalUnitState);
             tacticalFormationView.Present(tacticalUnitState);
             ApplyCounterSkin();
             localMovementBoard[tacticalUnitState.Position].OccupantId = tacticalUnitState.Id;
         }
 
-        // Toggles between the illustrated and NATO/MIL-STD-symbol skins for
-        // the player's own counter and every PLA contact marker; called
-        // after either is (re)built and whenever the Settings panel's
-        // Counter Skin control changes.
+        // Toggles between the illustrated, NATO/MIL-STD-symbol, and
+        // miniature skins for the player's own counter and every PLA
+        // contact marker; called after any is (re)built and whenever the
+        // Settings panel's Counter Skin control changes.
         private void ApplyCounterSkin()
         {
             if (tacticalIllustratedDetail != null) tacticalIllustratedDetail.SetActive(settings.CounterSkin == CounterSkinTier.Illustrated);
             if (tacticalSymbolDetail != null) tacticalSymbolDetail.SetActive(settings.CounterSkin == CounterSkinTier.Symbol);
+            if (tacticalMiniatureDetail != null) tacticalMiniatureDetail.SetActive(settings.CounterSkin == CounterSkinTier.Miniature);
             foreach (ContactMarkerView marker in tacticalContactViews.Values) marker.ApplySkin(settings.CounterSkin);
         }
 
@@ -2044,8 +2053,9 @@ namespace AlwaysFaithful.Prototype
             string counterSkinArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-counter-skin=", StringComparison.Ordinal));
             if (counterSkinArgument != null)
             {
-                settings.CounterSkin = counterSkinArgument.Substring("--capture-counter-skin=".Length).Equals("symbol", StringComparison.OrdinalIgnoreCase)
-                    ? CounterSkinTier.Symbol
+                string requested = counterSkinArgument.Substring("--capture-counter-skin=".Length);
+                settings.CounterSkin = requested.Equals("symbol", StringComparison.OrdinalIgnoreCase) ? CounterSkinTier.Symbol
+                    : requested.Equals("miniature", StringComparison.OrdinalIgnoreCase) ? CounterSkinTier.Miniature
                     : CounterSkinTier.Illustrated;
                 ApplyCounterSkin();
             }
@@ -3157,6 +3167,7 @@ namespace AlwaysFaithful.Prototype
                 : reactionEvent.Outcome == TacticalFireOutcome.Suppressed ? TacticalSound.FireSuppressed : TacticalSound.FireMiss);
             tacticalUnit.CueIncomingFire(reactionEvent.Outcome);
             tacticalSymbolView.FlashIcon(IncomingFireFlashColor(reactionEvent.Outcome));
+            tacticalMiniatureView.FlashTint(IncomingFireFlashColor(reactionEvent.Outcome));
             float reactionFireDuration = .46f * AnimationTimeScale();
             for (float elapsed = 0f; elapsed < reactionFireDuration; elapsed += Time.deltaTime)
             {
@@ -4075,6 +4086,7 @@ namespace AlwaysFaithful.Prototype
             tacticalFormationView.Present(tacticalUnitState);
             tacticalUnit.CueIncomingFire(fire.Outcome);
             tacticalSymbolView.FlashIcon(IncomingFireFlashColor(fire.Outcome));
+            tacticalMiniatureView.FlashTint(IncomingFireFlashColor(fire.Outcome));
             tacticalFireLine.enabled = true;
             tacticalFireLine.startColor = visible ? new Color(1f, .36f, .20f, .96f) : new Color(1f, .58f, .20f, .72f);
             tacticalFireLine.endColor = tacticalFireLine.startColor;
@@ -6494,13 +6506,13 @@ namespace AlwaysFaithful.Prototype
             settings.ColorSafePalette = true;
             settings.ReducedMotion = true;
             settings.AnimationSpeed = AnimationSpeedTier.Fast;
-            settings.CounterSkin = CounterSkinTier.Symbol;
+            settings.CounterSkin = CounterSkinTier.Miniature;
             SaveSettings();
 
             if (!TryLoadSettings(settingsPath, out AlwaysFaithfulSettings roundTripped) ||
                 roundTripped.UiScale != UiScaleTier.Large || roundTripped.RemapResetCameraKey != KeyCode.T || roundTripped.RemapCancelKey != KeyCode.Escape ||
                 roundTripped.GraphicsPreset != GraphicsPresetTier.Low || !roundTripped.ColorSafePalette || !roundTripped.ReducedMotion ||
-                roundTripped.AnimationSpeed != AnimationSpeedTier.Fast || roundTripped.CounterSkin != CounterSkinTier.Symbol)
+                roundTripped.AnimationSpeed != AnimationSpeedTier.Fast || roundTripped.CounterSkin != CounterSkinTier.Miniature)
             {
                 Debug.LogError($"ALWAYS_FAITHFUL_SETTINGS_REGRESSION_FAILED persistence round trip failed scale={roundTripped?.UiScale} resetKey={roundTripped?.RemapResetCameraKey} graphics={roundTripped?.GraphicsPreset} colorSafe={roundTripped?.ColorSafePalette} reducedMotion={roundTripped?.ReducedMotion} animSpeed={roundTripped?.AnimationSpeed} counterSkin={roundTripped?.CounterSkin}");
                 Application.Quit(1);
@@ -7699,8 +7711,8 @@ namespace AlwaysFaithful.Prototype
             { AnimationSpeedTier.Normal, AnimationSpeedTier.Fast, AnimationSpeedTier.Skip };
         private static readonly string[] AnimationSpeedLabels = { "NORMAL", "FAST", "SKIP" };
         private static readonly CounterSkinTier[] CounterSkinOptions =
-            { CounterSkinTier.Illustrated, CounterSkinTier.Symbol };
-        private static readonly string[] CounterSkinLabels = { "ILLUSTRATED", "NATO SYMBOL" };
+            { CounterSkinTier.Illustrated, CounterSkinTier.Symbol, CounterSkinTier.Miniature };
+        private static readonly string[] CounterSkinLabels = { "ILLUSTRATED", "NATO SYMBOL", "MINIATURE" };
 
         private OperationalContactState OperationalContactAt(HexCoord hex)
         {
@@ -7964,7 +7976,7 @@ namespace AlwaysFaithful.Prototype
             GUI.Label(new Rect(panel.x + 20f, rowY, 150f, 22f), "COUNTER SKIN", badgeStyle);
             for (int index = 0; index < CounterSkinOptions.Length; index++)
             {
-                Rect optionRect = new Rect(panel.x + 180f + index * 130f, rowY - 4f, 126f, 30f);
+                Rect optionRect = new Rect(panel.x + 180f + index * 104f, rowY - 4f, 100f, 30f);
                 bool active = settings.CounterSkin == CounterSkinOptions[index];
                 string label = active ? $"[{CounterSkinLabels[index]}]" : CounterSkinLabels[index];
                 if (GUI.Button(optionRect, label, buttonStyle))

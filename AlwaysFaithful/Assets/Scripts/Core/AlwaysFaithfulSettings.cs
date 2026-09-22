@@ -34,11 +34,14 @@ namespace AlwaysFaithful.Core
     // Illustrated is the hand-built Broken Front-style counter (deck,
     // maneuver elements, command node); Symbol is a NATO/MIL-STD-2525-
     // inspired alternate skin (blue/red frame, infantry-cross or
-    // support-dot icon) over the exact same underlying units.
+    // support-dot icon); Miniature swaps in sculpted USMC/PLANMC OBJ
+    // figures (Assets/Resources/Models/OneStar, CC BY-NC-SA 4.0, see
+    // NOTICE.md alongside them) — over the exact same underlying units.
     public enum CounterSkinTier
     {
         Illustrated,
-        Symbol
+        Symbol,
+        Miniature
     }
 
     // App-level presentation/input preference, not tactical-battle domain

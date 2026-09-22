@@ -12,10 +12,12 @@ namespace AlwaysFaithful.Prototype
         private GameObject formationDetail;
         private GameObject illustratedDetail;
         private GameObject symbolDetail;
+        private GameObject miniatureDetail;
         private GameObject contactGlyph;
         private MeshRenderer contactGlyphRenderer;
         private TacticalFormationView formationView;
         private NatoSymbolView symbolView;
+        private MiniatureCounterView miniatureView;
         private CounterSkinTier currentSkin = CounterSkinTier.Illustrated;
         private LineRenderer uncertaintyRing;
         private Vector3 settledScale = Vector3.one;
@@ -52,6 +54,12 @@ namespace AlwaysFaithful.Prototype
             symbolView = symbolDetail.AddComponent<NatoSymbolView>();
             bool isSupportRole = echelon != null && echelon.ToUpperInvariant().Contains("SUPPORT");
             symbolView.Initialize(false, isSupportRole, "PLA\n" + echelon);
+
+            miniatureDetail = new GameObject("Miniature Detail");
+            miniatureDetail.transform.SetParent(formationDetail.transform, false);
+            miniatureView = miniatureDetail.AddComponent<MiniatureCounterView>();
+            miniatureView.Initialize(false, isSupportRole, "PLA\n" + echelon);
+
             ApplySkin(currentSkin);
 
             contactGlyph = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -162,6 +170,11 @@ namespace AlwaysFaithful.Prototype
             faceRenderer.material.color = TacticalStatusVisuals.Desaturate(faceColor, desaturation);
             contactGlyphRenderer.material.color = faceColor;
             symbolView.SetColors(TacticalStatusVisuals.Desaturate(baseColor, desaturation), TacticalStatusVisuals.Desaturate(faceColor, desaturation));
+            // The miniature keeps its own painted texture colors rather than
+            // being tinted into the tier's illustrated palette; combat
+            // status still reads as a darkening, same language as the
+            // other two skins' desaturation.
+            miniatureView.SetTint(Color.Lerp(MiniatureCounterView.FullBrightTint, new Color(.35f, .35f, .35f), desaturation));
             label.color = new Color(.10f, .07f, .05f, 1f);
             uncertaintyRing.startColor = ringColor;
             uncertaintyRing.endColor = ringColor;
@@ -177,6 +190,7 @@ namespace AlwaysFaithful.Prototype
             currentSkin = tier;
             if (illustratedDetail != null) illustratedDetail.SetActive(tier == CounterSkinTier.Illustrated);
             if (symbolDetail != null) symbolDetail.SetActive(tier == CounterSkinTier.Symbol);
+            if (miniatureDetail != null) miniatureDetail.SetActive(tier == CounterSkinTier.Miniature);
         }
 
         private void UpdateStatusBadge(bool visible)
@@ -185,6 +199,7 @@ namespace AlwaysFaithful.Prototype
             statusBadge.SetActive(visible);
             if (visible) statusBadgeRenderer.material.color = TacticalStatusVisuals.BadgeColor(PresentedStatus);
             symbolView.UpdateStatusBadge(visible, PresentedStatus);
+            miniatureView.UpdateStatusBadge(visible, PresentedStatus);
         }
 
         public void CueFireOutcome(TacticalFireOutcome outcome)
@@ -196,6 +211,7 @@ namespace AlwaysFaithful.Prototype
                 : outcome == TacticalFireOutcome.Suppressed ? new Color(1f, .68f, .16f, 1f) : new Color(.62f, .66f, .61f, 1f);
             faceRenderer.material.color = flash;
             symbolView.FlashIcon(flash);
+            miniatureView.FlashTint(flash);
         }
 
         public int ReactionCueCount { get; private set; }
@@ -207,6 +223,7 @@ namespace AlwaysFaithful.Prototype
             transform.localScale = settledScale * 1.30f;
             faceRenderer.material.color = new Color(1f, .90f, .40f, 1f);
             symbolView.FlashIcon(new Color(1f, .90f, .40f, 1f));
+            miniatureView.FlashTint(new Color(1f, .90f, .40f, 1f));
             uncertaintyRing.enabled = true;
             uncertaintyRing.startColor = new Color(1f, .90f, .30f, .95f);
             uncertaintyRing.endColor = uncertaintyRing.startColor;
