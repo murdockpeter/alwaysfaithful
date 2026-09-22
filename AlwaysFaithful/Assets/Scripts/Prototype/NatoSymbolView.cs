@@ -5,12 +5,19 @@ namespace AlwaysFaithful.Prototype
 {
     // Alternate NATO/MIL-STD-2525-inspired presentation skin over the exact
     // same underlying unit, switchable against TacticalFormationView via
-    // Settings.CounterSkin: a flat frame (blue friendly / red hostile, the
+    // Settings.CounterSkin: a frame (blue friendly / red hostile, the
     // doctrinal convention, independent of this game's own illustrated
     // green-USMC/red-PLA palette) with an infantry-cross or support-dot
     // icon. Not full MIL-STD-2525 fidelity (no size/echelon glyph, no
     // mobility/equipment modifiers) — a simplified stand-in for players who
     // prefer the standardized look over the illustrated counter.
+    //
+    // The card itself is a fixed-tilt "billboard", not a decal lying flat on
+    // the hex: real NATO symbology is read face-on, like a paper counter, so
+    // the whole frame/icon/label/badge group sits on a tilted billboardRoot
+    // child rather than directly on this component's own transform. A
+    // separate small ground-anchor dot stays flat on the hex so it's still
+    // obvious which hex the unit occupies once the card above it is tilted.
     public sealed class NatoSymbolView : MonoBehaviour
     {
         private LineRenderer frame;
@@ -20,6 +27,7 @@ namespace AlwaysFaithful.Prototype
         private TextMesh label;
         private GameObject statusBadge;
         private MeshRenderer statusBadgeRenderer;
+        private MeshRenderer groundAnchorRenderer;
         private bool isSupportRole;
         private TacticalUnitState boundUnit;
         private Color boundFrameColor;
@@ -29,6 +37,14 @@ namespace AlwaysFaithful.Prototype
 
         public TacticalCombatStatus PresentedStatus { get; private set; }
 
+        // The tactical camera's fixed viewing offset (see
+        // AlwaysFaithfulPrototype.ApplyCamera: cameraFocus + (0, distance *
+        // 1.08, -distance * .56), always LookAt(cameraFocus)) never orbits —
+        // only pans and zooms — so a single static tilt already faces the
+        // camera everywhere on the board; no per-frame billboard math needed.
+        private static readonly Quaternion CameraFacingTilt =
+            Quaternion.FromToRotation(Vector3.up, new Vector3(0f, 1.08f, -.56f).normalized);
+
         public void Initialize(bool friendly, bool isSupportRoleUnit, string labelText)
         {
             isSupportRole = isSupportRoleUnit;
@@ -36,8 +52,24 @@ namespace AlwaysFaithful.Prototype
             Shader solid = Resources.Load<Shader>("Shaders/MapSolid") ?? overlay;
             Color frameColor = friendly ? new Color(.22f, .55f, .95f) : new Color(.92f, .20f, .16f);
 
+            GameObject anchor = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            anchor.name = "NATO Ground Anchor";
+            anchor.layer = LayerMask.NameToLayer("Ignore Raycast");
+            anchor.transform.SetParent(transform, false);
+            anchor.transform.localPosition = new Vector3(0f, .05f, 0f);
+            anchor.transform.localScale = new Vector3(.16f, .025f, .16f);
+            anchor.GetComponent<MeshRenderer>().sharedMaterial = new Material(solid) { color = frameColor };
+            Destroy(anchor.GetComponent<Collider>());
+            groundAnchorRenderer = anchor.GetComponent<MeshRenderer>();
+
+            GameObject billboardRoot = new GameObject("Billboard Root");
+            billboardRoot.transform.SetParent(transform, false);
+            billboardRoot.transform.localPosition = new Vector3(0f, .28f, 0f);
+            billboardRoot.transform.localRotation = CameraFacingTilt;
+            Transform card = billboardRoot.transform;
+
             frame = new GameObject("NATO Frame").AddComponent<LineRenderer>();
-            frame.transform.SetParent(transform, false);
+            frame.transform.SetParent(card, false);
             frame.loop = true;
             frame.useWorldSpace = false;
             frame.positionCount = 4;
@@ -47,10 +79,10 @@ namespace AlwaysFaithful.Prototype
             frame.endColor = frameColor;
             Vector3[] corners =
             {
-                new Vector3(-.52f, .22f, -.36f),
-                new Vector3(-.52f, .22f, .36f),
-                new Vector3(.52f, .22f, .36f),
-                new Vector3(.52f, .22f, -.36f)
+                new Vector3(-.42f, 0f, -.34f),
+                new Vector3(-.42f, 0f, .34f),
+                new Vector3(.42f, 0f, .34f),
+                new Vector3(.42f, 0f, -.34f)
             };
             for (int index = 0; index < corners.Length; index++) frame.SetPosition(index, corners[index]);
 
@@ -59,9 +91,10 @@ namespace AlwaysFaithful.Prototype
                 GameObject dot = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
                 dot.name = "NATO Support Dot";
                 dot.layer = LayerMask.NameToLayer("Ignore Raycast");
-                dot.transform.SetParent(transform, false);
-                dot.transform.localPosition = new Vector3(0f, .23f, 0f);
-                dot.transform.localScale = new Vector3(.30f, .03f, .30f);
+                dot.transform.SetParent(card, false);
+                dot.transform.localPosition = Vector3.zero;
+                dot.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                dot.transform.localScale = new Vector3(.26f, .015f, .26f);
                 dot.GetComponent<MeshRenderer>().sharedMaterial = new Material(solid) { color = frameColor };
                 Destroy(dot.GetComponent<Collider>());
                 supportDotRenderer = dot.GetComponent<MeshRenderer>();
@@ -70,15 +103,19 @@ namespace AlwaysFaithful.Prototype
             {
                 // The standard MIL-STD-2525 infantry glyph: a diagonal cross
                 // filling the frame.
-                crossA = BuildCrossLine("NATO Cross A", overlay, frameColor,
-                    new Vector3(-.42f, .225f, -.28f), new Vector3(.42f, .225f, .28f));
-                crossB = BuildCrossLine("NATO Cross B", overlay, frameColor,
-                    new Vector3(-.42f, .225f, .28f), new Vector3(.42f, .225f, -.28f));
+                crossA = BuildCrossLine("NATO Cross A", card, overlay, frameColor,
+                    new Vector3(-.34f, 0f, -.26f), new Vector3(.34f, 0f, .26f));
+                crossB = BuildCrossLine("NATO Cross B", card, overlay, frameColor,
+                    new Vector3(-.34f, 0f, .26f), new Vector3(.34f, 0f, -.26f));
             }
 
             GameObject labelObject = new GameObject("NATO Label");
-            labelObject.transform.SetParent(transform, false);
-            labelObject.transform.localPosition = new Vector3(0f, .225f, -.52f);
+            labelObject.transform.SetParent(card, false);
+            labelObject.transform.localPosition = new Vector3(0f, 0f, -.50f);
+            // TextMesh's own default facing (normal along local Z) needs to
+            // match the rest of this group's shared "lying in XZ, normal +Y"
+            // authoring convention before card's tilt carries everything to
+            // face the camera together.
             labelObject.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             label = labelObject.AddComponent<TextMesh>();
             label.text = labelText;
@@ -91,8 +128,8 @@ namespace AlwaysFaithful.Prototype
             statusBadge = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             statusBadge.name = "NATO Status Badge";
             statusBadge.layer = LayerMask.NameToLayer("Ignore Raycast");
-            statusBadge.transform.SetParent(transform, false);
-            statusBadge.transform.localPosition = new Vector3(0f, .45f, .12f);
+            statusBadge.transform.SetParent(card, false);
+            statusBadge.transform.localPosition = new Vector3(0f, .20f, .10f);
             statusBadge.transform.localScale = Vector3.one * .16f;
             statusBadgeRenderer = statusBadge.GetComponent<MeshRenderer>();
             statusBadgeRenderer.sharedMaterial = new Material(solid);
@@ -100,10 +137,10 @@ namespace AlwaysFaithful.Prototype
             statusBadge.SetActive(false);
         }
 
-        private LineRenderer BuildCrossLine(string objectName, Shader shader, Color color, Vector3 from, Vector3 to)
+        private static LineRenderer BuildCrossLine(string objectName, Transform parent, Shader shader, Color color, Vector3 from, Vector3 to)
         {
             LineRenderer line = new GameObject(objectName).AddComponent<LineRenderer>();
-            line.transform.SetParent(transform, false);
+            line.transform.SetParent(parent, false);
             line.useWorldSpace = false;
             line.positionCount = 2;
             line.widthMultiplier = .05f;
@@ -123,6 +160,7 @@ namespace AlwaysFaithful.Prototype
             if (frame == null) return;
             frame.startColor = frameColor;
             frame.endColor = frameColor;
+            if (groundAnchorRenderer != null) groundAnchorRenderer.material.color = frameColor;
             if (isSupportRole)
             {
                 if (supportDotRenderer != null) supportDotRenderer.material.color = iconColor;
