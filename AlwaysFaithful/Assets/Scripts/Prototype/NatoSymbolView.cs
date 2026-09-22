@@ -12,14 +12,20 @@ namespace AlwaysFaithful.Prototype
     // mobility/equipment modifiers) — a simplified stand-in for players who
     // prefer the standardized look over the illustrated counter.
     //
-    // The card itself is a fixed-tilt "billboard", not a decal lying flat on
-    // the hex: real NATO symbology is read face-on, like a paper counter, so
-    // the whole frame/icon/label/badge group sits on a tilted billboardRoot
-    // child rather than directly on this component's own transform. A
-    // separate small ground-anchor dot stays flat on the hex so it's still
-    // obvious which hex the unit occupies once the card above it is tilted.
+    // The card itself is a billboard, not a decal lying flat on the hex:
+    // real NATO symbology is read face-on, like a paper counter, so the
+    // whole frame/icon/label/badge group sits on a billboardRoot child whose
+    // rotation is recomputed every frame to face the camera (see Update —
+    // the tactical camera now supports free yaw/pitch orbit, so a
+    // once-computed static tilt is no longer enough). A separate small
+    // ground-anchor dot stays flat on the hex so it's still obvious which
+    // hex the unit occupies once the card above it is tilted.
     public sealed class NatoSymbolView : MonoBehaviour
     {
+        // Set once by AlwaysFaithfulPrototype right after it creates the map
+        // camera; every instance reads this same reference each frame.
+        public static Transform ActiveCamera;
+
         private LineRenderer frame;
         private LineRenderer crossA;
         private LineRenderer crossB;
@@ -28,6 +34,7 @@ namespace AlwaysFaithful.Prototype
         private GameObject statusBadge;
         private MeshRenderer statusBadgeRenderer;
         private MeshRenderer groundAnchorRenderer;
+        private Transform billboardRoot;
         private bool isSupportRole;
         private TacticalUnitState boundUnit;
         private Color boundFrameColor;
@@ -36,14 +43,6 @@ namespace AlwaysFaithful.Prototype
         private float flashTimer;
 
         public TacticalCombatStatus PresentedStatus { get; private set; }
-
-        // The tactical camera's fixed viewing offset (see
-        // AlwaysFaithfulPrototype.ApplyCamera: cameraFocus + (0, distance *
-        // 1.08, -distance * .56), always LookAt(cameraFocus)) never orbits —
-        // only pans and zooms — so a single static tilt already faces the
-        // camera everywhere on the board; no per-frame billboard math needed.
-        private static readonly Quaternion CameraFacingTilt =
-            Quaternion.FromToRotation(Vector3.up, new Vector3(0f, 1.08f, -.56f).normalized);
 
         public void Initialize(bool friendly, bool isSupportRoleUnit, string labelText)
         {
@@ -62,11 +61,12 @@ namespace AlwaysFaithful.Prototype
             Destroy(anchor.GetComponent<Collider>());
             groundAnchorRenderer = anchor.GetComponent<MeshRenderer>();
 
-            GameObject billboardRoot = new GameObject("Billboard Root");
-            billboardRoot.transform.SetParent(transform, false);
-            billboardRoot.transform.localPosition = new Vector3(0f, .28f, 0f);
-            billboardRoot.transform.localRotation = CameraFacingTilt;
-            Transform card = billboardRoot.transform;
+            GameObject billboardRootObject = new GameObject("Billboard Root");
+            billboardRootObject.transform.SetParent(transform, false);
+            billboardRootObject.transform.localPosition = new Vector3(0f, .28f, 0f);
+            billboardRoot = billboardRootObject.transform;
+            FaceCamera();
+            Transform card = billboardRoot;
 
             frame = new GameObject("NATO Frame").AddComponent<LineRenderer>();
             frame.transform.SetParent(card, false);
@@ -224,8 +224,30 @@ namespace AlwaysFaithful.Prototype
             boundIconColor = iconColor;
         }
 
+        // Recomputes billboardRoot's rotation so its original "lying flat,
+        // normal +Y" authoring (see Initialize) is carried to face wherever
+        // the camera currently is, using the shortest-arc rotation from
+        // world up to the camera direction — the same construction the old
+        // static tilt used, just re-run every frame instead of once.
+        private void FaceCamera()
+        {
+            if (billboardRoot == null) return;
+            if (ActiveCamera == null)
+            {
+                billboardRoot.rotation = Quaternion.identity;
+                return;
+            }
+            Vector3 toCamera = ActiveCamera.position - billboardRoot.position;
+            if (toCamera.sqrMagnitude < .0001f) return;
+            // World rotation, not local: the player's own counter root gets
+            // rotated to face its last movement direction, and this card
+            // must face the camera regardless of that parent rotation.
+            billboardRoot.rotation = Quaternion.FromToRotation(Vector3.up, toCamera.normalized);
+        }
+
         private void Update()
         {
+            FaceCamera();
             if (flashTimer > 0f)
             {
                 flashTimer -= Time.unscaledDeltaTime;

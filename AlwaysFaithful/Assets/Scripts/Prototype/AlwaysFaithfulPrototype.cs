@@ -75,6 +75,18 @@ namespace AlwaysFaithful.Prototype
         private HexCellView hoveredCell;
         private Vector3 cameraFocus;
         private float cameraDistance = 190f;
+        // Degrees. Yaw wraps freely (orbit around the focus); pitch is
+        // clamped so the camera can never go fully vertical (yaw would
+        // become meaningless) or drop to/below the horizon (looking into
+        // the terrain edge-on). Defaults reproduce each mode's original
+        // fixed viewing angle exactly, so nothing changes until a player
+        // actually rotates.
+        private float cameraYaw;
+        private float cameraPitch = OperationalDefaultPitch;
+        private const float MinCameraPitch = 15f;
+        private const float MaxCameraPitch = 85f;
+        private const float TacticalDefaultPitch = 62.6f;
+        private const float OperationalDefaultPitch = 77.1f;
         private GeographicElevationGrid elevation;
         private CoastlineData coastline;
         private GUIStyle titleStyle;
@@ -129,6 +141,8 @@ namespace AlwaysFaithful.Prototype
         private MeshRenderer tacticalFireReticleRenderer;
         private Vector3 overviewCameraFocus;
         private float overviewCameraDistance;
+        private float overviewCameraYaw;
+        private float overviewCameraPitch;
         private float localMinimumLandElevation;
         private float localMaximumLandElevation;
         private bool tacticalMode;
@@ -521,6 +535,7 @@ namespace AlwaysFaithful.Prototype
             mapCamera.nearClipPlane = .1f;
             mapCamera.farClipPlane = 700f;
             mapCamera.fieldOfView = 38f;
+            NatoSymbolView.ActiveCamera = cameraObject.transform;
             cameraObject.AddComponent<AudioListener>();
             tacticalAudio = cameraObject.AddComponent<TacticalAudio>();
             tacticalAudio.Initialize();
@@ -1563,6 +1578,8 @@ namespace AlwaysFaithful.Prototype
             {
                 overviewCameraFocus = cameraFocus;
                 overviewCameraDistance = cameraDistance;
+                overviewCameraYaw = cameraYaw;
+                overviewCameraPitch = cameraPitch;
             }
             CancelUnitInteraction();
             tacticalLosOverlayActive = false;
@@ -1597,6 +1614,8 @@ namespace AlwaysFaithful.Prototype
             tacticalRoot.SetActive(true);
             cameraFocus = Vector3.zero;
             cameraDistance = 33f;
+            cameraYaw = 0f;
+            cameraPitch = TacticalDefaultPitch;
             hoveredLocalCell = null;
             ApplyCamera();
             // Announce mission type / Battalion status the same way a
@@ -1646,6 +1665,8 @@ namespace AlwaysFaithful.Prototype
             turnState.ActiveSide = "USMC";
             cameraFocus = overviewCameraFocus;
             cameraDistance = overviewCameraDistance;
+            cameraYaw = overviewCameraYaw;
+            cameraPitch = overviewCameraPitch;
             ApplyCamera();
             Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_EXIT battlefield={tacticalBattlefield.BattlefieldId} parent={tacticalBattlefield.ParentHex}");
         }
@@ -2048,6 +2069,18 @@ namespace AlwaysFaithful.Prototype
             if (cameraDistanceArgument != null && float.TryParse(cameraDistanceArgument.Substring("--capture-camera-distance=".Length), out float overrideDistance))
             {
                 cameraDistance = overrideDistance;
+                ApplyCamera();
+            }
+            string cameraYawArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-camera-yaw=", StringComparison.Ordinal));
+            if (cameraYawArgument != null && float.TryParse(cameraYawArgument.Substring("--capture-camera-yaw=".Length), out float overrideYaw))
+            {
+                cameraYaw = overrideYaw;
+                ApplyCamera();
+            }
+            string cameraPitchArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-camera-pitch=", StringComparison.Ordinal));
+            if (cameraPitchArgument != null && float.TryParse(cameraPitchArgument.Substring("--capture-camera-pitch=".Length), out float overridePitch))
+            {
+                cameraPitch = Mathf.Clamp(overridePitch, MinCameraPitch, MaxCameraPitch);
                 ApplyCamera();
             }
             string counterSkinArgument = Array.Find(Environment.GetCommandLineArgs(), value => value.StartsWith("--capture-counter-skin=", StringComparison.Ordinal));
@@ -7511,20 +7544,46 @@ namespace AlwaysFaithful.Prototype
             cameraDistance = Mathf.Clamp(cameraDistance - Input.mouseScrollDelta.y * Mathf.Max(1.5f, cameraDistance * .08f), 10f, maximumDistance);
             float horizontal = (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow) ? 1f : 0f);
             float vertical = (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow) ? 1f : 0f);
-            Vector3 pan = new Vector3(horizontal, 0f, vertical);
-            if (Input.GetMouseButton(2)) pan += new Vector3(-Input.GetAxis("Mouse X") * 3f, 0f, -Input.GetAxis("Mouse Y") * 3f);
+            Vector3 rawPan = new Vector3(horizontal, 0f, vertical);
+            if (Input.GetMouseButton(2)) rawPan += new Vector3(-Input.GetAxis("Mouse X") * 3f, 0f, -Input.GetAxis("Mouse Y") * 3f);
+            // Pan is relative to the current yaw so WASD/drag still feels like
+            // "up/down/left/right on screen" once the camera has been rotated,
+            // rather than always moving along absolute world north/south.
+            Vector3 pan = Quaternion.Euler(0f, cameraYaw, 0f) * rawPan;
             cameraFocus += pan * (cameraDistance * .55f * Time.unscaledDeltaTime);
             if (tacticalMode)
             {
                 cameraFocus.x = Mathf.Clamp(cameraFocus.x, -14f, 14f);
                 cameraFocus.z = Mathf.Clamp(cameraFocus.z, -11f, 11f);
             }
+            // Q/E orbit yaw; Page Up/Down tilt pitch. Deliberately not RMB-drag
+            // (already claimed by orders) or MMB-drag (already pan) — free of
+            // every existing binding, in both modes.
+            float yawInput = (Input.GetKey(KeyCode.E) ? 1f : 0f) - (Input.GetKey(KeyCode.Q) ? 1f : 0f);
+            float pitchInput = (Input.GetKey(KeyCode.PageUp) ? 1f : 0f) - (Input.GetKey(KeyCode.PageDown) ? 1f : 0f);
+            const float RotationDegPerSecond = 90f;
+            cameraYaw += yawInput * RotationDegPerSecond * Time.unscaledDeltaTime;
+            cameraPitch = Mathf.Clamp(cameraPitch + pitchInput * RotationDegPerSecond * Time.unscaledDeltaTime, MinCameraPitch, MaxCameraPitch);
             if (Input.GetKeyDown(settings.RemapResetCameraKey))
             {
                 cameraFocus = tacticalMode ? Vector3.zero : HexToWorld(new HexCoord(Width / 2, Height / 2));
                 cameraDistance = tacticalMode ? 33f : 190f;
+                cameraYaw = 0f;
+                cameraPitch = tacticalMode ? TacticalDefaultPitch : OperationalDefaultPitch;
             }
             ApplyCamera();
+        }
+
+        // Six degrees of freedom over the focus point: pan (X/Z), zoom
+        // (distance), and free yaw/pitch orbit — no roll, so hexes, labels,
+        // and counters never tip sideways. Both maps share this exact
+        // formula; only the default pitch and pan/zoom clamps differ.
+        private Vector3 CameraDirectionFromYawPitch()
+        {
+            float yawRad = cameraYaw * Mathf.Deg2Rad;
+            float pitchRad = cameraPitch * Mathf.Deg2Rad;
+            float cosPitch = Mathf.Cos(pitchRad);
+            return new Vector3(Mathf.Sin(yawRad) * cosPitch, Mathf.Sin(pitchRad), -Mathf.Cos(yawRad) * cosPitch);
         }
 
         private void ApplyCamera()
@@ -7532,16 +7591,13 @@ namespace AlwaysFaithful.Prototype
             if (mapCamera == null) return;
             if (tacticalMode)
             {
-                mapCamera.transform.position = cameraFocus + new Vector3(0f, cameraDistance * 1.08f, -cameraDistance * .56f);
-                mapCamera.transform.LookAt(cameraFocus);
+                mapCamera.transform.position = cameraFocus + CameraDirectionFromYawPitch() * cameraDistance;
+                mapCamera.transform.LookAt(cameraFocus, Vector3.up);
                 if (tacticalUnit != null) tacticalUnit.transform.localScale = Vector3.one * Mathf.Clamp(cameraDistance / 30f, .82f, 1.55f);
                 return;
             }
-            float overview = Mathf.InverseLerp(42f, 190f, cameraDistance);
-            float height = Mathf.Lerp(1.08f, 1.48f, overview);
-            float setback = Mathf.Lerp(.92f, .34f, overview);
-            mapCamera.transform.position = cameraFocus + new Vector3(0f, cameraDistance * height, -cameraDistance * setback);
-            mapCamera.transform.LookAt(cameraFocus);
+            mapCamera.transform.position = cameraFocus + CameraDirectionFromYawPitch() * cameraDistance;
+            mapCamera.transform.LookAt(cameraFocus, Vector3.up);
             screenPickCacheValid = false;
             float counterScale = Mathf.Clamp(cameraDistance / 52f, 1f, 3.2f);
             foreach (UnitCounterView friendly in operationalFriendlyViews.Values)
@@ -7673,8 +7729,8 @@ namespace AlwaysFaithful.Prototype
                 }
             }
 
-            GUI.Box(new Rect(uiWidth - 310f, uiHeight - 83f, 288f, 61f), GUIContent.none);
-            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 70f, 256f, 45f), "RMB Unit Orders  •  LMB Confirm\nMMB/WASD Pan  •  Wheel Zoom  •  R Reset", bodyStyle);
+            GUI.Box(new Rect(uiWidth - 310f, uiHeight - 100f, 288f, 78f), GUIContent.none);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Unit Orders  •  LMB Confirm\nMMB/WASD Pan  •  Wheel Zoom  •  R Reset\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
 
             if (counterMenuOpen)
             {
@@ -8258,8 +8314,8 @@ namespace AlwaysFaithful.Prototype
                         tacticalLosOverlayActive ? "LOS OVERLAY • ON" : "LOS OVERLAY • OFF", buttonStyle))
                     ToggleTacticalLosOverlay();
             }
-            GUI.Box(new Rect(uiWidth - 310f, uiHeight - 83f, 288f, 61f), GUIContent.none);
-            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 70f, 256f, 45f), "RMB Orders  •  LMB Confirm\nMove / LOS / Fire / Recon  •  RMB/Escape Cancel", bodyStyle);
+            GUI.Box(new Rect(uiWidth - 310f, uiHeight - 100f, 288f, 78f), GUIContent.none);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Orders  •  LMB Confirm\nMove / LOS / Fire / Recon  •  RMB/Escape Cancel\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
         }
 
         // Default ramp is a single warm hue (red-orange-yellow), which reads
