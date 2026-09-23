@@ -25,6 +25,8 @@ namespace AlwaysFaithful.Prototype
         // Terrain value -- it never changes movement cost, LOS, or the
         // saved battlefield's terrain data, only what a land hex looks like.
         private const int PondChancePerMille = 120;
+        private const int RoughRockChancePerMille = 340;
+        private const int HighlandRockChancePerMille = 620;
 
         public static void Build(Transform cellTransform, HexCoord coord, TacticalTerrain terrain, TacticalCover cover, bool isBuiltUp, Shader shader, GraphicsPresetTier preset)
         {
@@ -38,7 +40,7 @@ namespace AlwaysFaithful.Prototype
             // Rocky ground reads by terrain class, independent of vegetation
             // cover -- previously Rough/Highland were color-only, so a bare
             // highland hex with no cover looked identical to bare lowland.
-            if (terrain == TacticalTerrain.Rough || terrain == TacticalTerrain.Highland)
+            if ((terrain == TacticalTerrain.Rough || terrain == TacticalTerrain.Highland) && ShouldHaveRocks(coord, terrain, preset))
                 BuildRocks(cellTransform, coord, terrain, shader, preset);
             if (terrain != TacticalTerrain.Highland && ShouldHavePond(coord))
                 BuildPond(cellTransform, coord, shader);
@@ -119,10 +121,20 @@ namespace AlwaysFaithful.Prototype
             }
         }
 
-        // Boulder clutter keyed off Terrain rather than Cover, so a bare
-        // Rough or Highland hex still reads as rocky ground even with no
-        // vegetation rolled on it. Irregular jittered scale/rotation per
-        // rock, not a uniform cube, for a less obviously primitive look.
+        // Boulder clutter is keyed off Terrain rather than Cover, but only a
+        // deterministic subset of eligible hexes receives it. Highland is
+        // visibly rockier than Rough ground without turning every hex into a
+        // gravel field; graphics presets nudge cosmetic density only.
+        private static bool ShouldHaveRocks(HexCoord coord, TacticalTerrain terrain, GraphicsPresetTier preset)
+        {
+            int chance = terrain == TacticalTerrain.Highland ? HighlandRockChancePerMille : RoughRockChancePerMille;
+            if (preset == GraphicsPresetTier.Low) chance -= 90;
+            else if (preset == GraphicsPresetTier.High) chance += 90;
+            return Hash(coord, 313) % 1000u < chance;
+        }
+
+        // Flattened, irregular spheres make rounded field boulders. The old
+        // tilted cubes read as cut masonry, especially at close zoom.
         private static void BuildRocks(Transform cellTransform, HexCoord coord, TacticalTerrain terrain, Shader shader, GraphicsPresetTier preset)
         {
             int baseCount = terrain == TacticalTerrain.Highland ? 2 : 1;
@@ -133,15 +145,16 @@ namespace AlwaysFaithful.Prototype
                 int salt = index + 31;
                 Vector2 offset = JitterOffset(coord, salt);
                 float size = .12f + JitterUnit(coord, salt) * .09f;
-                GameObject rock = Primitive(PrimitiveType.Cube, $"Rock {index}", cellTransform, shader, color);
-                rock.transform.localPosition = new Vector3(offset.x, SurfaceOffset + size * .32f, offset.y);
+                GameObject rock = Primitive(PrimitiveType.Sphere, $"Rounded Boulder {index}", cellTransform, shader, color);
+                float verticalScale = size * (.30f + JitterUnit(coord, salt + 9) * .16f);
+                rock.transform.localPosition = new Vector3(offset.x, SurfaceOffset + verticalScale * .46f, offset.y);
                 float yaw = Hash(coord, salt + 200) % 360u;
-                float tiltX = (JitterUnit(coord, salt + 3) - .5f) * 22f;
-                float tiltZ = (JitterUnit(coord, salt + 5) - .5f) * 18f;
+                float tiltX = (JitterUnit(coord, salt + 3) - .5f) * 12f;
+                float tiltZ = (JitterUnit(coord, salt + 5) - .5f) * 10f;
                 rock.transform.localRotation = Quaternion.Euler(tiltX, yaw, tiltZ);
                 rock.transform.localScale = new Vector3(
                     size * (.85f + JitterUnit(coord, salt + 7) * .5f),
-                    size * (.55f + JitterUnit(coord, salt + 9) * .35f),
+                    verticalScale,
                     size * (.85f + JitterUnit(coord, salt + 13) * .5f));
             }
         }
