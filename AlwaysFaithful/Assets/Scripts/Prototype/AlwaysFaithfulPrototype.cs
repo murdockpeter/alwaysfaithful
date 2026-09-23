@@ -1717,8 +1717,12 @@ namespace AlwaysFaithful.Prototype
 
             Mesh sharedMesh = CreateHexMesh(HexRadius * .985f, .12f);
             Material sharedMaterial = NewMaterial(Color.white);
+            sharedMaterial.SetFloat("_EdgeStrength", TacticalEdgeStrength());
+            sharedMaterial.SetFloat("_Atmosphere", TacticalAtmosphereStrength());
             Material sharedWaterMaterial = NewWaterMaterial();
-            Shader coverShader = Resources.Load<Shader>("Shaders/MapSolid") ?? Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
+            sharedWaterMaterial.SetFloat("_EdgeStrength", TacticalEdgeStrength() * .70f);
+            sharedWaterMaterial.SetFloat("_Atmosphere", TacticalAtmosphereStrength());
+            Shader coverShader = Resources.Load<Shader>("Shaders/MapProp") ?? Resources.Load<Shader>("Shaders/MapSolid") ?? Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
             foreach (TacticalBattlefieldCell source in tacticalBattlefield.Cells)
             {
                 Vector3 position = LocalHexToWorld(source.LocalCoord);
@@ -8747,6 +8751,26 @@ namespace AlwaysFaithful.Prototype
                 case GraphicsPresetTier.Low: return 0f;
                 case GraphicsPresetTier.High: return 1.2f;
                 default: return 1f;
+            }
+        }
+
+        private float TacticalEdgeStrength()
+        {
+            switch (settings.GraphicsPreset)
+            {
+                case GraphicsPresetTier.Low: return .12f;
+                case GraphicsPresetTier.High: return .42f;
+                default: return .30f;
+            }
+        }
+
+        private float TacticalAtmosphereStrength()
+        {
+            switch (settings.GraphicsPreset)
+            {
+                case GraphicsPresetTier.Low: return 0f;
+                case GraphicsPresetTier.High: return .34f;
+                default: return .24f;
             }
         }
 

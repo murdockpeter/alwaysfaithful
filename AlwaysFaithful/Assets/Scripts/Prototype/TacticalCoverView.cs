@@ -73,7 +73,7 @@ namespace AlwaysFaithful.Prototype
         private static void BuildBush(Transform cellTransform, HexCoord coord, int index, Shader shader)
         {
             Vector2 offset = JitterOffset(coord, index);
-            float radius = .11f + JitterUnit(coord, index) * .06f;
+            float radius = .15f + JitterUnit(coord, index) * .08f;
             GameObject bush = Primitive(PrimitiveType.Sphere, $"Bush {index}", cellTransform, shader, BushColor);
             bush.transform.localPosition = new Vector3(offset.x, SurfaceOffset + radius * .70f, offset.y);
             bush.transform.localScale = new Vector3(radius * 2.1f, radius * 1.3f, radius * 2.1f);
@@ -82,18 +82,18 @@ namespace AlwaysFaithful.Prototype
         private static void BuildTree(Transform cellTransform, HexCoord coord, int index, bool heavy, Shader shader)
         {
             Vector2 offset = JitterOffset(coord, index);
-            float trunkHeight = .14f + JitterUnit(coord, index) * .10f;
+            float trunkHeight = .22f + JitterUnit(coord, index) * .13f;
             GameObject trunk = Primitive(PrimitiveType.Cylinder, $"Trunk {index}", cellTransform, shader, TrunkColor);
             trunk.transform.localPosition = new Vector3(offset.x, SurfaceOffset + trunkHeight * .5f, offset.y);
-            trunk.transform.localScale = new Vector3(.028f, trunkHeight, .028f);
+            trunk.transform.localScale = new Vector3(.040f, trunkHeight, .040f);
 
             Color canopyColor = heavy ? HeavyCanopyColor : MediumCanopyColor;
             int lobes = heavy ? 3 : 2;
             for (int lobe = 0; lobe < lobes; lobe++)
             {
                 int salt = index * 7 + lobe + 40;
-                float lobeRadius = (.10f + JitterUnit(coord, salt) * .05f) * (heavy ? 1.15f : 1f);
-                Vector2 lobeSpread = JitterOffset(coord, salt) * .16f;
+                float lobeRadius = (.15f + JitterUnit(coord, salt) * .07f) * (heavy ? 1.15f : 1f);
+                Vector2 lobeSpread = JitterOffset(coord, salt) * .22f;
                 GameObject canopy = Primitive(PrimitiveType.Sphere, $"Canopy {index}-{lobe}", cellTransform, shader, canopyColor);
                 canopy.transform.localPosition = new Vector3(offset.x + lobeSpread.x, SurfaceOffset + trunkHeight + lobeRadius * .55f, offset.y + lobeSpread.y);
                 canopy.transform.localScale = Vector3.one * lobeRadius * 2f;
@@ -111,11 +111,11 @@ namespace AlwaysFaithful.Prototype
                 float height = .16f + JitterUnit(coord, index + 11) * .10f;
                 GameObject building = Primitive(PrimitiveType.Cube, $"Building {index}", cellTransform, shader, wallColor);
                 building.transform.localPosition = new Vector3(offset.x, SurfaceOffset + height * .5f, offset.y);
-                building.transform.localScale = new Vector3(.20f, height, .17f);
+                building.transform.localScale = new Vector3(.29f, height * 1.25f, .24f);
 
                 GameObject roof = Primitive(PrimitiveType.Cube, $"Roof {index}", cellTransform, shader, roofColor);
-                roof.transform.localPosition = new Vector3(offset.x, SurfaceOffset + height + .015f, offset.y);
-                roof.transform.localScale = new Vector3(.22f, .03f, .19f);
+                roof.transform.localPosition = new Vector3(offset.x, SurfaceOffset + height * 1.25f + .015f, offset.y);
+                roof.transform.localScale = new Vector3(.32f, .035f, .27f);
             }
         }
 
@@ -132,7 +132,7 @@ namespace AlwaysFaithful.Prototype
             {
                 int salt = index + 31;
                 Vector2 offset = JitterOffset(coord, salt);
-                float size = .08f + JitterUnit(coord, salt) * .07f;
+                float size = .12f + JitterUnit(coord, salt) * .09f;
                 GameObject rock = Primitive(PrimitiveType.Cube, $"Rock {index}", cellTransform, shader, color);
                 rock.transform.localPosition = new Vector3(offset.x, SurfaceOffset + size * .32f, offset.y);
                 float yaw = Hash(coord, salt + 200) % 360u;

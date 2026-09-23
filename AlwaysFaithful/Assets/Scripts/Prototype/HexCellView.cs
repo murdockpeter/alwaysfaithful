@@ -99,6 +99,18 @@ namespace AlwaysFaithful.Prototype
             else if (lineOfSight == TacticalLosState.Blocked) color = Color.Lerp(color, new Color(.88f, .16f, .13f), .62f);
             properties.SetColor("_Color", color);
             meshRenderer.SetPropertyBlock(properties);
+
+            // Scenery is built after Initialize, so discover it lazily when
+            // observation refreshes. It uses a separate depth-aware shader
+            // but must inherit the authoritative fog value of this cell.
+            foreach (MeshRenderer child in GetComponentsInChildren<MeshRenderer>())
+            {
+                if (child == meshRenderer || child.sharedMaterial == null || !child.sharedMaterial.HasProperty("_FogAmount")) continue;
+                var childProperties = new MaterialPropertyBlock();
+                child.GetPropertyBlock(childProperties);
+                childProperties.SetFloat("_FogAmount", fogAmount);
+                child.SetPropertyBlock(childProperties);
+            }
         }
     }
 }

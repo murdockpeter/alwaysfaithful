@@ -10,6 +10,9 @@ Shader "AlwaysFaithful/MapWater"
     {
         _Color ("Terrain Color", Color) = (1, 1, 1, 1)
         _Shimmer ("Shimmer Strength", Float) = 1
+        _EdgeStrength ("Hex Edge Strength", Range(0, 1)) = 0
+        _Atmosphere ("Distance Atmosphere", Range(0, 1)) = 0
+        _AtmosphereColor ("Atmosphere Color", Color) = (.025, .06, .075, 1)
     }
 
     SubShader
@@ -38,10 +41,15 @@ Shader "AlwaysFaithful/MapWater"
                 float4 vertex : SV_POSITION;
                 float shade : TEXCOORD0;
                 float2 worldXZ : TEXCOORD1;
+                float2 localXZ : TEXCOORD2;
+                float3 worldPosition : TEXCOORD3;
             };
 
             fixed4 _Color;
+            fixed4 _AtmosphereColor;
             float _Shimmer;
+            float _EdgeStrength;
+            float _Atmosphere;
 
             Interpolator Vert(Input input)
             {
@@ -50,6 +58,8 @@ Shader "AlwaysFaithful/MapWater"
                 float3 normal = UnityObjectToWorldNormal(input.normal);
                 output.shade = lerp(.86, 1.06, saturate(normal.y * .5 + .5));
                 output.worldXZ = mul(unity_ObjectToWorld, input.vertex).xz;
+                output.localXZ = input.vertex.xz;
+                output.worldPosition = mul(unity_ObjectToWorld, input.vertex).xyz;
                 return output;
             }
 
@@ -60,19 +70,25 @@ Shader "AlwaysFaithful/MapWater"
 
             fixed4 Frag(Interpolator input) : SV_Target
             {
-                // Two noise layers drifting at different speeds/directions
-                // stand in for a cheap animated ripple -- same hash idiom as
-                // MapTerrain's static grain, just time-scrolled.
-                float2 driftA = input.worldXZ * 7.0 + float2(_Time.y * .18, _Time.y * .11);
-                float2 driftB = input.worldXZ * 17.0 - float2(_Time.y * .09, _Time.y * .21);
-                float ripple = Hash(floor(driftA)) * .5 + Hash(floor(driftB)) * .5;
-                float rippleShade = lerp(1.0, lerp(.90, 1.12, ripple), saturate(_Shimmer));
+                // Directional wavelets read as water instead of animated TV
+                // static. A tiny hash term keeps repetition from becoming
+                // obvious across the whole operational board.
+                float waveA = sin(dot(input.worldXZ, float2(5.7, 2.1)) + _Time.y * 1.15);
+                float waveB = sin(dot(input.worldXZ, float2(-2.4, 8.3)) - _Time.y * .82);
+                float irregular = Hash(floor(input.worldXZ * 11.0));
+                float ripple = saturate(.50 + waveA * .20 + waveB * .14 + (irregular - .5) * .12);
+                float rippleShade = lerp(1.0, lerp(.93, 1.09, ripple), saturate(_Shimmer));
 
                 // Sparse, short-lived bright glints -- a sunlit-water
                 // sparkle rather than a uniformly moving pattern.
                 float sparkle = pow(Hash(floor(input.worldXZ * 33.0) + floor(_Time.y * 3.0)), 26.0) * saturate(_Shimmer);
 
-                fixed3 color = _Color.rgb * input.shade * rippleShade + sparkle * .5;
+                float edgeDistance = max(abs(input.localXZ.x), max(abs(.5 * input.localXZ.x + .8660254 * input.localXZ.y), abs(.5 * input.localXZ.x - .8660254 * input.localXZ.y)));
+                float edge = smoothstep(.93, .985, edgeDistance) * step(.72, input.shade) * saturate(_EdgeStrength);
+                fixed3 color = _Color.rgb * input.shade * rippleShade * lerp(1.0, .78, edge) + sparkle * .36;
+                float cameraDistance = distance(_WorldSpaceCameraPos, input.worldPosition);
+                float haze = smoothstep(18.0, 43.0, cameraDistance) * saturate(_Atmosphere);
+                color = lerp(color, _AtmosphereColor.rgb, haze);
                 return fixed4(color, 1);
             }
             ENDCG
