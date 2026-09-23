@@ -3,19 +3,45 @@ using UnityEngine;
 
 namespace AlwaysFaithful.Prototype
 {
-    // Procedural cover/built-up dressing for the 250 m tactical map only (never
-    // the whole-island operational board). Follows the same restrained,
-    // primitive-composed, Ignore-Raycast-layer idiom as TacticalFormationView
-    // and ContactMarkerView: flat-colored primitives, no imported assets.
+    // Procedural cover/built-up/terrain dressing for the 250 m tactical map
+    // only (never the whole-island operational board). Follows the same
+    // restrained, primitive-composed, Ignore-Raycast-layer idiom as
+    // TacticalFormationView and ContactMarkerView: flat-colored primitives,
+    // no imported assets.
     public static class TacticalCoverView
     {
         private const float SurfaceOffset = .10f;
 
-        public static void Build(Transform cellTransform, HexCoord coord, TacticalCover cover, bool isBuiltUp, Shader shader, GraphicsPresetTier preset)
+        private static readonly Color BushColor = new Color(.30f, .40f, .21f);
+        private static readonly Color TrunkColor = new Color(.32f, .23f, .16f);
+        private static readonly Color MediumCanopyColor = new Color(.22f, .33f, .18f);
+        private static readonly Color HeavyCanopyColor = new Color(.16f, .26f, .14f);
+        private static readonly Color HighlandRockColor = new Color(.50f, .48f, .45f);
+        private static readonly Color RoughRockColor = new Color(.42f, .39f, .35f);
+        private static readonly Color PondColor = new Color(.15f, .42f, .43f);
+        private static readonly Color ReedColor = new Color(.34f, .38f, .20f);
+
+        // A small body of water is purely cosmetic set dressing, not a new
+        // Terrain value -- it never changes movement cost, LOS, or the
+        // saved battlefield's terrain data, only what a land hex looks like.
+        private const int PondChancePerMille = 120;
+
+        public static void Build(Transform cellTransform, HexCoord coord, TacticalTerrain terrain, TacticalCover cover, bool isBuiltUp, Shader shader, GraphicsPresetTier preset)
         {
-            if (cover == TacticalCover.None) return;
-            if (isBuiltUp) BuildBuiltUp(cellTransform, coord, cover, shader, preset);
-            else BuildNatural(cellTransform, coord, cover, shader, preset);
+            if (terrain == TacticalTerrain.Water) return;
+            if (isBuiltUp)
+            {
+                if (cover != TacticalCover.None) BuildBuiltUp(cellTransform, coord, cover, shader, preset);
+                return;
+            }
+            if (cover != TacticalCover.None) BuildNatural(cellTransform, coord, cover, shader, preset);
+            // Rocky ground reads by terrain class, independent of vegetation
+            // cover -- previously Rough/Highland were color-only, so a bare
+            // highland hex with no cover looked identical to bare lowland.
+            if (terrain == TacticalTerrain.Rough || terrain == TacticalTerrain.Highland)
+                BuildRocks(cellTransform, coord, terrain, shader, preset);
+            if (terrain != TacticalTerrain.Highland && ShouldHavePond(coord))
+                BuildPond(cellTransform, coord, shader);
         }
 
         // Low trims a prop off every cell (floor of 1, so cover is never
@@ -31,22 +57,46 @@ namespace AlwaysFaithful.Prototype
             }
         }
 
+        // Light cover reads as low bushes; Medium/Heavy read as actual
+        // trees (trunk + a jittered cluster of canopy lobes) rather than
+        // the flat single-cylinder "clump" this used to be.
         private static void BuildNatural(Transform cellTransform, HexCoord coord, TacticalCover cover, Shader shader, GraphicsPresetTier preset)
         {
             int count = ScaledPropCount(cover == TacticalCover.Light ? 1 : cover == TacticalCover.Medium ? 2 : 3, preset);
-            Color color = cover == TacticalCover.Light
-                ? new Color(.32f, .42f, .23f)
-                : cover == TacticalCover.Medium
-                    ? new Color(.25f, .35f, .19f)
-                    : new Color(.17f, .27f, .15f);
-            float clumpHeight = cover == TacticalCover.Light ? .05f : cover == TacticalCover.Medium ? .09f : .14f;
             for (int index = 0; index < count; index++)
             {
-                Vector2 offset = JitterOffset(coord, index);
-                float radius = .14f + JitterUnit(coord, index) * .09f;
-                GameObject clump = Primitive(PrimitiveType.Cylinder, $"Cover Clump {index}", cellTransform, shader, color);
-                clump.transform.localPosition = new Vector3(offset.x, SurfaceOffset + clumpHeight * .5f, offset.y);
-                clump.transform.localScale = new Vector3(radius, clumpHeight, radius);
+                if (cover == TacticalCover.Light) BuildBush(cellTransform, coord, index, shader);
+                else BuildTree(cellTransform, coord, index, cover == TacticalCover.Heavy, shader);
+            }
+        }
+
+        private static void BuildBush(Transform cellTransform, HexCoord coord, int index, Shader shader)
+        {
+            Vector2 offset = JitterOffset(coord, index);
+            float radius = .11f + JitterUnit(coord, index) * .06f;
+            GameObject bush = Primitive(PrimitiveType.Sphere, $"Bush {index}", cellTransform, shader, BushColor);
+            bush.transform.localPosition = new Vector3(offset.x, SurfaceOffset + radius * .70f, offset.y);
+            bush.transform.localScale = new Vector3(radius * 2.1f, radius * 1.3f, radius * 2.1f);
+        }
+
+        private static void BuildTree(Transform cellTransform, HexCoord coord, int index, bool heavy, Shader shader)
+        {
+            Vector2 offset = JitterOffset(coord, index);
+            float trunkHeight = .14f + JitterUnit(coord, index) * .10f;
+            GameObject trunk = Primitive(PrimitiveType.Cylinder, $"Trunk {index}", cellTransform, shader, TrunkColor);
+            trunk.transform.localPosition = new Vector3(offset.x, SurfaceOffset + trunkHeight * .5f, offset.y);
+            trunk.transform.localScale = new Vector3(.028f, trunkHeight, .028f);
+
+            Color canopyColor = heavy ? HeavyCanopyColor : MediumCanopyColor;
+            int lobes = heavy ? 3 : 2;
+            for (int lobe = 0; lobe < lobes; lobe++)
+            {
+                int salt = index * 7 + lobe + 40;
+                float lobeRadius = (.10f + JitterUnit(coord, salt) * .05f) * (heavy ? 1.15f : 1f);
+                Vector2 lobeSpread = JitterOffset(coord, salt) * .16f;
+                GameObject canopy = Primitive(PrimitiveType.Sphere, $"Canopy {index}-{lobe}", cellTransform, shader, canopyColor);
+                canopy.transform.localPosition = new Vector3(offset.x + lobeSpread.x, SurfaceOffset + trunkHeight + lobeRadius * .55f, offset.y + lobeSpread.y);
+                canopy.transform.localScale = Vector3.one * lobeRadius * 2f;
             }
         }
 
@@ -66,6 +116,58 @@ namespace AlwaysFaithful.Prototype
                 GameObject roof = Primitive(PrimitiveType.Cube, $"Roof {index}", cellTransform, shader, roofColor);
                 roof.transform.localPosition = new Vector3(offset.x, SurfaceOffset + height + .015f, offset.y);
                 roof.transform.localScale = new Vector3(.22f, .03f, .19f);
+            }
+        }
+
+        // Boulder clutter keyed off Terrain rather than Cover, so a bare
+        // Rough or Highland hex still reads as rocky ground even with no
+        // vegetation rolled on it. Irregular jittered scale/rotation per
+        // rock, not a uniform cube, for a less obviously primitive look.
+        private static void BuildRocks(Transform cellTransform, HexCoord coord, TacticalTerrain terrain, Shader shader, GraphicsPresetTier preset)
+        {
+            int baseCount = terrain == TacticalTerrain.Highland ? 2 : 1;
+            int count = ScaledPropCount(baseCount, preset);
+            Color color = terrain == TacticalTerrain.Highland ? HighlandRockColor : RoughRockColor;
+            for (int index = 0; index < count; index++)
+            {
+                int salt = index + 31;
+                Vector2 offset = JitterOffset(coord, salt);
+                float size = .08f + JitterUnit(coord, salt) * .07f;
+                GameObject rock = Primitive(PrimitiveType.Cube, $"Rock {index}", cellTransform, shader, color);
+                rock.transform.localPosition = new Vector3(offset.x, SurfaceOffset + size * .32f, offset.y);
+                float yaw = Hash(coord, salt + 200) % 360u;
+                float tiltX = (JitterUnit(coord, salt + 3) - .5f) * 22f;
+                float tiltZ = (JitterUnit(coord, salt + 5) - .5f) * 18f;
+                rock.transform.localRotation = Quaternion.Euler(tiltX, yaw, tiltZ);
+                rock.transform.localScale = new Vector3(
+                    size * (.85f + JitterUnit(coord, salt + 7) * .5f),
+                    size * (.55f + JitterUnit(coord, salt + 9) * .35f),
+                    size * (.85f + JitterUnit(coord, salt + 13) * .5f));
+            }
+        }
+
+        private static bool ShouldHavePond(HexCoord coord) => Hash(coord, 91) % 1000u < PondChancePerMille;
+
+        // A shallow flat disc plus a few edge reeds -- deliberately tiny
+        // next to the real coastline water tiles, so it never reads as a
+        // miscolored ordinary hex, only as a small pond within one.
+        private static void BuildPond(Transform cellTransform, HexCoord coord, Shader shader)
+        {
+            Vector2 offset = JitterOffset(coord, 73) * .55f;
+            float radius = .17f + JitterUnit(coord, 73) * .09f;
+            GameObject pond = Primitive(PrimitiveType.Cylinder, "Pond", cellTransform, shader, PondColor);
+            pond.transform.localPosition = new Vector3(offset.x, SurfaceOffset + .008f, offset.y);
+            pond.transform.localScale = new Vector3(radius, .008f, radius);
+
+            for (int reed = 0; reed < 3; reed++)
+            {
+                int salt = 79 + reed;
+                float angle = (Hash(coord, salt) % 360u) * Mathf.Deg2Rad;
+                Vector2 reedOffset = offset + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius * .92f;
+                float reedHeight = .07f + JitterUnit(coord, salt) * .05f;
+                GameObject reedProp = Primitive(PrimitiveType.Cylinder, $"Reed {reed}", cellTransform, shader, ReedColor);
+                reedProp.transform.localPosition = new Vector3(reedOffset.x, SurfaceOffset + reedHeight * .5f, reedOffset.y);
+                reedProp.transform.localScale = new Vector3(.012f, reedHeight, .012f);
             }
         }
 

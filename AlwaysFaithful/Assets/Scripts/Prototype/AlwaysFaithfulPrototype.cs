@@ -1717,6 +1717,7 @@ namespace AlwaysFaithful.Prototype
 
             Mesh sharedMesh = CreateHexMesh(HexRadius * .985f, .12f);
             Material sharedMaterial = NewMaterial(Color.white);
+            Material sharedWaterMaterial = NewWaterMaterial();
             Shader coverShader = Resources.Load<Shader>("Shaders/MapSolid") ?? Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
             foreach (TacticalBattlefieldCell source in tacticalBattlefield.Cells)
             {
@@ -1729,7 +1730,7 @@ namespace AlwaysFaithful.Prototype
                 cellObject.transform.position = position;
                 cellObject.AddComponent<MeshFilter>().sharedMesh = sharedMesh;
                 MeshRenderer renderer = cellObject.AddComponent<MeshRenderer>();
-                renderer.sharedMaterial = sharedMaterial;
+                renderer.sharedMaterial = source.Terrain == TacticalTerrain.Water ? sharedWaterMaterial : sharedMaterial;
                 renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
                 Color color = source.Terrain == TacticalTerrain.Water ? WaterColor(source.ElevationMetres) : LocalLandColor(source.ElevationMetres);
@@ -1744,7 +1745,7 @@ namespace AlwaysFaithful.Prototype
                     ElevationMetres = source.ElevationMetres,
                     Cover = source.Cover
                 });
-                TacticalCoverView.Build(cellObject.transform, source.LocalCoord, source.Cover, source.IsBuiltUp, coverShader, settings.GraphicsPreset);
+                TacticalCoverView.Build(cellObject.transform, source.LocalCoord, source.Terrain, source.Cover, source.IsBuiltUp, coverShader, settings.GraphicsPreset);
             }
             foreach (TacticalReconMarker marker in tacticalReconMarkers) BuildTacticalReconRing(marker.Hex, tacticalReconRings, TacticalReconRingColor);
             foreach (TacticalReconMarker marker in tacticalPlaReconMarkers)
@@ -8707,6 +8708,16 @@ namespace AlwaysFaithful.Prototype
             return material;
         }
 
+        // Separate shader/material from land so only water hexes carry the
+        // time-scrolled ripple -- land keeps MapTerrain's static grain.
+        private Material NewWaterMaterial()
+        {
+            Shader shader = Resources.Load<Shader>("Shaders/MapWater") ?? Resources.Load<Shader>("Shaders/MapTerrain") ?? Shader.Find("Sprites/Default");
+            var material = new Material(shader) { color = Color.white };
+            material.SetFloat("_Shimmer", ShimmerStrengthMultiplier());
+            return material;
+        }
+
         private static Material NewOverlayMaterial(Color color)
         {
             Shader shader = Resources.Load<Shader>("Shaders/MapOverlay") ?? Shader.Find("Sprites/Default");
@@ -8722,6 +8733,19 @@ namespace AlwaysFaithful.Prototype
             {
                 case GraphicsPresetTier.Low: return 0f;
                 case GraphicsPresetTier.High: return 1.35f;
+                default: return 1f;
+            }
+        }
+
+        // Low drops the animated ripple/sparkle entirely (water falls back
+        // to a flat-shaded tile, matching Low's plainer land contour);
+        // Medium/High keep it, High a little stronger.
+        private float ShimmerStrengthMultiplier()
+        {
+            switch (settings.GraphicsPreset)
+            {
+                case GraphicsPresetTier.Low: return 0f;
+                case GraphicsPresetTier.High: return 1.2f;
                 default: return 1f;
             }
         }

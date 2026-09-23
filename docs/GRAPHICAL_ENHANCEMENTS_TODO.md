@@ -68,6 +68,17 @@ Added after a close-zoom (low camera distance) capture showed the tactical groun
 - [x] Softened the hex side-wall shading floor so raised-hex edges read as a subtle rim rather than a near-black outline.
 - Not attempted: reshaping the vegetation-clump/building geometry itself (the new lighting alone made them read as real 3D bumps rather than flat smears, which was the main problem) or blending color across adjacent hex edges.
 
+## Group I — Terrain dressing depth (trees, rocks, water)
+
+Follow-up to Group F's "not attempted" item: the flat cylinder cover clumps and color-only Rough/Highland ground still read as plain geometric primitives once lighting alone stopped being the limiting factor.
+
+- [x] Natural cover now builds real tree/bush shapes in `TacticalCoverView` instead of a single flat cylinder: Light cover is a squashed-sphere bush, Medium/Heavy cover is a trunk plus a jittered 2-3 lobe canopy cluster. Built-up cover (buildings) unchanged.
+- [x] Rock/boulder clutter (`BuildRocks`) keyed off `TacticalTerrain` (Rough/Highland) rather than `TacticalCover`, so bare rough or highland ground reads as rocky even with no vegetation rolled on it — irregular jittered scale and rotation per rock, not a uniform cube.
+- [x] Small inland water features (`BuildPond`): a low-probability (~12%), purely cosmetic shallow pond-plus-reeds prop on ordinary land hexes (never Highland, built-up, or real Water) — no new `TacticalTerrain` value, no movement/LOS/save-state effect, set dressing only.
+- [x] Real open-water hexes get a new `MapWater.shader` with a time-scrolled two-layer ripple and sparse bright glints, replacing the static per-hex grain water previously shared with land; gated by a `_Shimmer` strength that follows the Graphics Preset (off at Low, matching Low's plainer land contour).
+- Confirmed by capture at both close and whole-board zoom: trees/bushes/rocks read as distinct 3D shapes rather than color bands, ponds are visible as small teal ovals with reed detail, and the coastline water tile renders its expected color with no shader errors.
+- Not attempted: any interaction between the cosmetic pond dressing and real gameplay (cover, LOS, movement) — it is deliberately decoration-only, same rationale as Group F's props.
+
 ## Group D — Combat preview and feedback
 
 - [ ] On target hover, show weapon choice, legality, range band, expected-outcome band, and an expandable modifier breakdown.
