@@ -106,6 +106,27 @@
     .caution { color: #f0ca72; }
     .bad { color: #ef9985; }
     .small { font-size: .9rem; color: var(--muted); }
+    figure.guide-shot { margin: 1.5rem 0; }
+    figure.guide-shot img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid #52624f;
+      border-radius: .65rem .65rem 0 0;
+      background: #0b110d;
+    }
+    figure.guide-shot figcaption {
+      padding: .85rem 1rem;
+      border: 1px solid #52624f;
+      border-top: 0;
+      border-radius: 0 0 .65rem .65rem;
+      background: #1c251d;
+      color: var(--muted);
+      font-size: .94rem;
+    }
+    figure.guide-shot figcaption strong { color: #f3da91; }
+    .shot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+    .shot-grid .guide-shot { margin: 0; }
     .top-link { display: block; margin-top: 1rem; font-size: .86rem; }
     footer { max-width: var(--max); margin: auto; padding: 2rem 1.4rem 3.5rem; color: var(--muted); }
 
@@ -114,6 +135,7 @@
       .layout { display: block; }
       nav { position: static; max-height: none; margin-bottom: 2rem; }
       table { display: block; overflow-x: auto; }
+      .shot-grid { grid-template-columns: 1fr; }
     }
     @media print {
       :root { color-scheme: light; --ink: #111; --muted: #444; --paper: #fff; --panel: #f6f6f2; --panel-2: #eee; --line: #999; }
@@ -124,6 +146,8 @@
       nav, .top-link { display: none; }
       section { break-inside: avoid; padding: 1rem 0; }
       .callout, .card { background: #f6f6f2 !important; }
+      figure.guide-shot { break-inside: avoid; }
+      figure.guide-shot figcaption { background: #f6f6f2; color: #222; }
       h1, h2, h3, th, code { color: #111; }
       a { color: #111; text-decoration: none; }
     }
@@ -219,6 +243,10 @@
       <section id="operational">
         <h2>4. Commanding on the operational map</h2>
         <p>The operational board covers Taiwan in 64 by 104 hexes. Here, you command formations rather than individual platoons. Select a USMC battalion to see where it can move and what it currently knows.</p>
+        <figure class="guide-shot">
+          <img src="images/always-faithful/operational-map.png" alt="The Always Faithful operational map showing the full island of Taiwan, surrounding seas, Kaohsiung, Taipei, hex terrain, and friendly operational markers in the south." width="1280" height="720" loading="lazy" />
+          <figcaption><strong>Operational view.</strong> The full island is one connected campaign board. The large terrain bands show the coastal plain and central highlands; the small hexes are the roughly 4 km operational spaces. Friendly activity begins around Kaohsiung in this example. Select a battalion before choosing movement, reconnaissance, or a local map.</figcaption>
+        </figure>
         <h3>Movement and reconnaissance</h3>
         <p>Movement positions the battalion for the campaign; reconnaissance spends scarce action points to look outward. Enemy information is intentionally imperfect. A marker can begin as a vague contact, become better identified, and later turn stale if you lose track of it.</p>
         <h3>Entering a tactical battle</h3>
@@ -247,6 +275,10 @@
         <h3>Deployment</h3>
         <p>Place every friendly platoon within 3 hexes of the friendly entry area. The teal ring marks this deployment zone; the gold ring marks the main objective. A green objective ring means USMC forces currently control it.</p>
         <p>During the battle, use the company list to jump directly to a platoon. <kbd>N</kbd> cycles through all friendly platoons, while <kbd>Tab</kbd> skips to one that still has an action available.</p>
+        <figure class="guide-shot">
+          <img src="images/always-faithful/tactical-battlefield-map.png" alt="A tactical battlefield showing several friendly platoon miniatures, highlighted movement range, and an orange planned route across 250-meter hexes." width="1280" height="720" loading="lazy" />
+          <figcaption><strong>Reading a planned move.</strong> The selected platoon is surrounded by bright selection rings. Tinted hexes show reachable ground, while the orange hex chain is the proposed route and its endpoint. The other miniature groups are separate platoons—keep them close enough to support the move without stacking the whole company on one route.</figcaption>
+        </figure>
         <div class="callout tip"><strong>Deployment habit:</strong> put your best observer where it can see useful ground, keep one rifle platoon ready to react, and avoid lining the whole company up on a single exposed route.</div>
       </section>
 
@@ -286,6 +318,16 @@
         <p>The tactical map contains Open, Rough, Highland, and Water terrain. Water is impassable. Cover can be Light, Medium, or Heavy; stronger cover makes a target harder to hit and can interrupt sight through a hex. Cover changes protection and visibility, not the movement price by itself.</p>
         <h3>Lines of sight</h3>
         <p>A line of sight is <span class="tag">Clear</span>, <span class="tag">Obscured</span>, or <span class="tag">Blocked</span>. Use <strong>Inspect LOS</strong> to examine a particular line, and <strong>LOS Overlay</strong> to understand the selected platoon's wider view. Smoke can deliberately obscure sight for two turns.</p>
+        <div class="shot-grid">
+          <figure class="guide-shot">
+            <img src="images/always-faithful/contact-picture.png" alt="A tactical observation view with the selected platoon at the center, nearby friendly platoons, visible enemy figures, and a lightened footprint of observed hexes." width="1280" height="720" loading="lazy" />
+            <figcaption><strong>Company observation picture.</strong> Lighter hexes are inside the useful observation footprint; the surrounding ground is less certain. Friendly platoons contribute to one shared picture, so an observer can find a target for a different platoon.</figcaption>
+          </figure>
+          <figure class="guide-shot">
+            <img src="images/always-faithful/line-of-sight.png" alt="A line-of-sight inspection across tactical hexes, with amber line segments changing to red where intervening terrain blocks the view." width="1280" height="720" loading="lazy" />
+            <figcaption><strong>Inspect LOS before committing.</strong> The amber portion can be traced from the selected platoon; red hexes and line segments show where terrain or cover breaks the view. A blocked line cannot support direct fire even when an old contact marker remains.</figcaption>
+          </figure>
+        </div>
         <h3>Four levels of enemy knowledge</h3>
         <ol>
           <li><strong>Hidden:</strong> you do not know the enemy is there.</li>
@@ -328,6 +370,16 @@
         <h2>9. Fire, suppression, smoke, and assault</h2>
         <h3>Direct fire</h3>
         <p>Select <strong>Attack</strong> to cycle the attack profile, then use <strong>Direct Fire</strong> and select a currently observed enemy. The profile is a commitment choice, not a separate weapon.</p>
+        <div class="shot-grid">
+          <figure class="guide-shot">
+            <img src="images/always-faithful/direct-fire.png" alt="A selected USMC platoon previewing direct fire along an orange line to an observed enemy formation on the tactical map." width="1280" height="720" loading="lazy" />
+            <figcaption><strong>Direct-fire preview.</strong> The orange line joins the selected shooter to the observed target. Before confirming, check that the line is valid and that the chosen attack profile is worth its AP and ammunition cost.</figcaption>
+          </figure>
+          <figure class="guide-shot">
+            <img src="images/always-faithful/suppression.png" alt="A close tactical view of USMC and enemy miniature formations with a bright impact marker beside a suppressed enemy platoon." width="1280" height="720" loading="lazy" />
+            <figcaption><strong>Suppression creates opportunity.</strong> The close view shows separate platoon formations and the impact marker at the enemy position. The goal is often to pin this formation so another friendly platoon can move, flank, or assault safely—not merely to trade shots.</figcaption>
+          </figure>
+        </div>
         <table>
           <thead><tr><th>Profile</th><th>Cost</th><th>Best use</th></tr></thead>
           <tbody>
