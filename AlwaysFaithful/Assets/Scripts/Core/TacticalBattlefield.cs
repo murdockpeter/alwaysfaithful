@@ -19,7 +19,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 15;
+        public const int CurrentSchemaVersion = 16;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;
@@ -71,6 +71,12 @@ namespace AlwaysFaithful.Core
         public List<TacticalPositionEvent> PositionEvents = new List<TacticalPositionEvent>();
         public List<TacticalLogisticsEvent> LogisticsEvents = new List<TacticalLogisticsEvent>();
         public List<TacticalCallForFireEvent> CallForFireEvents = new List<TacticalCallForFireEvent>();
+
+        // Schema 16: standalone quick-battle conditions and optional objectives/tutorial.
+        public TacticalQuickBattleConfiguration QuickBattle = new TacticalQuickBattleConfiguration();
+        public List<TacticalSecondaryObjectiveState> SecondaryObjectives = new List<TacticalSecondaryObjectiveState>();
+        public TacticalTutorialState Tutorial = new TacticalTutorialState();
+        public TacticalAfterActionReport AfterActionReport;
 
         public bool Contains(double longitude, double latitude)
             => longitude >= West && longitude <= East && latitude >= South && latitude <= North;

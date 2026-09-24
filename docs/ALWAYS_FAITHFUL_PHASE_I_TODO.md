@@ -78,4 +78,26 @@ Campaign progression inside Always Faithful, previously listed here, is now impl
 - [x] Persist Package 2 unit state and smoke/suppression/assault event history in battlefield schema 14 and surface it in the event log.
 - [x] Add a dedicated `--fire-maneuver-regression` covering the linked posture, facing, reaction, smoke, suppression, assault, turn-reset, and serialization rules.
 
+## Standalone Package 3 — Positions and Combat Power
+
+- [x] Separate persistent 0–100 platoon strength and supply from recoverable suppression/cohesion.
+- [x] Add two-level fighting positions whose protection is lost on movement.
+- [x] Add Hasty, Standard, Deliberate, and Rapid direct-fire profiles with distinct AP, ammunition, accuracy, suppression, and damage values.
+- [x] Add limited in-battle company fire missions.
+- [x] Make the Reserve support card deploy a real fifth rifle platoon.
+- [x] Add Weapons-Platoon resupply and supply-consuming reorganization.
+- [x] Persist strength, positions, logistics, and fire missions in battlefield schema 15 and cover their rules with `--combat-power-regression`.
+
+## Standalone Package 4 — Standalone Longevity
+
+- [x] Add a Quick Battle configurator for mission, attachment, difficulty, weather, visibility, turn limit, and tutorial mode.
+- [x] Make weather and light affect detection and fire effectiveness; scale enemy combat power with difficulty.
+- [x] Add named-platoon career carryover with battles, victories, experience, strength recovery, and veteran AP progression.
+- [x] Add mission-aware secondary objectives.
+- [x] Expand the AAR with remaining combat power, ammunition expenditure, fire missions, highlights, and secondary-objective completion.
+- [x] Add JSON-driven quick-battle definitions through `--quick-battle=<path>` as the scenario/editor data foundation.
+- [x] Add an optional six-step interactive tutorial overlay tied to real player actions.
+- [x] Persist Package 4 state in battlefield schema 16 and add `--longevity-regression`.
+- [ ] A graphical scenario editor remains a later authoring-tool project; the runtime schema and loader are now in place.
+
 These are not rejected features. They are deferred so Phase I can prove the core decision loop, presentation language, deterministic architecture, and Sea of Uncertainty handoff first.
