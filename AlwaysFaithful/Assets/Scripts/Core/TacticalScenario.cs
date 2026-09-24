@@ -8,16 +8,15 @@ namespace AlwaysFaithful.Core
     // generation, so a given battlefield always rerolls the same way.
     // Sequences 1-4 are cover/built-up generation and 5 is ObjectiveRoll's
     // tie-break. Within this file: 6=turn limit, 7=roster count, 9-10=roster
-    // slots 1-2 (ChooseEnemyRoster's loop starts at slot=1, so 8+1..8+2),
-    // 11=mission type; 12+ still reserved.
+    // 11=mission type; 20-24=company roster slots 1-5.
     public static class TacticalScenario
     {
-        public const int MinTurnLimit = 5;
-        public const int MaxTurnLimit = 8;
-        public const int MinRosterSize = 1;
-        public const int MaxRosterSize = 3;
-        public const string RifleRole = "pla-rifle-squad";
-        public const string SupportRole = "pla-support-team";
+        public const int MinTurnLimit = 8;
+        public const int MaxTurnLimit = 12;
+        public const int MinRosterSize = 4;
+        public const int MaxRosterSize = 6;
+        public const string RifleRole = "planmc-rifle-platoon";
+        public const string SupportRole = "planmc-weapons-platoon";
 
         public static int ChooseTurnLimit(string battlefieldId)
             => MinTurnLimit + (int)((uint)ScenarioRoll(battlefieldId, 6) % (MaxTurnLimit - MinTurnLimit + 1));
@@ -30,7 +29,7 @@ namespace AlwaysFaithful.Core
             int count = MinRosterSize + (int)((uint)ScenarioRoll(battlefieldId, 7) % (MaxRosterSize - MinRosterSize + 1));
             var roster = new List<string> { RifleRole };
             for (int slot = 1; slot < count; slot++)
-                roster.Add(ScenarioRoll(battlefieldId, 8 + slot) % 2 == 0 ? RifleRole : SupportRole);
+                roster.Add(ScenarioRoll(battlefieldId, 19 + slot) % 2 == 0 ? RifleRole : SupportRole);
             return roster;
         }
 

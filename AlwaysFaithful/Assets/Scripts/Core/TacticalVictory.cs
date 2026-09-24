@@ -177,6 +177,59 @@ namespace AlwaysFaithful.Core
             return TacticalBattleOutcome.InProgress;
         }
 
+        public static TacticalBattleOutcome Evaluate(
+            TacticalObjectiveState objective,
+            IReadOnlyList<TacticalUnitState> friendlies,
+            IReadOnlyList<TacticalUnitState> enemies,
+            IReadOnlyDictionary<HexCoord, TacticalMovementCell> board,
+            int currentTurn,
+            out string summary)
+        {
+            bool allFriendliesReduced = AllReduced(friendlies);
+            bool allEnemiesReduced = AllReduced(enemies);
+            if (allFriendliesReduced && allEnemiesReduced)
+            {
+                summary = "Mutual destruction: both forces combat ineffective.";
+                return TacticalBattleOutcome.Draw;
+            }
+            if (allFriendliesReduced)
+            {
+                summary = "USMC company combat ineffective.";
+                return TacticalBattleOutcome.UsmcDefeat;
+            }
+            if (allEnemiesReduced)
+            {
+                summary = "PLANMC company combat ineffective.";
+                return TacticalBattleOutcome.UsmcVictory;
+            }
+
+            // Reuse the established mission/deadline rules with a surviving
+            // representative, but temporarily mirror objective occupancy so
+            // any friendly platoon can seize/hold the company objective.
+            TacticalUnitState representative = FirstEffective(friendlies);
+            if (representative == null)
+            {
+                summary = "USMC company combat ineffective.";
+                return TacticalBattleOutcome.UsmcDefeat;
+            }
+            string originalOccupant = null;
+            bool substituted = false;
+            if (board.TryGetValue(objective.ObjectiveHex, out TacticalMovementCell objectiveCell))
+            {
+                originalOccupant = objectiveCell.OccupantId;
+                TacticalUnitState controller = FindById(friendlies, originalOccupant);
+                if (controller != null && controller.Id != representative.Id)
+                {
+                    objectiveCell.OccupantId = representative.Id;
+                    substituted = true;
+                }
+            }
+            TacticalBattleOutcome outcome = Evaluate(objective, representative, enemies, board, currentTurn, out summary);
+            if (substituted && board.TryGetValue(objective.ObjectiveHex, out TacticalMovementCell restoreCell))
+                restoreCell.OccupantId = originalOccupant;
+            return outcome;
+        }
+
         // Tracks cumulative recon-in-force progress — called once per turn
         // handback alongside Evaluate, since fog can regress an enemy back to
         // Hidden after a stale track expires; achievement should not un-happen.
@@ -196,6 +249,22 @@ namespace AlwaysFaithful.Core
             foreach (TacticalUnitState unit in units)
                 if (unit.CombatStatus != TacticalCombatStatus.Reduced) return false;
             return true;
+        }
+
+        private static TacticalUnitState FirstEffective(IReadOnlyList<TacticalUnitState> units)
+        {
+            if (units == null) return null;
+            foreach (TacticalUnitState unit in units)
+                if (unit != null && unit.CombatStatus != TacticalCombatStatus.Reduced) return unit;
+            return null;
+        }
+
+        private static TacticalUnitState FindById(IReadOnlyList<TacticalUnitState> units, string id)
+        {
+            if (units == null || string.IsNullOrEmpty(id)) return null;
+            foreach (TacticalUnitState unit in units)
+                if (unit != null && unit.Id == id) return unit;
+            return null;
         }
 
         private static int ReducedCount(IReadOnlyList<TacticalUnitState> units)

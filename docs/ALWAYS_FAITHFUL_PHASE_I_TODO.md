@@ -55,4 +55,16 @@ Required slice:
 
 Campaign progression inside Always Faithful, previously listed here, is now implemented in a lightweight form for standalone play (persistent Battalion status carrying attrition across generated scenarios) — removed from this deferred list accordingly.
 
+## Standalone Package 1 — Company Command
+
+- [x] Normalize fresh standalone tactical counters to platoon scale: three USMC rifle platoons plus one attachment versus four to six PLANMC rifle/weapons platoons.
+- [x] Add pre-battle force organization with Balanced (Weapons), Recon, and Assault (Combat Engineer) company presets.
+- [x] Add a bounded three-hex deployment phase with direct platoon selection and click-to-place repositioning.
+- [x] Add direct platoon selection, **N** next-unit, **Tab** next-actionable-unit, and a live clickable company list.
+- [x] Generalize movement, fire, rally, recon, rendering, objective control, defeat checks, event naming, and turn refresh around the active platoon and the complete friendly force.
+- [x] Combine friendly observation into a company sensor picture and make the PLA select the best detected friendly target while advancing on the actual scenario objective.
+- [x] Persist the full friendly roster, weapons, active selection, and company preset in tactical-save schema 3 while retaining schema-2 single-platoon migration.
+- [x] Extend standalone battles to 8–12 turns for the larger force and retain the legacy `BattleRequest` roster/contract unchanged.
+- [x] Add a dedicated `--company-regression` and pass the existing tactical regression suite against the company model.
+
 These are not rejected features. They are deferred so Phase I can prove the core decision loop, presentation language, deterministic architecture, and Sea of Uncertainty handoff first.

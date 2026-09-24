@@ -23,7 +23,8 @@ Second half of the Settings panel; Pass A (persistence, UI scale, remappable Can
 - [x] Surface suppression, degradation, fired/moved, ammunition-concern, and reaction-eligibility state without requiring a panel to be opened.
   - Suppression/degradation (combat status) and fired/moved (Readiness) were already always-visible on the command card. New this pass: the AMMO badge now colors orange/red when low/empty, and a "REACTION FIRE • READY/UNAVAILABLE" badge reflects the same eligibility gate `TacticalReactionFire` itself checks.
   - "Dug-in" and "passenger" states don't exist as mechanics yet (no entrenchment or embark/transport system) — nothing to surface until those land.
-- [ ] Add next-unit, next-actionable-unit, and objective-focus navigation, plus toggleable LOS and threat overlays and map labels/pins.
+- [ ] Add objective-focus navigation, toggleable LOS and threat overlays, and map labels/pins.
+  - [x] Package 1 adds next-unit (**N**), next-actionable-unit (**Tab**), direct counter selection, and a clickable tactical company list for the new four-platoon friendly force.
   - [x] Objective-focus: a "FOCUS OBJECTIVE" button snaps the camera to the objective hex.
   - [x] Toggleable LOS overlay: a tactical-menu button tints every in-range hex Clear/Obscured/Blocked from the selected unit's current position, kept mutually exclusive with the pre-existing single-target INSPECT LOS tool since both drive the same per-cell tint.
   - Next-unit/next-actionable-unit navigation is not meaningful yet at Phase I's one-controllable-unit-per-side scale; a threat overlay and map labels/pins remain undone.
