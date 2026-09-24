@@ -19,7 +19,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 13;
+        public const int CurrentSchemaVersion = 14;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;
@@ -58,6 +58,12 @@ namespace AlwaysFaithful.Core
         // — the enemy's own active sensor-tasking markers on the platoon.
         public List<TacticalSupportCardEvent> SupportCardEvents = new List<TacticalSupportCardEvent>();
         public List<TacticalReconMarker> ActivePlaReconMarkers = new List<TacticalReconMarker>();
+
+        // Schema 14: platoon fire-and-maneuver effects and their replayable log.
+        public List<TacticalSmokeMarker> ActiveSmokeMarkers = new List<TacticalSmokeMarker>();
+        public List<TacticalSmokeEvent> SmokeEvents = new List<TacticalSmokeEvent>();
+        public List<TacticalAreaSuppressionEvent> AreaSuppressionEvents = new List<TacticalAreaSuppressionEvent>();
+        public List<TacticalAssaultEvent> AssaultEvents = new List<TacticalAssaultEvent>();
 
         public bool Contains(double longitude, double latitude)
             => longitude >= West && longitude <= East && latitude >= South && latitude <= North;

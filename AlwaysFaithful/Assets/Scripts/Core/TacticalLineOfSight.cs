@@ -78,6 +78,13 @@ namespace AlwaysFaithful.Core
 
                 if (index > 0 && index < line.Count - 1)
                 {
+                    if (cell.SmokeExpiresAfterTurn > 0)
+                    {
+                        obscured = true;
+                        result.State = TacticalLosState.Obscured;
+                        detail = "Smoke obscures sightline";
+                        if (!result.Modifiers.Contains("Intervening smoke: obscured")) result.Modifiers.Add("Intervening smoke: obscured");
+                    }
                     // Highland already contributes its measured terrain elevation.
                     // Rough adds an abstract vegetation/surface-obstruction height,
                     // and cover (vegetation clumps or built-up structures) adds its
@@ -115,6 +122,11 @@ namespace AlwaysFaithful.Core
                 });
             }
             if (result.MinimumClearanceMetres == float.MaxValue) result.MinimumClearanceMetres = 0f;
+            if (result.State != TacticalLosState.Blocked && (observerCell.SmokeExpiresAfterTurn > 0 || targetCell.SmokeExpiresAfterTurn > 0))
+            {
+                result.State = TacticalLosState.Obscured;
+                result.Modifiers.Add(observerCell.SmokeExpiresAfterTurn > 0 ? "Observer smoke: obscured" : "Target smoke: obscured");
+            }
             if (targetCell.Terrain == TacticalTerrain.Rough || targetCell.Terrain == TacticalTerrain.Highland)
                 result.Modifiers.Add("Target terrain: " + targetCell.Terrain);
             if (targetCell.Cover != TacticalCover.None)

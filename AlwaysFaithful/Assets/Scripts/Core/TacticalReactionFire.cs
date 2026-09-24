@@ -53,7 +53,7 @@ namespace AlwaysFaithful.Core
             int bestRange = int.MaxValue;
             foreach (TacticalReactionCandidate candidate in candidates)
             {
-                if (candidate.Unit == null || !candidate.Unit.CanFire) continue;
+                if (!TacticalFireAndManeuver.CanReact(candidate.Unit)) continue;
                 if (candidate.Weapon == null || candidate.Weapon.RemainingAmmunition <= 0) continue;
                 TacticalLosResult los = TacticalLineOfSight.Inspect(board, candidate.Unit.Position, triggerPosition, ReactionRangeHexes);
                 if (!los.IsValid || los.State == TacticalLosState.Blocked) continue;
@@ -94,6 +94,10 @@ namespace AlwaysFaithful.Core
             preview.Modifiers.Add(new TacticalFireModifier { Label = "Base small-arms fire", Value = TacticalDirectFire.BaseHitChance });
             preview.Modifiers.Add(new TacticalFireModifier { Label = "Reaction snap shot", Value = SnapShotPenalty });
             chance += SnapShotPenalty;
+            TacticalFacingAspect aspect = TacticalFireAndManeuver.FacingAspect(reactor, moverPosition);
+            int facingModifier = TacticalFireAndManeuver.ReactionModifierForAspect(aspect);
+            preview.Modifiers.Add(new TacticalFireModifier { Label = aspect + " reaction sector", Value = facingModifier });
+            chance += facingModifier;
             int rangeModifier = -Math.Max(0, los.RangeHexes - 2) * 6;
             if (rangeModifier != 0)
             {

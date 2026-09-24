@@ -11,8 +11,10 @@ namespace AlwaysFaithful.Core
         public float ElevationMetres;
         public TacticalCover Cover;
         public string OccupantId;
+        public int SmokeExpiresAfterTurn;
 
         public bool IsPassable => Terrain != TacticalTerrain.Water;
+        public bool HasActiveSmoke(int turn) => SmokeExpiresAfterTurn >= turn;
     }
 
     [Serializable]

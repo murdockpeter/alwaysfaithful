@@ -29,6 +29,14 @@ namespace AlwaysFaithful.Core
         public bool IsSelected;
         public int SuppressionPoints;
         public TacticalCombatStatus CombatStatus;
+        public TacticalMovementPosture MovementPosture = TacticalMovementPosture.Tactical;
+        public TacticalMovementPosture LastMovementPosture = TacticalMovementPosture.Tactical;
+        public TacticalReactionPolicy ReactionPolicy = TacticalReactionPolicy.WeaponsFree;
+        public int FacingSector;
+        public int ReactionPoints = TacticalFireAndManeuver.ReactionPointMaximum;
+        public bool MovedThisTurn;
+        public bool FiredThisTurn;
+        public bool WasFiredUponThisTurn;
 
         public TacticalUnitState(string id, string displayName, HexCoord position, int maximumActionPoints)
         {
@@ -95,6 +103,10 @@ namespace AlwaysFaithful.Core
             RemainingActionPoints = MaximumActionPoints;
             Readiness = UnitReadiness.Available;
             IsSelected = false;
+            ReactionPoints = TacticalFireAndManeuver.ReactionPointMaximum;
+            MovedThisTurn = false;
+            FiredThisTurn = false;
+            WasFiredUponThisTurn = false;
         }
     }
 

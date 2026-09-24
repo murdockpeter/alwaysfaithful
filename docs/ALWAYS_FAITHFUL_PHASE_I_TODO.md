@@ -67,4 +67,15 @@ Campaign progression inside Always Faithful, previously listed here, is now impl
 - [x] Extend standalone battles to 8–12 turns for the larger force and retain the legacy `BattleRequest` roster/contract unchanged.
 - [x] Add a dedicated `--company-regression` and pass the existing tactical regression suite against the company model.
 
+## Standalone Package 2 — Fire and Maneuver
+
+- [x] Add Quick, Tactical, and Bounding platoon movement postures with scaled route reach, AP cost, fire penalties, and reaction-reserve consequences.
+- [x] Add a two-point reaction economy with Weapons Hold, Return Fire, and Weapons Free policies for both sides.
+- [x] Add six broad facing sectors and forward/flank/rear reaction modifiers appropriate to 250 m platoon hexes.
+- [x] Add area suppression against terrain hexes with explicit AP/ammunition cost and deterministic effects.
+- [x] Add organic smoke with 500 m placement range, two-turn persistence, a map marker, and LOS obscuration.
+- [x] Add adjacent close assault resolved from attacker/defender suppression and target cover, including advance/displacement on success.
+- [x] Persist Package 2 unit state and smoke/suppression/assault event history in battlefield schema 14 and surface it in the event log.
+- [x] Add a dedicated `--fire-maneuver-regression` covering the linked posture, facing, reaction, smoke, suppression, assault, turn-reset, and serialization rules.
+
 These are not rejected features. They are deferred so Phase I can prove the core decision loop, presentation language, deterministic architecture, and Sea of Uncertainty handoff first.
