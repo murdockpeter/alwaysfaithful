@@ -449,6 +449,7 @@ namespace AlwaysFaithful.Prototype
                 EnterTacticalMap(FindHighReliefOperationalCell(), false);
                 fastEnemyAnimation = true;
                 tacticalObjective.TurnLimit = 1;
+                tacticalObjective.ObjectiveOvertimeGranted = true;
                 EndTacticalTurn();
                 StartCoroutine(CaptureResultScreenshotWhenRequested());
             }
@@ -3854,6 +3855,7 @@ namespace AlwaysFaithful.Prototype
             if (tacticalObjective == null || tacticalObjective.Outcome != TacticalBattleOutcome.InProgress) return;
             TacticalVictory.TrackObservation(tacticalObjective, tacticalContacts);
             int holdTurnsBefore = tacticalObjective.ObjectiveHoldTurns;
+            bool overtimeBefore = tacticalObjective.ObjectiveOvertimeGranted;
             TacticalBattleOutcome outcome = TacticalVictory.Evaluate(tacticalObjective, tacticalUnitState, tacticalEnemyStates,
                 localMovementBoard, turnState.TurnNumber, out string summary);
             if (tacticalObjective.ObjectiveHoldTurns != holdTurnsBefore)
@@ -3876,6 +3878,20 @@ namespace AlwaysFaithful.Prototype
                     ? $"OBJECTIVE HOLD {tacticalObjective.ObjectiveHoldTurns}/{required}"
                     : "OBJECTIVE HOLD BROKEN";
                 Debug.Log($"ALWAYS_FAITHFUL_OBJECTIVE_HOLD turn={turnState.TurnNumber} progress={tacticalObjective.ObjectiveHoldTurns}/{required} controlled={usmcControls}");
+            }
+            if (!overtimeBefore && tacticalObjective.ObjectiveOvertimeGranted)
+            {
+                tacticalBattlefield.ObjectiveEvents.Add(new TacticalObjectiveEvent
+                {
+                    Sequence = ++tacticalEventSequence,
+                    BattlefieldId = tacticalBattlefield.BattlefieldId,
+                    Turn = turnState.TurnNumber,
+                    Hex = tacticalObjective.ObjectiveHex,
+                    IsOvertime = true,
+                    ExtendedTurnLimit = tacticalObjective.TurnLimit
+                });
+                tacticalOrderFeedback = $"OBJECTIVE CONTESTED • OVERTIME TO TURN {tacticalObjective.TurnLimit}";
+                Debug.Log($"ALWAYS_FAITHFUL_OBJECTIVE_OVERTIME turn={turnState.TurnNumber} extendedLimit={tacticalObjective.TurnLimit}");
             }
             if (outcome == TacticalBattleOutcome.InProgress) return;
             tacticalObjective.Outcome = outcome;
@@ -4055,9 +4071,11 @@ namespace AlwaysFaithful.Prototype
                 entries.Add((recon.Sequence, $"RECON • T{recon.Turn} • {UnitDisplayName(recon.UnitId)} tasked {recon.Hex} ({recon.DurationTurns} turns)"));
             foreach (TacticalObjectiveEvent objectiveEvent in tacticalBattlefield.ObjectiveEvents)
             {
-                string line = objectiveEvent.IsHoldProgress
-                    ? $"OBJECTIVE • T{objectiveEvent.Turn} • {objectiveEvent.Hex} hold {objectiveEvent.HoldTurns}/{objectiveEvent.RequiredHoldTurns}"
-                    : $"OBJECTIVE • T{objectiveEvent.Turn} • {objectiveEvent.Hex} {(objectiveEvent.ControlledByUsmc ? "secured" : "lost")} by USMC";
+                string line = objectiveEvent.IsOvertime
+                    ? $"OBJECTIVE • T{objectiveEvent.Turn} • {objectiveEvent.Hex} contested • overtime to turn {objectiveEvent.ExtendedTurnLimit}"
+                    : objectiveEvent.IsHoldProgress
+                        ? $"OBJECTIVE • T{objectiveEvent.Turn} • {objectiveEvent.Hex} hold {objectiveEvent.HoldTurns}/{objectiveEvent.RequiredHoldTurns}"
+                        : $"OBJECTIVE • T{objectiveEvent.Turn} • {objectiveEvent.Hex} {(objectiveEvent.ControlledByUsmc ? "secured" : "lost")} by USMC";
                 entries.Add((objectiveEvent.Sequence, line));
             }
             foreach (TacticalSupportCardEvent supportCard in tacticalBattlefield.SupportCardEvents)
@@ -5346,6 +5364,7 @@ namespace AlwaysFaithful.Prototype
             EnterTacticalMap(FindHighReliefOperationalCell(), false);
             fastEnemyAnimation = true;
             tacticalObjective.TurnLimit = 1;
+            tacticalObjective.ObjectiveOvertimeGranted = true;
             EndTacticalTurn();
             float deadline = Time.realtimeSinceStartup + 5f;
             do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
@@ -5406,9 +5425,42 @@ namespace AlwaysFaithful.Prototype
             }
 
             outcome = TacticalVictory.Evaluate(objective, usmc, enemies, board, objective.BattleStartTurn + objective.TurnLimit, out _);
+            if (outcome != TacticalBattleOutcome.InProgress || !objective.ObjectiveOvertimeGranted ||
+                objective.ObjectiveOvertimeTurnsGranted != TacticalVictory.DefaultObjectiveOvertimeTurns || objective.TurnLimit != 7)
+            {
+                failure = $"expected three-turn overtime at the original deadline, got {outcome} overtime={objective.ObjectiveOvertimeGranted} granted={objective.ObjectiveOvertimeTurnsGranted} limit={objective.TurnLimit}";
+                return false;
+            }
+
+            outcome = TacticalVictory.Evaluate(objective, usmc, enemies, board, objective.BattleStartTurn + objective.TurnLimit, out _);
             if (outcome != TacticalBattleOutcome.Stalemate)
             {
-                failure = $"expected Stalemate at the turn limit without control, got {outcome}";
+                failure = $"expected Stalemate at the extended deadline without control, got {outcome}";
+                return false;
+            }
+
+            var overtimeHoldObjective = new TacticalObjectiveState
+            {
+                ObjectiveHex = objective.ObjectiveHex,
+                Posture = TacticalPosture.Attack,
+                MissionType = TacticalMissionType.Attack,
+                TurnLimit = 4,
+                BattleStartTurn = 1
+            };
+            board[overtimeHoldObjective.ObjectiveHex].OccupantId = usmc.Id;
+            outcome = TacticalVictory.Evaluate(overtimeHoldObjective, usmc, enemies, board, 5, out _);
+            if (outcome != TacticalBattleOutcome.InProgress || !overtimeHoldObjective.ObjectiveOvertimeGranted ||
+                overtimeHoldObjective.ObjectiveHoldTurns != 1 || overtimeHoldObjective.TurnLimit != 7)
+            {
+                failure = $"expected a deadline hold to enter overtime at 1/3, got {outcome} hold={overtimeHoldObjective.ObjectiveHoldTurns}/3 limit={overtimeHoldObjective.TurnLimit}";
+                return false;
+            }
+            TacticalVictory.Evaluate(overtimeHoldObjective, usmc, enemies, board, 6, out _);
+            outcome = TacticalVictory.Evaluate(overtimeHoldObjective, usmc, enemies, board, 7, out string overtimeHoldSummary);
+            if (outcome != TacticalBattleOutcome.UsmcVictory || overtimeHoldObjective.ObjectiveHoldTurns != 3 ||
+                string.IsNullOrEmpty(overtimeHoldSummary) || !overtimeHoldSummary.Contains("3 consecutive turns"))
+            {
+                failure = $"expected a deadline hold to mature during overtime, got {outcome} hold={overtimeHoldObjective.ObjectiveHoldTurns}/3 summary={overtimeHoldSummary}";
                 return false;
             }
 
@@ -5424,20 +5476,26 @@ namespace AlwaysFaithful.Prototype
             outcome = TacticalVictory.Evaluate(holdObjective, usmc, enemies, board, 2, out _);
             if (outcome != TacticalBattleOutcome.InProgress || holdObjective.ObjectiveHoldTurns != 1)
             {
-                failure = $"expected first objective hold turn to remain InProgress at 1/2, got {outcome} {holdObjective.ObjectiveHoldTurns}/2";
+                failure = $"expected first objective hold turn to remain InProgress at 1/3, got {outcome} {holdObjective.ObjectiveHoldTurns}/3";
                 return false;
             }
             outcome = TacticalVictory.Evaluate(holdObjective, usmc, enemies, board, 2, out _);
             if (outcome != TacticalBattleOutcome.InProgress || holdObjective.ObjectiveHoldTurns != 1)
             {
-                failure = $"same-turn evaluation advanced objective hold twice: {outcome} {holdObjective.ObjectiveHoldTurns}/2";
+                failure = $"same-turn evaluation advanced objective hold twice: {outcome} {holdObjective.ObjectiveHoldTurns}/3";
                 return false;
             }
             outcome = TacticalVictory.Evaluate(holdObjective, usmc, enemies, board, 3, out string holdSummary);
-            if (outcome != TacticalBattleOutcome.UsmcVictory || holdObjective.ObjectiveHoldTurns != 2 ||
-                string.IsNullOrEmpty(holdSummary) || !holdSummary.Contains("2 consecutive turns"))
+            if (outcome != TacticalBattleOutcome.InProgress || holdObjective.ObjectiveHoldTurns != 2)
             {
-                failure = $"expected victory after consecutive 2/2 hold, got {outcome} {holdObjective.ObjectiveHoldTurns}/2 summary={holdSummary}";
+                failure = $"expected second objective hold turn to remain InProgress at 2/3, got {outcome} {holdObjective.ObjectiveHoldTurns}/3";
+                return false;
+            }
+            outcome = TacticalVictory.Evaluate(holdObjective, usmc, enemies, board, 4, out holdSummary);
+            if (outcome != TacticalBattleOutcome.UsmcVictory || holdObjective.ObjectiveHoldTurns != 3 ||
+                string.IsNullOrEmpty(holdSummary) || !holdSummary.Contains("3 consecutive turns"))
+            {
+                failure = $"expected victory after consecutive 3/3 hold, got {outcome} {holdObjective.ObjectiveHoldTurns}/3 summary={holdSummary}";
                 return false;
             }
 
@@ -5453,7 +5511,7 @@ namespace AlwaysFaithful.Prototype
             outcome = TacticalVictory.Evaluate(brokenHoldObjective, usmc, enemies, board, 3, out _);
             if (outcome != TacticalBattleOutcome.InProgress || brokenHoldObjective.ObjectiveHoldTurns != 0)
             {
-                failure = $"expected lost objective to reset hold progress, got {outcome} {brokenHoldObjective.ObjectiveHoldTurns}/2";
+                failure = $"expected lost objective to reset hold progress, got {outcome} {brokenHoldObjective.ObjectiveHoldTurns}/3";
                 return false;
             }
 
@@ -5763,6 +5821,7 @@ namespace AlwaysFaithful.Prototype
             string liveBattlefieldId = tacticalBattlefield.BattlefieldId;
             DismissCampaignBriefing();
             fastEnemyAnimation = true;
+            tacticalObjective.ObjectiveOvertimeGranted = true;
             EndTacticalTurn();
             float deadline = Time.realtimeSinceStartup + 5f;
             do { yield return null; } while ((tacticalEnemyTurnActive || !File.Exists(outputPath)) && Time.realtimeSinceStartup < deadline);
@@ -6045,6 +6104,7 @@ namespace AlwaysFaithful.Prototype
             resultScreenActive = false;
             resultScreenOpacity = 0f;
             fastEnemyAnimation = true;
+            tacticalObjective.ObjectiveOvertimeGranted = true;
             EndTacticalTurn();
             float resultDeadline = Time.realtimeSinceStartup + 5f;
             do { yield return null; } while ((tacticalEnemyTurnActive || !File.Exists(requestOutputPath)) && Time.realtimeSinceStartup < resultDeadline);
@@ -6167,14 +6227,24 @@ namespace AlwaysFaithful.Prototype
                 ControlledByUsmc = true,
                 IsHoldProgress = true,
                 HoldTurns = 1,
-                RequiredHoldTurns = 2
+                RequiredHoldTurns = 3
+            });
+            battlefield.ObjectiveEvents.Add(new TacticalObjectiveEvent
+            {
+                Sequence = 2,
+                BattlefieldId = "TEST",
+                Turn = 6,
+                Hex = new HexCoord(3, 4),
+                IsOvertime = true,
+                ExtendedTurnLimit = 9
             });
             string serialized = JsonUtility.ToJson(battlefield);
             TacticalBattlefieldState restored = JsonUtility.FromJson<TacticalBattlefieldState>(serialized);
-            if (restored?.ObjectiveEvents.Count != 1 || restored.ObjectiveEvents[0].Turn != 2 ||
+            if (restored?.ObjectiveEvents.Count != 2 || restored.ObjectiveEvents[0].Turn != 2 ||
                 !restored.ObjectiveEvents[0].Hex.Equals(new HexCoord(3, 4)) || !restored.ObjectiveEvents[0].ControlledByUsmc ||
                 !restored.ObjectiveEvents[0].IsHoldProgress || restored.ObjectiveEvents[0].HoldTurns != 1 ||
-                restored.ObjectiveEvents[0].RequiredHoldTurns != 2)
+                restored.ObjectiveEvents[0].RequiredHoldTurns != 3 || !restored.ObjectiveEvents[1].IsOvertime ||
+                restored.ObjectiveEvents[1].ExtendedTurnLimit != 9)
             {
                 failure = "TacticalObjectiveEvent did not round-trip through JsonUtility";
                 return false;
@@ -6262,6 +6332,7 @@ namespace AlwaysFaithful.Prototype
             // 5. RESULT line appears once the battle concludes.
             fastEnemyAnimation = true;
             tacticalObjective.TurnLimit = 1;
+            tacticalObjective.ObjectiveOvertimeGranted = true;
             EndTacticalTurn();
             float deadline = Time.realtimeSinceStartup + 5f;
             do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
@@ -6482,6 +6553,7 @@ namespace AlwaysFaithful.Prototype
             fastEnemyAnimation = true;
             EnterTacticalMap(parent, false);
             tacticalObjective.TurnLimit = 1;
+            tacticalObjective.ObjectiveOvertimeGranted = true;
             EndTacticalTurn();
             float deadline = Time.realtimeSinceStartup + 5f;
             do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
@@ -6505,6 +6577,7 @@ namespace AlwaysFaithful.Prototype
             ReturnToIsland(false);
             EnterTacticalMap(parent, false);
             tacticalObjective.TurnLimit = 1;
+            tacticalObjective.ObjectiveOvertimeGranted = true;
             EndTacticalTurn();
             deadline = Time.realtimeSinceStartup + 5f;
             do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
@@ -6538,6 +6611,7 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
             DismissCampaignBriefing();
+            tacticalObjective.ObjectiveOvertimeGranted = true;
             EndTacticalTurn();
             deadline = Time.realtimeSinceStartup + 5f;
             do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
@@ -6565,6 +6639,7 @@ namespace AlwaysFaithful.Prototype
             // EnterTacticalMap call would correctly treat it as resuming (not a
             // fresh scenario) and keep the stale AP value rather than recompute it.
             tacticalObjective.TurnLimit = 1;
+            tacticalObjective.ObjectiveOvertimeGranted = true;
             EndTacticalTurn();
             deadline = Time.realtimeSinceStartup + 5f;
             do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
@@ -6763,6 +6838,7 @@ namespace AlwaysFaithful.Prototype
             fastEnemyAnimation = true;
             EnterTacticalMap(parent, false);
             tacticalObjective.TurnLimit = 1;
+            tacticalObjective.ObjectiveOvertimeGranted = true;
             EndTacticalTurn();
             float deadline = Time.realtimeSinceStartup + 5f;
             do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
@@ -6795,6 +6871,7 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
             DismissCampaignBriefing();
+            tacticalObjective.ObjectiveOvertimeGranted = true;
             EndTacticalTurn();
             deadline = Time.realtimeSinceStartup + 5f;
             do { yield return null; } while ((tacticalEnemyTurnActive || !resultScreenActive || resultScreenOpacity < .98f) && Time.realtimeSinceStartup < deadline);
@@ -8559,7 +8636,8 @@ namespace AlwaysFaithful.Prototype
             {
                 int progress = usmcControls ? tacticalObjective.ObjectiveHoldTurns : 0;
                 int required = TacticalVictory.HoldTurnsRequired(tacticalObjective);
-                return $"{label}  •  OBJ {tacticalObjective.ObjectiveHex}  •  HOLD {progress}/{required}  •  {control}";
+                string overtime = tacticalObjective.ObjectiveOvertimeGranted ? "  •  OVERTIME" : string.Empty;
+                return $"{label}  •  OBJ {tacticalObjective.ObjectiveHex}  •  HOLD {progress}/{required}  •  {control}{overtime}";
             }
             return $"{label}  •  {verb} OBJECTIVE {tacticalObjective.ObjectiveHex}  •  {control}";
         }

@@ -46,6 +46,8 @@ namespace AlwaysFaithful.Core
         public int RequiredObjectiveHoldTurns = TacticalVictory.DefaultObjectiveHoldTurns;
         public int ObjectiveHoldTurns;
         public int LastObjectiveHoldEvaluationTurn;
+        public bool ObjectiveOvertimeGranted;
+        public int ObjectiveOvertimeTurnsGranted;
         public bool RaidObjectiveAchieved;
         public List<string> ObservedEnemyIds = new List<string>();
     }
@@ -61,12 +63,15 @@ namespace AlwaysFaithful.Core
         public bool IsHoldProgress;
         public int HoldTurns;
         public int RequiredHoldTurns;
+        public bool IsOvertime;
+        public int ExtendedTurnLimit;
     }
 
     public static class TacticalVictory
     {
         public const int DefaultTurnLimit = 6;
-        public const int DefaultObjectiveHoldTurns = 2;
+        public const int DefaultObjectiveHoldTurns = 3;
+        public const int DefaultObjectiveOvertimeTurns = 3;
         public const int ObjectiveExclusionRadiusHexes = 4;
 
         public static int HoldTurnsRequired(TacticalObjectiveState objective)
@@ -152,6 +157,15 @@ namespace AlwaysFaithful.Core
                     // withdrawal success never depends on holding any hex.
                     summary = "Platoon withdrew intact.";
                     return TacticalBattleOutcome.UsmcVictory;
+                }
+                if ((objective.MissionType == TacticalMissionType.Attack || objective.MissionType == TacticalMissionType.Defend) &&
+                    !objective.ObjectiveOvertimeGranted)
+                {
+                    objective.ObjectiveOvertimeGranted = true;
+                    objective.ObjectiveOvertimeTurnsGranted = DefaultObjectiveOvertimeTurns;
+                    objective.TurnLimit += DefaultObjectiveOvertimeTurns;
+                    summary = null;
+                    return TacticalBattleOutcome.InProgress;
                 }
                 summary = objective.MissionType == TacticalMissionType.Attack || objective.MissionType == TacticalMissionType.Defend
                     ? $"Turn limit reached without holding {objective.ObjectiveHex} for {objective.RequiredObjectiveHoldTurns} consecutive turns."
