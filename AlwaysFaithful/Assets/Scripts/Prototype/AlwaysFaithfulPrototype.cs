@@ -3853,8 +3853,30 @@ namespace AlwaysFaithful.Prototype
         {
             if (tacticalObjective == null || tacticalObjective.Outcome != TacticalBattleOutcome.InProgress) return;
             TacticalVictory.TrackObservation(tacticalObjective, tacticalContacts);
+            int holdTurnsBefore = tacticalObjective.ObjectiveHoldTurns;
             TacticalBattleOutcome outcome = TacticalVictory.Evaluate(tacticalObjective, tacticalUnitState, tacticalEnemyStates,
                 localMovementBoard, turnState.TurnNumber, out string summary);
+            if (tacticalObjective.ObjectiveHoldTurns != holdTurnsBefore)
+            {
+                int required = TacticalVictory.HoldTurnsRequired(tacticalObjective);
+                bool usmcControls = localMovementBoard.TryGetValue(tacticalObjective.ObjectiveHex, out TacticalMovementCell objectiveCell) &&
+                    objectiveCell.OccupantId == tacticalUnitState.Id;
+                tacticalBattlefield.ObjectiveEvents.Add(new TacticalObjectiveEvent
+                {
+                    Sequence = ++tacticalEventSequence,
+                    BattlefieldId = tacticalBattlefield.BattlefieldId,
+                    Turn = turnState.TurnNumber,
+                    Hex = tacticalObjective.ObjectiveHex,
+                    ControlledByUsmc = usmcControls,
+                    IsHoldProgress = true,
+                    HoldTurns = tacticalObjective.ObjectiveHoldTurns,
+                    RequiredHoldTurns = required
+                });
+                tacticalOrderFeedback = usmcControls
+                    ? $"OBJECTIVE HOLD {tacticalObjective.ObjectiveHoldTurns}/{required}"
+                    : "OBJECTIVE HOLD BROKEN";
+                Debug.Log($"ALWAYS_FAITHFUL_OBJECTIVE_HOLD turn={turnState.TurnNumber} progress={tacticalObjective.ObjectiveHoldTurns}/{required} controlled={usmcControls}");
+            }
             if (outcome == TacticalBattleOutcome.InProgress) return;
             tacticalObjective.Outcome = outcome;
             tacticalObjective.OutcomeTurn = turnState.TurnNumber;
@@ -4032,7 +4054,12 @@ namespace AlwaysFaithful.Prototype
             foreach (TacticalReconEvent recon in tacticalBattlefield.ReconEvents)
                 entries.Add((recon.Sequence, $"RECON • T{recon.Turn} • {UnitDisplayName(recon.UnitId)} tasked {recon.Hex} ({recon.DurationTurns} turns)"));
             foreach (TacticalObjectiveEvent objectiveEvent in tacticalBattlefield.ObjectiveEvents)
-                entries.Add((objectiveEvent.Sequence, $"OBJECTIVE • T{objectiveEvent.Turn} • {objectiveEvent.Hex} {(objectiveEvent.ControlledByUsmc ? "secured" : "lost")} by USMC"));
+            {
+                string line = objectiveEvent.IsHoldProgress
+                    ? $"OBJECTIVE • T{objectiveEvent.Turn} • {objectiveEvent.Hex} hold {objectiveEvent.HoldTurns}/{objectiveEvent.RequiredHoldTurns}"
+                    : $"OBJECTIVE • T{objectiveEvent.Turn} • {objectiveEvent.Hex} {(objectiveEvent.ControlledByUsmc ? "secured" : "lost")} by USMC";
+                entries.Add((objectiveEvent.Sequence, line));
+            }
             foreach (TacticalSupportCardEvent supportCard in tacticalBattlefield.SupportCardEvents)
                 entries.Add((supportCard.Sequence, $"SUPPORT • T{supportCard.Turn} • {supportCard.Summary}"));
             entries.Sort((a, b) => a.Sequence.CompareTo(b.Sequence));
@@ -5385,12 +5412,48 @@ namespace AlwaysFaithful.Prototype
                 return false;
             }
 
-            board[objective.ObjectiveHex].OccupantId = usmc.Id;
-            outcome = TacticalVictory.Evaluate(objective, usmc, enemies, board, objective.BattleStartTurn + objective.TurnLimit, out _);
-            board[objective.ObjectiveHex].OccupantId = null;
-            if (outcome != TacticalBattleOutcome.UsmcVictory)
+            var holdObjective = new TacticalObjectiveState
             {
-                failure = $"expected UsmcVictory at the turn limit with control, got {outcome}";
+                ObjectiveHex = objective.ObjectiveHex,
+                Posture = TacticalPosture.Attack,
+                MissionType = TacticalMissionType.Attack,
+                TurnLimit = 6,
+                BattleStartTurn = 1
+            };
+            board[holdObjective.ObjectiveHex].OccupantId = usmc.Id;
+            outcome = TacticalVictory.Evaluate(holdObjective, usmc, enemies, board, 2, out _);
+            if (outcome != TacticalBattleOutcome.InProgress || holdObjective.ObjectiveHoldTurns != 1)
+            {
+                failure = $"expected first objective hold turn to remain InProgress at 1/2, got {outcome} {holdObjective.ObjectiveHoldTurns}/2";
+                return false;
+            }
+            outcome = TacticalVictory.Evaluate(holdObjective, usmc, enemies, board, 2, out _);
+            if (outcome != TacticalBattleOutcome.InProgress || holdObjective.ObjectiveHoldTurns != 1)
+            {
+                failure = $"same-turn evaluation advanced objective hold twice: {outcome} {holdObjective.ObjectiveHoldTurns}/2";
+                return false;
+            }
+            outcome = TacticalVictory.Evaluate(holdObjective, usmc, enemies, board, 3, out string holdSummary);
+            if (outcome != TacticalBattleOutcome.UsmcVictory || holdObjective.ObjectiveHoldTurns != 2 ||
+                string.IsNullOrEmpty(holdSummary) || !holdSummary.Contains("2 consecutive turns"))
+            {
+                failure = $"expected victory after consecutive 2/2 hold, got {outcome} {holdObjective.ObjectiveHoldTurns}/2 summary={holdSummary}";
+                return false;
+            }
+
+            var brokenHoldObjective = new TacticalObjectiveState
+            {
+                ObjectiveHex = objective.ObjectiveHex,
+                MissionType = TacticalMissionType.Defend,
+                TurnLimit = 6,
+                BattleStartTurn = 1
+            };
+            TacticalVictory.Evaluate(brokenHoldObjective, usmc, enemies, board, 2, out _);
+            board[brokenHoldObjective.ObjectiveHex].OccupantId = null;
+            outcome = TacticalVictory.Evaluate(brokenHoldObjective, usmc, enemies, board, 3, out _);
+            if (outcome != TacticalBattleOutcome.InProgress || brokenHoldObjective.ObjectiveHoldTurns != 0)
+            {
+                failure = $"expected lost objective to reset hold progress, got {outcome} {brokenHoldObjective.ObjectiveHoldTurns}/2";
                 return false;
             }
 
@@ -5976,6 +6039,11 @@ namespace AlwaysFaithful.Prototype
                 Application.Quit(1);
                 yield break;
             }
+            // The first fixture can legitimately conclude before this second
+            // request is installed; dismiss its presentation screen just as a
+            // real player would return to the island before starting another.
+            resultScreenActive = false;
+            resultScreenOpacity = 0f;
             fastEnemyAnimation = true;
             EndTacticalTurn();
             float resultDeadline = Time.realtimeSinceStartup + 5f;
@@ -6096,12 +6164,17 @@ namespace AlwaysFaithful.Prototype
                 BattlefieldId = "TEST",
                 Turn = 2,
                 Hex = new HexCoord(3, 4),
-                ControlledByUsmc = true
+                ControlledByUsmc = true,
+                IsHoldProgress = true,
+                HoldTurns = 1,
+                RequiredHoldTurns = 2
             });
             string serialized = JsonUtility.ToJson(battlefield);
             TacticalBattlefieldState restored = JsonUtility.FromJson<TacticalBattlefieldState>(serialized);
             if (restored?.ObjectiveEvents.Count != 1 || restored.ObjectiveEvents[0].Turn != 2 ||
-                !restored.ObjectiveEvents[0].Hex.Equals(new HexCoord(3, 4)) || !restored.ObjectiveEvents[0].ControlledByUsmc)
+                !restored.ObjectiveEvents[0].Hex.Equals(new HexCoord(3, 4)) || !restored.ObjectiveEvents[0].ControlledByUsmc ||
+                !restored.ObjectiveEvents[0].IsHoldProgress || restored.ObjectiveEvents[0].HoldTurns != 1 ||
+                restored.ObjectiveEvents[0].RequiredHoldTurns != 2)
             {
                 failure = "TacticalObjectiveEvent did not round-trip through JsonUtility";
                 return false;
@@ -8482,6 +8555,12 @@ namespace AlwaysFaithful.Prototype
                 cell.OccupantId == tacticalUnitState.Id;
             string verb = tacticalObjective.MissionType == TacticalMissionType.Defend ? "HOLD" : "SEIZE";
             string control = usmcControls ? "USMC" : "CONTESTED";
+            if (tacticalObjective.MissionType == TacticalMissionType.Attack || tacticalObjective.MissionType == TacticalMissionType.Defend)
+            {
+                int progress = usmcControls ? tacticalObjective.ObjectiveHoldTurns : 0;
+                int required = TacticalVictory.HoldTurnsRequired(tacticalObjective);
+                return $"{label}  •  OBJ {tacticalObjective.ObjectiveHex}  •  HOLD {progress}/{required}  •  {control}";
+            }
             return $"{label}  •  {verb} OBJECTIVE {tacticalObjective.ObjectiveHex}  •  {control}";
         }
 

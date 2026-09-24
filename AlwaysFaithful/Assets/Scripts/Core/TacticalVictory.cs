@@ -43,6 +43,9 @@ namespace AlwaysFaithful.Core
         public TacticalBattleOutcome Outcome = TacticalBattleOutcome.InProgress;
         public int OutcomeTurn;
         public string OutcomeSummary;
+        public int RequiredObjectiveHoldTurns = TacticalVictory.DefaultObjectiveHoldTurns;
+        public int ObjectiveHoldTurns;
+        public int LastObjectiveHoldEvaluationTurn;
         public bool RaidObjectiveAchieved;
         public List<string> ObservedEnemyIds = new List<string>();
     }
@@ -55,12 +58,21 @@ namespace AlwaysFaithful.Core
         public int Turn;
         public HexCoord Hex;
         public bool ControlledByUsmc;
+        public bool IsHoldProgress;
+        public int HoldTurns;
+        public int RequiredHoldTurns;
     }
 
     public static class TacticalVictory
     {
         public const int DefaultTurnLimit = 6;
+        public const int DefaultObjectiveHoldTurns = 2;
         public const int ObjectiveExclusionRadiusHexes = 4;
+
+        public static int HoldTurnsRequired(TacticalObjectiveState objective)
+            => objective != null && objective.RequiredObjectiveHoldTurns > 0
+                ? objective.RequiredObjectiveHoldTurns
+                : DefaultObjectiveHoldTurns;
 
         public static TacticalBattleOutcome Evaluate(
             TacticalObjectiveState objective,
@@ -109,6 +121,27 @@ namespace AlwaysFaithful.Core
                 }
             }
 
+            if (objective.MissionType == TacticalMissionType.Attack || objective.MissionType == TacticalMissionType.Defend)
+            {
+                int requiredHoldTurns = HoldTurnsRequired(objective);
+                objective.RequiredObjectiveHoldTurns = requiredHoldTurns;
+                bool usmcControls = usmc != null && board.TryGetValue(objective.ObjectiveHex, out TacticalMovementCell objectiveCell) &&
+                    objectiveCell.OccupantId == usmc.Id;
+                // Evaluate is normally called once as the enemy phase hands
+                // back to USMC. Guarding on turn makes the rule idempotent for
+                // save/load checks and any extra presentation refreshes.
+                if (objective.LastObjectiveHoldEvaluationTurn != currentTurn)
+                {
+                    objective.LastObjectiveHoldEvaluationTurn = currentTurn;
+                    objective.ObjectiveHoldTurns = usmcControls ? objective.ObjectiveHoldTurns + 1 : 0;
+                }
+                if (objective.ObjectiveHoldTurns >= requiredHoldTurns)
+                {
+                    summary = $"Objective {objective.ObjectiveHex} held for {requiredHoldTurns} consecutive turns.";
+                    return TacticalBattleOutcome.UsmcVictory;
+                }
+            }
+
             int turnsElapsed = currentTurn - objective.BattleStartTurn;
             if (turnsElapsed >= objective.TurnLimit)
             {
@@ -120,14 +153,9 @@ namespace AlwaysFaithful.Core
                     summary = "Platoon withdrew intact.";
                     return TacticalBattleOutcome.UsmcVictory;
                 }
-                bool usmcControls = usmc != null && board.TryGetValue(objective.ObjectiveHex, out TacticalMovementCell cell) &&
-                    cell.OccupantId == usmc.Id;
-                if (usmcControls)
-                {
-                    summary = $"Objective {objective.ObjectiveHex} secured by the turn limit.";
-                    return TacticalBattleOutcome.UsmcVictory;
-                }
-                summary = $"Turn limit reached without securing {objective.ObjectiveHex}.";
+                summary = objective.MissionType == TacticalMissionType.Attack || objective.MissionType == TacticalMissionType.Defend
+                    ? $"Turn limit reached without holding {objective.ObjectiveHex} for {objective.RequiredObjectiveHoldTurns} consecutive turns."
+                    : $"Turn limit reached without securing {objective.ObjectiveHex}.";
                 return TacticalBattleOutcome.Stalemate;
             }
 
