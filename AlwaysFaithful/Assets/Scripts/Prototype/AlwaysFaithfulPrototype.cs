@@ -83,8 +83,10 @@ namespace AlwaysFaithful.Prototype
         // actually rotates.
         private float cameraYaw;
         private float cameraPitch = OperationalDefaultPitch;
-        private const float MinCameraPitch = 15f;
-        private const float MaxCameraPitch = 85f;
+        private const float MinCameraPitch = 2f;
+        private const float MaxCameraPitch = 88f;
+        private const float TacticalCameraGroundClearance = .32f;
+        private const float OperationalCameraGroundClearance = .42f;
         private const float TacticalDefaultPitch = 62.6f;
         private const float OperationalDefaultPitch = 77.1f;
         private GeographicElevationGrid elevation;
@@ -7587,22 +7589,19 @@ namespace AlwaysFaithful.Prototype
 
         private void UpdateCamera()
         {
-            float maximumDistance = tacticalMode ? 48f : 240f;
-            cameraDistance = Mathf.Clamp(cameraDistance - Input.mouseScrollDelta.y * Mathf.Max(1.5f, cameraDistance * .08f), 10f, maximumDistance);
+            float minimumDistance = tacticalMode ? 4f : 8f;
+            float maximumDistance = tacticalMode ? 80f : 320f;
+            cameraDistance = Mathf.Clamp(cameraDistance - Input.mouseScrollDelta.y * Mathf.Max(1.5f, cameraDistance * .08f), minimumDistance, maximumDistance);
             float horizontal = (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow) ? 1f : 0f);
             float vertical = (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow) ? 1f : 0f);
             Vector3 rawPan = new Vector3(horizontal, 0f, vertical);
-            if (Input.GetMouseButton(2)) rawPan += new Vector3(-Input.GetAxis("Mouse X") * 3f, 0f, -Input.GetAxis("Mouse Y") * 3f);
+            bool mouseOrbit = (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt)) && Input.GetMouseButton(2);
+            if (Input.GetMouseButton(2) && !mouseOrbit) rawPan += new Vector3(-Input.GetAxis("Mouse X") * 3f, 0f, -Input.GetAxis("Mouse Y") * 3f);
             // Pan is relative to the current yaw so WASD/drag still feels like
             // "up/down/left/right on screen" once the camera has been rotated,
             // rather than always moving along absolute world north/south.
             Vector3 pan = Quaternion.Euler(0f, cameraYaw, 0f) * rawPan;
             cameraFocus += pan * (cameraDistance * .55f * Time.unscaledDeltaTime);
-            if (tacticalMode)
-            {
-                cameraFocus.x = Mathf.Clamp(cameraFocus.x, -14f, 14f);
-                cameraFocus.z = Mathf.Clamp(cameraFocus.z, -11f, 11f);
-            }
             // Q/E orbit yaw; Page Up/Down tilt pitch. Deliberately not RMB-drag
             // (already claimed by orders) or MMB-drag (already pan) — free of
             // every existing binding, in both modes.
@@ -7611,6 +7610,11 @@ namespace AlwaysFaithful.Prototype
             const float RotationDegPerSecond = 90f;
             cameraYaw += yawInput * RotationDegPerSecond * Time.unscaledDeltaTime;
             cameraPitch = Mathf.Clamp(cameraPitch + pitchInput * RotationDegPerSecond * Time.unscaledDeltaTime, MinCameraPitch, MaxCameraPitch);
+            if (mouseOrbit)
+            {
+                cameraYaw += Input.GetAxis("Mouse X") * 5f;
+                cameraPitch = Mathf.Clamp(cameraPitch - Input.GetAxis("Mouse Y") * 5f, MinCameraPitch, MaxCameraPitch);
+            }
             if (Input.GetKeyDown(settings.RemapResetCameraKey))
             {
                 cameraFocus = tacticalMode ? Vector3.zero : HexToWorld(new HexCoord(Width / 2, Height / 2));
@@ -7636,15 +7640,21 @@ namespace AlwaysFaithful.Prototype
         private void ApplyCamera()
         {
             if (mapCamera == null) return;
+            Vector3 lookTarget = cameraFocus;
+            lookTarget.y = Mathf.Max(lookTarget.y, CameraSurfaceHeightAt(lookTarget));
+            Vector3 cameraPosition = lookTarget + CameraDirectionFromYawPitch() * cameraDistance;
+            float minimumCameraHeight = CameraSurfaceHeightAt(cameraPosition) +
+                                        (tacticalMode ? TacticalCameraGroundClearance : OperationalCameraGroundClearance);
+            cameraPosition.y = Mathf.Max(cameraPosition.y, minimumCameraHeight);
             if (tacticalMode)
             {
-                mapCamera.transform.position = cameraFocus + CameraDirectionFromYawPitch() * cameraDistance;
-                mapCamera.transform.LookAt(cameraFocus, Vector3.up);
+                mapCamera.transform.position = cameraPosition;
+                mapCamera.transform.LookAt(lookTarget, Vector3.up);
                 if (tacticalUnit != null) tacticalUnit.transform.localScale = Vector3.one * Mathf.Clamp(cameraDistance / 30f, .82f, 1.55f);
                 return;
             }
-            mapCamera.transform.position = cameraFocus + CameraDirectionFromYawPitch() * cameraDistance;
-            mapCamera.transform.LookAt(cameraFocus, Vector3.up);
+            mapCamera.transform.position = cameraPosition;
+            mapCamera.transform.LookAt(lookTarget, Vector3.up);
             screenPickCacheValid = false;
             float counterScale = Mathf.Clamp(cameraDistance / 52f, 1f, 3.2f);
             foreach (UnitCounterView friendly in operationalFriendlyViews.Values)
@@ -7652,6 +7662,38 @@ namespace AlwaysFaithful.Prototype
             foreach (ContactMarkerView contact in operationalEnemyViews.Values)
                 if (contact != null) contact.SetDisplayScale(counterScale);
             UpdateGeographicLabels();
+        }
+
+        // Returns the rendered surface beneath an arbitrary X/Z position.
+        // The inverse offset-coordinate estimate is refined over its 3x3
+        // neighborhood, avoiding a per-frame scan of all 6,656 operational
+        // cells while remaining stable at hex boundaries. Outside the board,
+        // the recessed command-table top becomes the safety floor.
+        private float CameraSurfaceHeightAt(Vector3 worldPosition)
+        {
+            IReadOnlyDictionary<HexCoord, HexCellView> source = tacticalMode ? localCells : cells;
+            int centerQ = tacticalMode ? TacticalBattlefieldExtractor.DefaultWidth / 2 : 0;
+            int centerR = tacticalMode ? TacticalBattlefieldExtractor.DefaultHeight / 2 : 0;
+            int estimatedQ = Mathf.RoundToInt(worldPosition.x / (HexRadius * 1.5f)) + centerQ;
+            int estimatedR = Mathf.RoundToInt(worldPosition.z / (HexRadius * Mathf.Sqrt(3f)) + centerR -
+                                              (((estimatedQ & 1) - (centerQ & 1)) * .5f));
+            HexCellView nearest = null;
+            float nearestDistance = float.MaxValue;
+            for (int qOffset = -1; qOffset <= 1; qOffset++)
+            for (int rOffset = -1; rOffset <= 1; rOffset++)
+            {
+                var coord = new HexCoord(estimatedQ + qOffset, estimatedR + rOffset);
+                if (!source.TryGetValue(coord, out HexCellView candidate)) continue;
+                float deltaX = candidate.transform.position.x - worldPosition.x;
+                float deltaZ = candidate.transform.position.z - worldPosition.z;
+                float distance = deltaX * deltaX + deltaZ * deltaZ;
+                if (distance >= nearestDistance) continue;
+                nearest = candidate;
+                nearestDistance = distance;
+            }
+            if (nearest != null && nearestDistance <= HexRadius * HexRadius * 1.35f)
+                return nearest.transform.position.y + CellSurfaceOffset;
+            return tacticalMode ? -.075f : -.06f;
         }
 
         private void UpdateGeographicLabels()
@@ -7777,7 +7819,7 @@ namespace AlwaysFaithful.Prototype
             }
 
             GUI.Box(new Rect(uiWidth - 310f, uiHeight - 100f, 288f, 78f), GUIContent.none);
-            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Unit Orders  •  LMB Confirm\nMMB/WASD Pan  •  Wheel Zoom  •  R Reset\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Unit Orders  •  LMB Confirm\nMMB/WASD Pan  •  Alt+MMB Orbit  •  Wheel Zoom\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
 
             if (counterMenuOpen)
             {
@@ -8362,7 +8404,7 @@ namespace AlwaysFaithful.Prototype
                     ToggleTacticalLosOverlay();
             }
             GUI.Box(new Rect(uiWidth - 310f, uiHeight - 100f, 288f, 78f), GUIContent.none);
-            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Orders  •  LMB Confirm\nMove / LOS / Fire / Recon  •  RMB/Escape Cancel\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Orders  •  LMB Confirm\nMMB Pan  •  Alt+MMB Orbit  •  Wheel Zoom\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
         }
 
         // Default ramp is a single warm hue (red-orange-yellow), which reads

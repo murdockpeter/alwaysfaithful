@@ -38,11 +38,11 @@ namespace AlwaysFaithful.Prototype
         };
         private static readonly float[] ClusterYaw = { 168f, 194f, 152f, 208f };
 
-        // USMC has no ground vehicle in the source pack, only a drone; PLA's
-        // vehicles (EQ2050 light utility, ZBL-09 IFV) exist but only the
-        // support role gets one here, pairing naturally with the same
-        // role's already-distinct barrel prop/dot icon rather than
-        // appearing on a plain rifle squad.
+        // USMC has no ground vehicle in the source pack, only a drone. Every
+        // identified PLANMC miniature vignette carries a ZBL-09 so the force
+        // reads as mechanized even when a generated roster contains rifle
+        // squads but no support team. The vehicle is counter dressing, not
+        // an independently targetable gameplay unit.
         private const string UsmcVignettePath = "Models/OneStar/USMC Black Hornet";
         private const string PlaSupportVignettePath = "Models/OneStar/PLANMC ZBL-09";
         private const float DroneVignetteScale = .17f;
@@ -104,7 +104,7 @@ namespace AlwaysFaithful.Prototype
             // Vignette prop: a drone hovering over the USMC scene, or a
             // vehicle beside the PLA support crew — set dressing for the
             // "small tabletop scene" look, not a separate gameplay unit.
-            string vignettePath = friendly ? UsmcVignettePath : isSupportRole ? PlaSupportVignettePath : null;
+            string vignettePath = friendly ? UsmcVignettePath : PlaSupportVignettePath;
             if (vignettePath != null)
             {
                 GameObject vignettePrefab = Resources.Load<GameObject>(vignettePath);
