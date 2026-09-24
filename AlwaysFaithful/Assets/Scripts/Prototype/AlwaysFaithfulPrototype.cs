@@ -7595,16 +7595,19 @@ namespace AlwaysFaithful.Prototype
             float horizontal = (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow) ? 1f : 0f);
             float vertical = (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow) ? 1f : 0f);
             Vector3 rawPan = new Vector3(horizontal, 0f, vertical);
-            bool mouseOrbit = (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt)) && Input.GetMouseButton(2);
-            if (Input.GetMouseButton(2) && !mouseOrbit) rawPan += new Vector3(-Input.GetAxis("Mouse X") * 3f, 0f, -Input.GetAxis("Mouse Y") * 3f);
+            bool shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            bool mouseOrbit = Input.GetMouseButton(2) && !shiftHeld;
+            bool mousePan = Input.GetMouseButton(2) && shiftHeld;
+            if (mousePan) rawPan += new Vector3(-Input.GetAxis("Mouse X") * 3f, 0f, -Input.GetAxis("Mouse Y") * 3f);
             // Pan is relative to the current yaw so WASD/drag still feels like
             // "up/down/left/right on screen" once the camera has been rotated,
             // rather than always moving along absolute world north/south.
             Vector3 pan = Quaternion.Euler(0f, cameraYaw, 0f) * rawPan;
             cameraFocus += pan * (cameraDistance * .55f * Time.unscaledDeltaTime);
-            // Q/E orbit yaw; Page Up/Down tilt pitch. Deliberately not RMB-drag
-            // (already claimed by orders) or MMB-drag (already pan) — free of
-            // every existing binding, in both modes.
+            // Plain MMB is the primary free-orbit gesture: horizontal drag
+            // has unrestricted 360-degree yaw, while vertical drag spans the
+            // safe near-ground-to-overhead pitch range. Shift+MMB pans;
+            // Q/E and Page Up/Down remain keyboard alternatives.
             float yawInput = (Input.GetKey(KeyCode.E) ? 1f : 0f) - (Input.GetKey(KeyCode.Q) ? 1f : 0f);
             float pitchInput = (Input.GetKey(KeyCode.PageUp) ? 1f : 0f) - (Input.GetKey(KeyCode.PageDown) ? 1f : 0f);
             const float RotationDegPerSecond = 90f;
@@ -7819,7 +7822,7 @@ namespace AlwaysFaithful.Prototype
             }
 
             GUI.Box(new Rect(uiWidth - 310f, uiHeight - 100f, 288f, 78f), GUIContent.none);
-            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Unit Orders  •  LMB Confirm\nMMB/WASD Pan  •  Alt+MMB Orbit  •  Wheel Zoom\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Unit Orders  •  LMB Confirm\nMMB Orbit  •  Shift+MMB/WASD Pan  •  Wheel Zoom\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
 
             if (counterMenuOpen)
             {
@@ -8404,7 +8407,7 @@ namespace AlwaysFaithful.Prototype
                     ToggleTacticalLosOverlay();
             }
             GUI.Box(new Rect(uiWidth - 310f, uiHeight - 100f, 288f, 78f), GUIContent.none);
-            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Orders  •  LMB Confirm\nMMB Pan  •  Alt+MMB Orbit  •  Wheel Zoom\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Orders  •  LMB Confirm\nMMB Orbit  •  Shift+MMB/WASD Pan  •  Wheel Zoom\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
         }
 
         // Default ramp is a single warm hue (red-orange-yellow), which reads
