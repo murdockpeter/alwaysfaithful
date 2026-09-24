@@ -147,6 +147,7 @@ namespace AlwaysFaithful.Core
         {
             if (unit == null) return;
             unit.MovedThisTurn = true;
+            TacticalCombatPower.ClearEntrenchment(unit);
             unit.LastMovementPosture = posture;
             if (path != null && path.Count > 1) unit.FacingSector = DirectionSector(path[path.Count - 2], path[path.Count - 1]);
             if (posture == TacticalMovementPosture.Quick) unit.ReactionPoints = 0;

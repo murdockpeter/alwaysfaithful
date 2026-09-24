@@ -87,7 +87,7 @@ namespace AlwaysFaithful.Core
             int currentTurn,
             out string summary)
         {
-            bool usmcReduced = usmc != null && usmc.CombatStatus == TacticalCombatStatus.Reduced;
+            bool usmcReduced = usmc != null && !TacticalCombatPower.IsCombatEffective(usmc);
             bool allEnemiesReduced = AllReduced(enemies);
 
             if (usmcReduced && allEnemiesReduced)
@@ -247,7 +247,7 @@ namespace AlwaysFaithful.Core
         {
             if (units == null || units.Count == 0) return false;
             foreach (TacticalUnitState unit in units)
-                if (unit.CombatStatus != TacticalCombatStatus.Reduced) return false;
+                if (TacticalCombatPower.IsCombatEffective(unit)) return false;
             return true;
         }
 
@@ -255,7 +255,7 @@ namespace AlwaysFaithful.Core
         {
             if (units == null) return null;
             foreach (TacticalUnitState unit in units)
-                if (unit != null && unit.CombatStatus != TacticalCombatStatus.Reduced) return unit;
+                if (TacticalCombatPower.IsCombatEffective(unit)) return unit;
             return null;
         }
 

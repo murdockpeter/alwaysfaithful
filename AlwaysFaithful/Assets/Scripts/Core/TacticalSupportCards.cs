@@ -55,7 +55,7 @@ namespace AlwaysFaithful.Core
                 case TacticalSupportAssetType.FireSupport:
                     return "Prep bombardment suppresses enemies near the objective.";
                 default:
-                    return "Reinforcement grants bonus action points for the battle.";
+                    return "Deploys a fresh reserve rifle platoon onto the battlefield.";
             }
         }
     }

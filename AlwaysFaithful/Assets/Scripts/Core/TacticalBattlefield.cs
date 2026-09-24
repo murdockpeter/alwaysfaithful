@@ -19,7 +19,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 14;
+        public const int CurrentSchemaVersion = 15;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;
@@ -64,6 +64,13 @@ namespace AlwaysFaithful.Core
         public List<TacticalSmokeEvent> SmokeEvents = new List<TacticalSmokeEvent>();
         public List<TacticalAreaSuppressionEvent> AreaSuppressionEvents = new List<TacticalAreaSuppressionEvent>();
         public List<TacticalAssaultEvent> AssaultEvents = new List<TacticalAssaultEvent>();
+
+        // Schema 15: persistent combat power, positions, logistics and fire missions.
+        public int FireMissionsRemaining = TacticalCombatPower.DefaultFireMissions;
+        public List<TacticalStrengthEvent> StrengthEvents = new List<TacticalStrengthEvent>();
+        public List<TacticalPositionEvent> PositionEvents = new List<TacticalPositionEvent>();
+        public List<TacticalLogisticsEvent> LogisticsEvents = new List<TacticalLogisticsEvent>();
+        public List<TacticalCallForFireEvent> CallForFireEvents = new List<TacticalCallForFireEvent>();
 
         public bool Contains(double longitude, double latitude)
             => longitude >= West && longitude <= East && latitude >= South && latitude <= North;

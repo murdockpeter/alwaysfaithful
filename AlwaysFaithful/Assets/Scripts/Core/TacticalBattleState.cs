@@ -37,6 +37,15 @@ namespace AlwaysFaithful.Core
         public bool MovedThisTurn;
         public bool FiredThisTurn;
         public bool WasFiredUponThisTurn;
+        public int MaximumStrength = TacticalCombatPower.DefaultStrength;
+        public int Strength = TacticalCombatPower.DefaultStrength;
+        public int MaximumSupply = TacticalCombatPower.DefaultSupply;
+        public int Supply = TacticalCombatPower.DefaultSupply;
+        public int EntrenchmentLevel;
+        public HexCoord EntrenchedPosition;
+        public bool IsReserve;
+        public bool HasArrived = true;
+        public int ReinforcementTurn;
 
         public TacticalUnitState(string id, string displayName, HexCoord position, int maximumActionPoints)
         {
@@ -49,7 +58,7 @@ namespace AlwaysFaithful.Core
             CombatStatus = TacticalCombatStatus.Ready;
         }
 
-        public bool CanMove => Readiness == UnitReadiness.Available && RemainingActionPoints > 0 &&
+        public bool CanMove => HasArrived && Strength > 0 && Readiness == UnitReadiness.Available && RemainingActionPoints > 0 &&
             CombatStatus != TacticalCombatStatus.Reduced;
 
         public bool CanFire => CanMove && CombatStatus != TacticalCombatStatus.Disrupted;
