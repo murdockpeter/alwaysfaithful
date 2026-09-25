@@ -12,6 +12,10 @@ namespace AlwaysFaithful.Core
         public TacticalCover Cover;
         public string OccupantId;
         public int SmokeExpiresAfterTurn;
+        public TacticalObstacleType Obstacle;
+        public TacticalObstacleIntelligence ObstacleIntelligence;
+        public bool ObstacleBreached;
+        public string ObstacleOwnerSide;
 
         public bool IsPassable => Terrain != TacticalTerrain.Water;
         public bool HasActiveSmoke(int turn) => SmokeExpiresAfterTurn >= turn;
@@ -50,7 +54,8 @@ namespace AlwaysFaithful.Core
             IReadOnlyDictionary<HexCoord, TacticalMovementCell> board,
             HexCoord origin,
             int actionPoints,
-            string movingUnitId)
+            string movingUnitId,
+            string movingSide = null)
         {
             var costs = new Dictionary<HexCoord, int> { [origin] = 0 };
             var open = new List<HexCoord> { origin };
@@ -61,7 +66,7 @@ namespace AlwaysFaithful.Core
                 open.RemoveAt(0);
                 foreach (HexCoord neighbor in MovementPlanner.Neighbors(current))
                 {
-                    if (!TryEdgeCost(board, current, neighbor, movingUnitId, out int edgeCost, out _)) continue;
+                    if (!TryEdgeCost(board, current, neighbor, movingUnitId, out int edgeCost, out _, movingSide)) continue;
                     int candidate = costs[current] + edgeCost;
                     if (candidate > actionPoints || costs.TryGetValue(neighbor, out int known) && candidate >= known) continue;
                     costs[neighbor] = candidate;
@@ -76,7 +81,8 @@ namespace AlwaysFaithful.Core
             HexCoord origin,
             HexCoord destination,
             int actionPoints,
-            string movingUnitId)
+            string movingUnitId,
+            string movingSide = null)
         {
             var result = new TacticalRouteResult();
             if (origin.Equals(destination)) return Reject(result, "Already occupying destination");
@@ -96,7 +102,7 @@ namespace AlwaysFaithful.Core
                 if (current.Equals(destination)) break;
                 foreach (HexCoord neighbor in MovementPlanner.Neighbors(current))
                 {
-                    if (!TryEdgeCost(board, current, neighbor, movingUnitId, out int edgeCost, out string rejection))
+                    if (!TryEdgeCost(board, current, neighbor, movingUnitId, out int edgeCost, out string rejection, movingSide))
                     {
                         steepEdgeEncountered |= rejection == "Slope too steep";
                         continue;
@@ -125,7 +131,8 @@ namespace AlwaysFaithful.Core
             HexCoord to,
             string movingUnitId,
             out int cost,
-            out string rejection)
+            out string rejection,
+            string movingSide = null)
         {
             cost = 0;
             rejection = null;
@@ -152,7 +159,12 @@ namespace AlwaysFaithful.Core
             }
             int terrainCost = destination.Terrain == TacticalTerrain.Open ? 1 : destination.Terrain == TacticalTerrain.Rough ? 2 : 3;
             int slopeCost = elevationChange >= 45f ? 2 : elevationChange >= 15f ? 1 : 0;
-            cost = terrainCost + slopeCost;
+            string resolvedSide = !string.IsNullOrEmpty(movingSide) ? movingSide :
+                movingUnitId != null && movingUnitId.IndexOf("pla", StringComparison.OrdinalIgnoreCase) >= 0 ? "PLA" : "USMC";
+            int obstacleCost = string.Equals(destination.ObstacleOwnerSide, resolvedSide, StringComparison.OrdinalIgnoreCase)
+                ? 0
+                : TacticalObstacles.MovementCost(destination.Obstacle, destination.ObstacleIntelligence, destination.ObstacleBreached);
+            cost = terrainCost + slopeCost + obstacleCost;
             return true;
         }
 

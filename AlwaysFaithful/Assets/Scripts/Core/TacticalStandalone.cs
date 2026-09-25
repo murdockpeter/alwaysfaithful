@@ -6,7 +6,7 @@ namespace AlwaysFaithful.Core
     public enum TacticalDifficulty { Regular, Veteran, Elite }
     public enum TacticalWeather { Clear, Rain, Storm }
     public enum TacticalVisibility { Day, DawnDusk, Night }
-    public enum TacticalSecondaryObjectiveType { PreserveForce, AmmunitionDiscipline, IdentifyEnemy }
+    public enum TacticalSecondaryObjectiveType { PreserveForce, AmmunitionDiscipline, IdentifyEnemy, BreachRoute }
 
     [Serializable]
     public sealed class TacticalQuickBattleConfiguration
@@ -99,7 +99,7 @@ namespace AlwaysFaithful.Core
         public static int EnemyStrength(TacticalDifficulty difficulty)
             => difficulty == TacticalDifficulty.Elite ? 115 : difficulty == TacticalDifficulty.Veteran ? 105 : 100;
 
-        public static List<TacticalSecondaryObjectiveState> CreateSecondaryObjectives(TacticalMissionType mission)
+        public static List<TacticalSecondaryObjectiveState> CreateSecondaryObjectives(TacticalMissionType mission, bool hasEngineers = false)
         {
             var objectives = new List<TacticalSecondaryObjectiveState>
             {
@@ -108,6 +108,8 @@ namespace AlwaysFaithful.Core
             };
             if (mission == TacticalMissionType.ReconInForce)
                 objectives.Add(new TacticalSecondaryObjectiveState { Type = TacticalSecondaryObjectiveType.IdentifyEnemy, Description = "Identify the complete enemy order of battle.", RewardPoints = 2 });
+            else if (mission == TacticalMissionType.Attack && hasEngineers)
+                objectives.Add(new TacticalSecondaryObjectiveState { Type = TacticalSecondaryObjectiveType.BreachRoute, Description = "Open at least one safe breach lane.", RewardPoints = 2 });
             return objectives;
         }
 

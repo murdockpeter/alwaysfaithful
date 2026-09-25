@@ -13,7 +13,10 @@ namespace AlwaysFaithful.Core
         // Appended, not inserted — TacticalEnemyActionEvent.Kind persists this
         // enum in save files, and inserting a member earlier would silently
         // renumber every already-saved historical Kind value.
-        Recon
+        Recon,
+        Hide,
+        Search,
+        Withdraw
     }
 
     [Serializable]
@@ -83,6 +86,19 @@ namespace AlwaysFaithful.Core
                 return order;
             }
 
+            if (unit.MoraleState == TacticalMoraleState.FallingBack || unit.MoraleState == TacticalMoraleState.Routed)
+            {
+                if (TacticalConcealmentMorale.TryChooseFallbackHex(board, unit, new[] { opponent }, out HexCoord fallback))
+                {
+                    order.Kind = TacticalAiOrderKind.Withdraw;
+                    order.Destination = fallback;
+                    order.ActionPointCost = TacticalConcealmentMorale.WithdrawActionPointCost;
+                    order.Intent = "Break contact and restore cohesion";
+                    return order;
+                }
+                return Hold(order, "No safe fallback route");
+            }
+
             TacticalFirePreview fire = TacticalDirectFire.Preview(board, unit.Id, unit.Position,
                 opponentContact, opponent.Position, weapon, unit.RemainingActionPoints);
             if (unit.CanFire && fire.IsValid)
@@ -112,10 +128,22 @@ namespace AlwaysFaithful.Core
                 return order;
             }
 
+            if (opponentContact.State == TacticalVisibilityState.Contact && !opponentContact.IsStale &&
+                HexCoord.Distance(unit.Position, opponentContact.LastKnownPosition) == TacticalConcealmentMorale.SearchRangeHexes &&
+                unit.RemainingActionPoints >= TacticalConcealmentMorale.SearchActionPointCost)
+            {
+                order.Kind = TacticalAiOrderKind.Search;
+                order.TargetId = opponent.Id;
+                order.Destination = opponentContact.LastKnownPosition;
+                order.ActionPointCost = TacticalConcealmentMorale.SearchActionPointCost;
+                order.Intent = "Search suspected covered position";
+                return order;
+            }
+
             if (unit.CanMove)
             {
                 Dictionary<HexCoord, int> reachable = TacticalMovementPlanner.Reachable(
-                    board, unit.Position, unit.RemainingActionPoints, unit.Id);
+                    board, unit.Position, unit.RemainingActionPoints, unit.Id, "PLA");
                 HexCoord destination = unit.Position;
                 int currentDistance = HexCoord.Distance(unit.Position, objective);
                 int bestScore = ScoreDestination(board, unit.Position, objective, seed);
@@ -130,7 +158,7 @@ namespace AlwaysFaithful.Core
                 if (!destination.Equals(unit.Position) && HexCoord.Distance(destination, objective) <= currentDistance)
                 {
                     TacticalRouteResult route = TacticalMovementPlanner.FindRoute(board, unit.Position, destination,
-                        unit.RemainingActionPoints, unit.Id);
+                        unit.RemainingActionPoints, unit.Id, "PLA");
                     if (route.IsValid)
                     {
                         order.Kind = TacticalAiOrderKind.Move;
@@ -150,6 +178,14 @@ namespace AlwaysFaithful.Core
                 order.TargetId = opponent.Id;
                 order.Destination = opponent.Position;
                 order.Intent = "Update observation picture";
+                return order;
+            }
+            if (board.TryGetValue(unit.Position, out TacticalMovementCell currentCell) &&
+                TacticalConcealmentMorale.CanHide(unit, currentCell))
+            {
+                order.Kind = TacticalAiOrderKind.Hide;
+                order.ActionPointCost = TacticalConcealmentMorale.HideActionPointCost;
+                order.Intent = "Prepare a concealed ambush";
                 return order;
             }
             return Hold(order, "No legal action improves objective posture");
@@ -182,7 +218,7 @@ namespace AlwaysFaithful.Core
                     return true;
                 case TacticalAiOrderKind.Move:
                     TacticalRouteResult route = TacticalMovementPlanner.FindRoute(board, unit.Position,
-                        order.Destination, unit.RemainingActionPoints, unit.Id);
+                        order.Destination, unit.RemainingActionPoints, unit.Id, "PLA");
                     if (!route.IsValid || route.ActionPointCost != order.ActionPointCost)
                         return Reject(out rejection, route.RejectionReason ?? "Movement cost mismatch");
                     return true;
@@ -196,6 +232,23 @@ namespace AlwaysFaithful.Core
                         HexCoord.Distance(unit.Position, order.Destination) > TacticalRecon.MaximumRangeHexes)
                         return Reject(out rejection, "Recon target out of range");
                     return true;
+                case TacticalAiOrderKind.Hide:
+                    if (!board.TryGetValue(unit.Position, out TacticalMovementCell hideCell) ||
+                        !TacticalConcealmentMorale.CanHide(unit, hideCell))
+                        return Reject(out rejection, "Unit cannot conceal in this position");
+                    return true;
+                case TacticalAiOrderKind.Search:
+                    if (order.ActionPointCost != TacticalConcealmentMorale.SearchActionPointCost ||
+                        !TacticalConcealmentMorale.CanSearch(unit, order.Destination))
+                        return Reject(out rejection, "Search target is not adjacent");
+                    return true;
+                case TacticalAiOrderKind.Withdraw:
+                    if (order.ActionPointCost != TacticalConcealmentMorale.WithdrawActionPointCost ||
+                        !board.TryGetValue(order.Destination, out TacticalMovementCell withdrawCell) || !withdrawCell.IsPassable ||
+                        !string.IsNullOrEmpty(withdrawCell.OccupantId) && withdrawCell.OccupantId != unit.Id ||
+                        HexCoord.Distance(unit.Position, order.Destination) != TacticalConcealmentMorale.WithdrawRangeHexes)
+                        return Reject(out rejection, "Withdrawal route is not legal");
+                    return true;
                 case TacticalAiOrderKind.Hold:
                     return true;
                 default:
@@ -208,7 +261,12 @@ namespace AlwaysFaithful.Core
         {
             int terrain = 0;
             if (board.TryGetValue(coord, out TacticalMovementCell cell))
+            {
                 terrain = cell.Terrain == TacticalTerrain.Rough ? -8 : cell.Terrain == TacticalTerrain.Highland ? -5 : 0;
+                if (cell.ObstacleBreached) terrain -= 12;
+                else if (cell.Obstacle != TacticalObstacleType.None &&
+                         !string.Equals(cell.ObstacleOwnerSide, "PLA", StringComparison.OrdinalIgnoreCase)) terrain += 80;
+            }
             return HexCoord.Distance(coord, objective) * 100 + terrain + TieBreak(coord, seed);
         }
 

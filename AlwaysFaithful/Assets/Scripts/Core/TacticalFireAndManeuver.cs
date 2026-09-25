@@ -146,6 +146,7 @@ namespace AlwaysFaithful.Core
         public static void RecordMove(TacticalUnitState unit, TacticalMovementPosture posture, IReadOnlyList<HexCoord> path)
         {
             if (unit == null) return;
+            TacticalConcealmentMorale.Reveal(unit);
             unit.MovedThisTurn = true;
             TacticalCombatPower.ClearEntrenchment(unit);
             unit.LastMovementPosture = posture;
@@ -162,13 +163,14 @@ namespace AlwaysFaithful.Core
             return Math.Max(15, Math.Min(85, chance));
         }
 
-        public static int AssaultChance(TacticalUnitState attacker, TacticalUnitState defender, TacticalMovementCell target)
+        public static int AssaultChance(TacticalUnitState attacker, TacticalUnitState defender, TacticalMovementCell target, bool engineerAssault = false)
         {
             if (attacker == null || defender == null || target == null || HexCoord.Distance(attacker.Position, defender.Position) != 1) return 0;
             int chance = 50 + (defender.SuppressionPoints - attacker.SuppressionPoints) * 6;
             if (target.Cover == TacticalCover.Light) chance -= 5;
             else if (target.Cover == TacticalCover.Medium) chance -= 15;
             else if (target.Cover == TacticalCover.Heavy) chance -= 25;
+            if (engineerAssault && (defender.EntrenchmentLevel > 0 || target.Cover >= TacticalCover.Medium)) chance += 20;
             if (attacker.LastMovementPosture == TacticalMovementPosture.Bounding) chance += 10;
             return Math.Max(10, Math.Min(90, chance));
         }

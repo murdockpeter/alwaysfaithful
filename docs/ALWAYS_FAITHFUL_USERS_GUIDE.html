@@ -159,7 +159,7 @@
       <p class="eyebrow">Player's field manual</p>
       <h1>Always Faithful</h1>
       <p class="lead">A friendly guide to commanding a Marine battalion across Taiwan and leading its platoons through close, 250-meter-hex tactical battles.</p>
-      <p class="version">Covers the current game build, including Company Command, Fire and Maneuver, Positions and Combat Power, and Standalone Longevity features.</p>
+      <p class="version">Covers the current game build, including Company Command, Fire and Maneuver, Positions and Combat Power, Standalone Longevity, Concealment and Morale, and battlefield obstacles.</p>
     </div>
   </header>
 
@@ -268,7 +268,7 @@
           <tbody>
             <tr><td><strong>Balanced</strong></td><td>Weapons Platoon</td><td>A dependable all-purpose force. It begins with 8 ammunition and can resupply nearby platoons.</td></tr>
             <tr><td><strong>Recon</strong></td><td>Recon Platoon</td><td>Better information and mobility. The Recon Platoon has 10 action points and pays only 2 AP for Recon instead of 3.</td></tr>
-            <tr><td><strong>Assault</strong></td><td>Combat Engineer Platoon</td><td>Designed for difficult close fighting and fortified positions. It begins with 9 action points.</td></tr>
+            <tr><td><strong>Assault</strong></td><td>Combat Engineer Platoon</td><td>Detects and breaches obstacles and attacks strongpoints. It begins with 9 AP and 5 engineer stores.</td></tr>
           </tbody>
         </table>
         <p>The setup screen may also let you choose the mission, weather, light, enemy difficulty, turn limit, and tutorial. These are explained under <a href="#quick-battle">Quick Battle</a>.</p>
@@ -289,10 +289,11 @@
           <thead><tr><th>Value</th><th>Plain-language meaning</th></tr></thead>
           <tbody>
             <tr><td><strong>Strength</strong> <span class="meter">0–100</span></td><td>People, weapons, and fighting power still available. Strength loss lasts beyond the immediate exchange and may carry into later battles.</td></tr>
-            <tr><td><strong>Cohesion / Suppression</strong> <span class="meter">0–100</span></td><td>How badly the platoon is pinned or disorganized right now. Higher suppression is worse. It recovers more readily than strength.</td></tr>
+            <tr><td><strong>Cohesion / Suppression</strong> <span class="meter">0–100</span></td><td>How badly the platoon is pinned or disorganized right now. Higher suppression is worse. It recovers more readily than strength. A newly Reduced platoon attempts to fall back automatically.</td></tr>
             <tr><td><strong>AP</strong></td><td>Action Points: the platoon's time and attention for this turn. Movement, fire, reconnaissance, and special actions spend AP.</td></tr>
             <tr><td><strong>Ammo</strong></td><td>Direct-fire ammunition. Most attacks spend 1; Rapid attacks and Area Suppression spend 2.</td></tr>
             <tr><td><strong>Supply</strong></td><td>General stores used for recovery and transfer actions. Reorganize spends 2; a Weapons Platoon spends 2 to resupply another unit.</td></tr>
+            <tr><td><strong>Engineer stores</strong></td><td>Specialized breaching material carried by the Combat Engineer Platoon. Hasty Breach spends 1; Deliberate Breach spends 2.</td></tr>
             <tr><td><strong>RP</strong></td><td>Reaction Points reserved for automatic fire during enemy movement. Each reaction costs 1 RP.</td></tr>
             <tr><td><strong>Position</strong></td><td>Entrenchment level, from 0 to 2. Better positions make the platoon harder to hit.</td></tr>
             <tr><td><strong>Facing</strong></td><td>The direction the platoon is prepared to watch. It strongly affects reaction fire.</td></tr>
@@ -306,7 +307,7 @@
             <tr><td>0–24</td><td class="good">Ready</td><td>Fully able to act.</td></tr>
             <tr><td>25–49</td><td class="caution">Suppressed</td><td>Under pressure, but still functioning.</td></tr>
             <tr><td>50–74</td><td class="bad">Disrupted</td><td>Cannot fire.</td></tr>
-            <tr><td>75–100</td><td class="bad">Reduced</td><td>Cannot move or fire.</td></tr>
+            <tr><td>75–100</td><td class="bad">Reduced</td><td>Cannot move or fire normally. It immediately attempts a one-hex fallback; if trapped it routs or may surrender.</td></tr>
           </tbody>
         </table>
         <p>Suppression naturally falls by 15 each turn. <strong>Rally</strong> costs 1 AP and removes 40, making it the fast answer to a platoon that is pinned but otherwise healthy. <strong>Reorganize</strong> is slower and more expensive, but restores both strength and cohesion.</p>
@@ -339,6 +340,10 @@
         <h3>Recon</h3>
         <p><strong>Recon</strong> searches out to 12 hexes (3 km), does not require line of sight, reveals the exact hex for two turns, and improves the contact by one information level. It normally costs 3 AP; the specialist Recon Platoon pays 2 AP.</p>
         <p>Weather and light reduce normal observation. Clear daylight offers the best view. Rain and dawn/dusk shorten it; storm and night shorten it much more. The combined penalty can never reduce observation below 2 hexes.</p>
+
+        <h3>Concealment and searching</h3>
+        <p>A stationary platoon in Medium or Heavy cover can spend 2 AP to <strong>Hide</strong>. A concealed platoon is harder to classify and prepares an ambush. Moving or firing reveals it. An enemy can also spend 2 AP to <strong>Search/Clear</strong> an adjacent 250-meter hex; if a concealed formation occupies that hex, it is exposed.</p>
+        <div class="callout tip"><strong>Ambush discipline:</strong> Hide, face the likely approach, and leave reaction fire on Weapons Free. The first direct or reaction shot receives a substantial accuracy and suppression advantage, but the shot reveals the platoon.</div>
       </section>
 
       <section id="movement">
@@ -364,6 +369,21 @@
 
         <h3>Face the threat</h3>
         <p><strong>Face Sector</strong> turns a platoon among six directions and costs no AP. Reaction fire into the forward sector receives a <strong>+10</strong> advantage. A flank shot suffers <strong>−10</strong>; a rear reaction suffers <strong>−25</strong>. Before ending your turn, point each exposed platoon toward the most likely enemy approach.</p>
+
+        <h3>Hidden obstacles</h3>
+        <p>PLA defenses can include abstract 250-meter <strong>minefields</strong>, <strong>wire belts</strong>, and <strong>roadblocks</strong>. They begin hidden, so an unknown obstacle does not appear in the route preview or secretly increase its displayed AP cost. If a platoon enters one, it stops in that hex and identifies the obstacle. Minefields can reduce strength and add suppression; wire adds suppression; roadblocks stop the move without causing casualties.</p>
+        <p>Once discovered, an enemy obstacle receives a red map marker and appears on the hex-inspection card; friendly defenses are blue. Future routes correctly include the additional hostile-obstacle cost: +2 AP for a known minefield or wire belt and +3 AP for a roadblock. A green <strong>LANE</strong> marker means the obstacle has been breached and can be crossed safely.</p>
+        <h3>Engineer breaching</h3>
+        <p>The Combat Engineer Platoon can use <strong>Detect/Mark</strong> on adjacent ground for 2 AP. The sweep spends its AP even if the hex is clear; when an obstacle is present, it identifies and marks it without entering the danger area. A marked adjacent obstacle can then be breached:</p>
+        <ul>
+          <li><strong>Hasty Breach:</strong> 2 AP and 1 engineer store. It has a 70% chance to open the lane. Failure suppresses the engineers.</li>
+          <li><strong>Deliberate Breach:</strong> 4 AP and 2 engineer stores. It always opens the lane when the order is otherwise legal.</li>
+        </ul>
+        <p>A successful breach is permanent for that battle. Friendly routes and enemy planning recognize the safe lane. Engineers also gain a +20 close-assault advantage against defenders in Medium or Heavy cover or a fighting position.</p>
+        <div class="callout warning"><strong>Practical advice:</strong> Quick movement is most dangerous in uncleared ground. Tactical movement reduces minefield losses; Bounding movement reduces them further. Use secure routes when possible and keep another platoon ready to support a formation stopped at an obstacle.</div>
+
+        <h3>Withdrawing and forced fallback</h3>
+        <p><strong>Withdraw</strong> spends 2 AP and the remainder of the platoon's activation to move one hex farther from the nearest enemy, recover 10 suppression, and break contact. This is a controlled movement you choose. Forced fallback is different: when a platoon becomes Reduced, it automatically seeks an empty adjacent hex farther from danger, preferring cover. A trapped platoon routs in place; if it is trapped beside the enemy, it surrenders.</p>
       </section>
 
       <section id="combat">
@@ -405,7 +425,7 @@
       <section id="positions">
         <h2>10. Positions, recovery, supply, and support</h2>
         <h3>Entrench</h3>
-        <p>Spend 4 AP before the platoon has moved or fired to improve its position by one level, up to level 2. Each level gives an attacker a −12 hit penalty. Moving abandons the prepared position.</p>
+        <p>Spend 4 AP before the platoon has moved or fired to improve its position by one level, up to level 2. The position faces the same sector as the platoon when built. Each level gives an attacker a −12 hit penalty from the front, half that protection from a flank, and no position protection from the rear. Moving abandons it.</p>
 
         <h3>Rally or reorganize?</h3>
         <ul>
@@ -451,6 +471,7 @@
           <li><strong>Preserve Force:</strong> finish with every friendly platoon at 50 strength or better.</li>
           <li><strong>Ammunition Discipline:</strong> retain at least half of the company's starting ammunition.</li>
           <li><strong>Identify Enemy:</strong> in Recon in Force, identify the complete enemy roster.</li>
+          <li><strong>Open a Breach Lane:</strong> in an engineer-led Attack, successfully breach at least one obstacle.</li>
         </ul>
         <p>Secondary objectives add meaning to <em>how</em> you win. A victory that preserves the company and its ammunition is better preparation for the next fight.</p>
       </section>
@@ -471,6 +492,7 @@
         </table>
         <h3>The interactive tutorial</h3>
         <p>The optional coach walks through selecting a platoon, choosing a movement posture, moving into cover, inspecting sight or scouting, using fire/suppression/smoke, and ending the turn to watch reactions. It teaches controls without taking command away from you.</p>
+        <p>In a <strong>Defend</strong> mission, deployment also provides three defensive obstacles. Choose Minefield, Wire, or Roadblock, select <strong>Place Defense</strong>, and click open ground within four hexes of the objective. Your own platoons know these positions and cross them without penalty; the PLA plans around them or risks being halted.</p>
         <div class="callout tip"><strong>Suggested learning battle:</strong> Attack, Clear, Day, Regular, 10 turns, Tutorial On, Balanced company.</div>
       </section>
 
@@ -551,7 +573,7 @@
         <table>
           <thead><tr><th>Order</th><th>What it does</th><th>Important limit</th></tr></thead>
           <tbody>
-            <tr><td><strong>Move</strong></td><td>Plots and executes a route using the current posture.</td><td>Water is impassable; AP cost and reach depend on posture and route.</td></tr>
+            <tr><td><strong>Move</strong></td><td>Plots and executes a route using the current posture.</td><td>Water is impassable. Known obstacles add AP; entering an unbreached obstacle halts movement.</td></tr>
             <tr><td><strong>Inspect LOS</strong></td><td>Examines sight between the selected platoon and a chosen hex.</td><td>Sight may be clear, obscured, or blocked.</td></tr>
             <tr><td><strong>Direct Fire</strong></td><td>Fires with the currently selected attack profile.</td><td>Requires a current Observed target and sufficient AP/ammo.</td></tr>
             <tr><td><strong>Rally</strong></td><td>Removes 40 suppression.</td><td>Costs 1 AP.</td></tr>
@@ -564,10 +586,16 @@
             <tr><td><strong>Deploy Smoke</strong></td><td>Creates two turns of obscuration.</td><td>2 AP, range 2.</td></tr>
             <tr><td><strong>Close Assault</strong></td><td>Attempts to overrun an adjacent enemy.</td><td>4 AP; risky against cohesive, covered defenders.</td></tr>
             <tr><td><strong>Attack</strong></td><td>Cycles Hasty, Standard, Deliberate, and Rapid profiles.</td><td>Use Direct Fire afterward to execute the attack.</td></tr>
-            <tr><td><strong>Entrench</strong></td><td>Builds one position level, to a maximum of 2.</td><td>4 AP; only before moving/firing; movement removes it.</td></tr>
+            <tr><td><strong>Entrench</strong></td><td>Builds one directional position level, to a maximum of 2.</td><td>4 AP; face first; only before moving/firing; movement removes it.</td></tr>
             <tr><td><strong>Call Fire</strong></td><td>Hits a target hex and its neighboring hexes with supporting fire.</td><td>3 AP, range 12, two missions per battle.</td></tr>
             <tr><td><strong>Resupply</strong></td><td>Transfers 3 supply and 3 ammo from an adjacent Weapons Platoon.</td><td>2 AP; Weapons Platoon spends 2 supply.</td></tr>
             <tr><td><strong>Reorganize</strong></td><td>Restores 15 strength and removes 40 suppression.</td><td>4 AP and 2 supply; unavailable after moving/firing.</td></tr>
+            <tr><td><strong>Hide</strong></td><td>Conceals the platoon and prepares an ambush.</td><td>2 AP; requires Medium/Heavy cover and no move or fire this turn.</td></tr>
+            <tr><td><strong>Search / Clear</strong></td><td>Checks an adjacent hex and exposes a concealed enemy there.</td><td>2 AP; range 1.</td></tr>
+            <tr><td><strong>Withdraw</strong></td><td>Moves one hex away from the nearest enemy and recovers 10 suppression.</td><td>2 AP and ends the activation; destination must increase enemy distance.</td></tr>
+            <tr><td><strong>Detect / Mark</strong></td><td>Checks adjacent ground and identifies an obstacle without entering it.</td><td>Engineers only; 2 AP; range 1.</td></tr>
+            <tr><td><strong>Hasty Breach</strong></td><td>Attempts to open a persistent safe lane with 70% reliability.</td><td>Engineers only; 2 AP, 1 engineer store; marked adjacent obstacle.</td></tr>
+            <tr><td><strong>Deliberate Breach</strong></td><td>Reliably opens a persistent safe lane.</td><td>Engineers only; 4 AP, 2 engineer stores; marked adjacent obstacle.</td></tr>
           </tbody>
         </table>
       </section>
@@ -593,6 +621,9 @@
 
         <h3>Why did the enemy shoot during my turn?</h3>
         <p>You entered the range and line of sight of a unit with an eligible reaction policy and an available Reaction Point. Smoke, suppression, covered routes, Quick movement through genuinely safe areas, or forcing the enemy to spend reactions elsewhere can help.</p>
+
+        <h3>Why did my platoon stop when nobody fired?</h3>
+        <p>It encountered a hidden minefield, wire belt, or roadblock. Inspect the newly revealed marker and check the Event Log. The formation remains in the obstacle hex; future route previews know the obstacle's real cost. Minefield danger is greatest during Quick movement and lowest during Bounding movement.</p>
 
         <h3>Why did capturing the objective not end the battle?</h3>
         <p>Attack and Defend require control for three completed turns, and control is checked after the enemy acts. Other missions use entirely different victory tests.</p>

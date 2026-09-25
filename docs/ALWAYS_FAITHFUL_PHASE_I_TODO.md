@@ -98,6 +98,30 @@ Campaign progression inside Always Faithful, previously listed here, is now impl
 - [x] Add JSON-driven quick-battle definitions through `--quick-battle=<path>` as the scenario/editor data foundation.
 - [x] Add an optional six-step interactive tutorial overlay tied to real player actions.
 - [x] Persist Package 4 state in battlefield schema 16 and add `--longevity-regression`.
+
+## Standalone Package 5 — Concealment and Morale
+
+- [x] Add a two-AP Hide order for stationary platoons in Medium or Heavy cover, with persistent concealment and an ambush-ready state.
+- [x] Degrade observation against concealed platoons and reveal them when they move, fire, or are exposed by Search/Clear.
+- [x] Add prepared-ambush bonuses to both direct fire and reaction fire.
+- [x] Add an adjacent Search/Clear order and a controlled one-hex Withdraw order that must increase distance from the nearest enemy.
+- [x] Make newly Reduced platoons fall back automatically when a safe adjacent hex exists, rout when trapped, and surrender when trapped beside the enemy.
+- [x] Teach the PLA order system to hide, search, and withdraw under the same validation rules.
+- [x] Surface concealment and morale state in the tactical HUD, company list, chronological event log, and AAR highlights.
+- [x] Persist Package 5 state and event history in battlefield schema 17 and add `--concealment-morale-regression`.
+
+## Standalone Package 6 — Obstacles and Engineers
+
+- [x] Add persistent minefield, wire-belt, roadblock, and breached-lane state at the 250 m platoon scale.
+- [x] Keep hidden obstacles out of USMC route previews; expose suspected, detected, and identified intelligence levels for later reconnaissance and engineer orders.
+- [x] Halt movement on first contact, identify the obstacle, and apply posture-sensitive minefield or wire effects.
+- [x] Add known-obstacle movement costs, map markers, hex-inspection details, event-log entries, and AAR highlights.
+- [x] Generate deterministic six-hex PLA defensive layouts for offensive missions without placing obstacles under deployed formations; Defend missions reserve the layer for USMC setup.
+- [x] Persist the obstacle layer and history in battlefield schema 18 and add `--obstacles-regression`; all 29 regression suites pass together.
+- [x] Add Combat Engineer Detect/Mark, Hasty Breach, and Deliberate Breach orders with five engineer-supply points.
+- [x] Turn breached obstacles into persistent safe lanes; friendly route planning and PLA AI both value obstacle ownership, hostile belts, and opened lanes.
+- [x] Add a three-obstacle pre-battle placement budget to Defend missions and a breach-lane secondary objective to engineer-led Attack missions.
+- [x] Add directional fighting positions: full protection forward, half on the flank, none from the rear; engineers gain a close-assault bonus against covered or entrenched defenders.
 - [ ] A graphical scenario editor remains a later authoring-tool project; the runtime schema and loader are now in place.
 
 These are not rejected features. They are deferred so Phase I can prove the core decision loop, presentation language, deterministic architecture, and Sea of Uncertainty handoff first.

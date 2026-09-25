@@ -49,7 +49,8 @@ namespace AlwaysFaithful.Core
             string displayName,
             HexCoord target,
             int turn,
-            TacticalContactState previous = null)
+            TacticalContactState previous = null,
+            TacticalUnitState targetUnit = null)
         {
             TacticalLosResult los = TacticalLineOfSight.Inspect(board, observer, target);
             TacticalVisibilityState state = DetermineCurrentState(los);
@@ -63,6 +64,7 @@ namespace AlwaysFaithful.Core
                 else if (state == TacticalVisibilityState.Identified)
                     state = TacticalVisibilityState.Contact;
             }
+            state = TacticalConcealmentMorale.ApplyConcealment(state, targetUnit, los.RangeHexes);
             if (state == TacticalVisibilityState.Hidden && previous != null && previous.State != TacticalVisibilityState.Hidden)
             {
                 // A lost track remains as one-turn-old map information, then expires.

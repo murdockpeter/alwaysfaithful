@@ -19,7 +19,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 16;
+        public const int CurrentSchemaVersion = 18;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;
@@ -77,6 +77,15 @@ namespace AlwaysFaithful.Core
         public List<TacticalSecondaryObjectiveState> SecondaryObjectives = new List<TacticalSecondaryObjectiveState>();
         public TacticalTutorialState Tutorial = new TacticalTutorialState();
         public TacticalAfterActionReport AfterActionReport;
+
+        // Schema 17: deliberate concealment, ambushes, searching, withdrawal,
+        // and forced morale displacement.
+        public List<TacticalConcealmentEvent> ConcealmentEvents = new List<TacticalConcealmentEvent>();
+
+        // Schema 18: platoon-scale obstacle belts and the intelligence/event
+        // history that prevents hidden obstacles leaking into route planning.
+        public List<TacticalObstacleState> Obstacles = new List<TacticalObstacleState>();
+        public List<TacticalObstacleEvent> ObstacleEvents = new List<TacticalObstacleEvent>();
 
         public bool Contains(double longitude, double latitude)
             => longitude >= West && longitude <= East && latitude >= South && latitude <= North;

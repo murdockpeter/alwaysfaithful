@@ -26,6 +26,7 @@ namespace AlwaysFaithful.Core
         public HexCoord Position;
         public int LevelBefore;
         public int LevelAfter;
+        public int FacingSector;
     }
 
     [Serializable]
@@ -115,12 +116,25 @@ namespace AlwaysFaithful.Core
             => target != null && target.EntrenchmentLevel > 0 && target.EntrenchedPosition.Equals(position)
                 ? target.EntrenchmentLevel * EntrenchmentPenaltyPerLevel : 0;
 
+        public static int EntrenchmentHitModifier(TacticalUnitState target, HexCoord position, HexCoord attackerPosition)
+        {
+            int full = EntrenchmentHitModifier(target, position);
+            if (full == 0) return 0;
+            int savedFacing = target.FacingSector;
+            target.FacingSector = target.EntrenchmentFacingSector;
+            TacticalFacingAspect aspect = TacticalFireAndManeuver.FacingAspect(target, attackerPosition);
+            target.FacingSector = savedFacing;
+            if (aspect == TacticalFacingAspect.Rear) return 0;
+            return aspect == TacticalFacingAspect.Flank ? full / 2 : full;
+        }
+
         public static bool TryEntrench(TacticalUnitState unit)
         {
             if (unit == null || unit.MovedThisTurn || unit.FiredThisTurn || unit.EntrenchmentLevel >= MaximumEntrenchmentLevel) return false;
             if (!unit.TrySpendActionPoints(EntrenchActionPointCost)) return false;
             unit.EntrenchmentLevel++;
             unit.EntrenchedPosition = unit.Position;
+            unit.EntrenchmentFacingSector = unit.FacingSector;
             return true;
         }
 
@@ -129,6 +143,7 @@ namespace AlwaysFaithful.Core
             if (unit == null) return;
             unit.EntrenchmentLevel = 0;
             unit.EntrenchedPosition = unit.Position;
+            unit.EntrenchmentFacingSector = unit.FacingSector;
         }
 
         public static int StrengthDamage(TacticalFireOutcome outcome, TacticalAttackType type)

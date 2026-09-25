@@ -43,9 +43,16 @@ namespace AlwaysFaithful.Core
         public int Supply = TacticalCombatPower.DefaultSupply;
         public int EntrenchmentLevel;
         public HexCoord EntrenchedPosition;
+        public int EntrenchmentFacingSector;
+        public int EngineerSupply;
+        public int MaximumEngineerSupply;
         public bool IsReserve;
         public bool HasArrived = true;
         public int ReinforcementTurn;
+        public bool IsConcealed;
+        public bool AmbushReady;
+        public int ConcealedTurn;
+        public TacticalMoraleState MoraleState = TacticalMoraleState.Steady;
 
         public TacticalUnitState(string id, string displayName, HexCoord position, int maximumActionPoints)
         {
@@ -59,17 +66,20 @@ namespace AlwaysFaithful.Core
         }
 
         public bool CanMove => HasArrived && Strength > 0 && Readiness == UnitReadiness.Available && RemainingActionPoints > 0 &&
-            CombatStatus != TacticalCombatStatus.Reduced;
+            CombatStatus != TacticalCombatStatus.Reduced && MoraleState != TacticalMoraleState.Routed &&
+            MoraleState != TacticalMoraleState.Surrendered;
 
         public bool CanFire => CanMove && CombatStatus != TacticalCombatStatus.Disrupted;
 
         public bool CanRally => Readiness == UnitReadiness.Available && RemainingActionPoints > 0 &&
-            CombatStatus != TacticalCombatStatus.Ready;
+            CombatStatus != TacticalCombatStatus.Ready && MoraleState != TacticalMoraleState.Surrendered;
 
         public void ApplySuppressionPoints(int delta)
         {
             SuppressionPoints = Math.Max(0, Math.Min(TacticalSuppression.MaximumPoints, SuppressionPoints + delta));
             CombatStatus = TacticalSuppression.ComputeStatus(SuppressionPoints);
+            if (CombatStatus == TacticalCombatStatus.Reduced && MoraleState != TacticalMoraleState.Surrendered)
+                MoraleState = TacticalMoraleState.FallingBack;
         }
 
         public bool TryRally(int actionPointCost)
@@ -108,7 +118,10 @@ namespace AlwaysFaithful.Core
 
         public void BeginTurn()
         {
+            if (MoraleState == TacticalMoraleState.Surrendered) return;
             ApplySuppressionPoints(-TacticalSuppression.PassiveRecoveryAmount);
+            if (CombatStatus != TacticalCombatStatus.Reduced) MoraleState = TacticalMoraleState.Steady;
+            else MoraleState = TacticalMoraleState.Routed;
             RemainingActionPoints = MaximumActionPoints;
             Readiness = UnitReadiness.Available;
             IsSelected = false;
