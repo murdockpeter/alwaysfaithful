@@ -25,7 +25,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattleSaveState
     {
-        public const int CurrentSchemaVersion = 3;
+        public const int CurrentSchemaVersion = 4;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string SavedAtUtc;
@@ -55,6 +55,11 @@ namespace AlwaysFaithful.Core
         // "no active request" unambiguous regardless of that behavior.
         public bool HasActiveBattleRequest;
         public BattleRequest ActiveBattleRequest;
+        // Schema 4: binds an in-progress zoom battle back to the exact
+        // operational battalions whose platoons supplied its tactical roster.
+        public bool IsOperationalEngagement;
+        public string OperationalParentBattalionId;
+        public string OperationalEnemyBattalionId;
     }
 
     public static class TacticalBattleSave
@@ -66,9 +71,9 @@ namespace AlwaysFaithful.Core
                 error = "Save file did not parse to a valid save state";
                 return false;
             }
-            if (state.SchemaVersion != 2 && state.SchemaVersion != TacticalBattleSaveState.CurrentSchemaVersion)
+            if (state.SchemaVersion != 2 && state.SchemaVersion != 3 && state.SchemaVersion != TacticalBattleSaveState.CurrentSchemaVersion)
             {
-                error = $"Unsupported save schema version {state.SchemaVersion} (expected 2 or {TacticalBattleSaveState.CurrentSchemaVersion})";
+                error = $"Unsupported save schema version {state.SchemaVersion} (expected 2, 3, or {TacticalBattleSaveState.CurrentSchemaVersion})";
                 return false;
             }
             if (state.Battlefield == null || string.IsNullOrWhiteSpace(state.Battlefield.BattlefieldId))

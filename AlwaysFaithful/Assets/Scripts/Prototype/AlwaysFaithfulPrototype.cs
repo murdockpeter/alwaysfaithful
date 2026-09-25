@@ -68,6 +68,8 @@ namespace AlwaysFaithful.Prototype
         private readonly Dictionary<HexCoord, LineRenderer> operationalReconRings = new Dictionary<HexCoord, LineRenderer>();
         private LineRenderer operationalObjectiveRing;
         private OperationalBattalionState activeOperationalBattalion;
+        private OperationalBattalionState tacticalOperationalEnemyBattalion;
+        private bool tacticalOperationalEngagement;
         private bool operationalReconPlanning;
         private bool operationalBriefingActive;
         private bool operationalBriefingIntelPage;
@@ -130,6 +132,7 @@ namespace AlwaysFaithful.Prototype
         private TacticalUnitState tacticalUnitState;
         private TacticalCompanyPreset tacticalCompanyPreset = TacticalCompanyPreset.Balanced;
         private bool tacticalForcePanelOpen;
+        private Vector2 tacticalCompanyScroll;
         private bool tacticalDeploymentActive;
         private TacticalUnitState tacticalDeploymentUnit;
         private bool tacticalObstaclePlacementActive;
@@ -236,6 +239,8 @@ namespace AlwaysFaithful.Prototype
         private AlwaysFaithfulSettings settings;
         private string settingsPath;
         private bool settingsPanelOpen;
+        private bool hudCollapsed;
+        private string hoveredOrderTooltip;
         private RemapTarget? awaitingRemapFor;
         private string remapRejectionText;
         private bool automatedSettingsRegression;
@@ -566,10 +571,31 @@ namespace AlwaysFaithful.Prototype
 
         private void Update()
         {
-            if (IsAutomatedRun() || mapTransitionActive) return;
+            if (IsAutomatedRun()) return;
+            if (Input.GetKeyDown(KeyCode.H))
+            {
+                ToggleHudVisibility();
+                return;
+            }
+            if (mapTransitionActive) return;
             UpdateCamera();
             if (tacticalMode) UpdateTacticalPointer();
             else UpdatePointer();
+        }
+
+        private void ToggleHudVisibility()
+        {
+            if (mapTransitionActive || campaignBriefingActive || operationalBriefingActive || supportCardModalActive ||
+                tacticalForcePanelOpen || tacticalDeploymentActive || resultScreenActive || settingsPanelOpen) return;
+            hudCollapsed = !hudCollapsed;
+            if (hudCollapsed)
+            {
+                settingsPanelOpen = false;
+                supportPanelOpen = false;
+                eventLogPanelOpen = false;
+                operationalOrderOfBattleOpen = false;
+            }
+            tacticalAudio?.Play(TacticalSound.Inspect);
         }
 
         private void LoadGeography()
@@ -1174,6 +1200,8 @@ namespace AlwaysFaithful.Prototype
         {
             battleRequestError = null;
             activeBattleRequest = null;
+            tacticalOperationalEngagement = false;
+            tacticalOperationalEnemyBattalion = null;
             if (!File.Exists(path))
             {
                 ShowBattleRequestError($"Battle request file not found: {path}");
@@ -1361,7 +1389,10 @@ namespace AlwaysFaithful.Prototype
                 CompanyPreset = tacticalCompanyPreset,
                 EventSequence = tacticalEventSequence,
                 HasActiveBattleRequest = activeBattleRequest != null,
-                ActiveBattleRequest = activeBattleRequest
+                ActiveBattleRequest = activeBattleRequest,
+                IsOperationalEngagement = tacticalOperationalEngagement,
+                OperationalParentBattalionId = tacticalOperationalEngagement ? activeOperationalBattalion?.Id : null,
+                OperationalEnemyBattalionId = tacticalOperationalEngagement ? tacticalOperationalEnemyBattalion?.Id : null
             };
             state.FriendlyUnits.AddRange(tacticalFriendlyStates);
             foreach (KeyValuePair<string, TacticalWeaponState> pair in tacticalFriendlyWeapons)
@@ -1423,6 +1454,20 @@ namespace AlwaysFaithful.Prototype
                 error = $"Saved parent hex {state.Battlefield.ParentHex} is out of bounds";
                 return false;
             }
+
+            tacticalOperationalEngagement = state.IsOperationalEngagement;
+            if (tacticalOperationalEngagement)
+            {
+                OperationalBattalionState parent = operationalFriendlyBattalions.Find(item => item.Id == state.OperationalParentBattalionId);
+                if (parent == null)
+                {
+                    error = "Saved operational parent battalion is no longer present";
+                    return false;
+                }
+                SelectOperationalBattalion(operationalFriendlyViews[parent.Id]);
+                tacticalOperationalEnemyBattalion = operationalEnemyBattalions.Find(item => item.Id == state.OperationalEnemyBattalionId);
+            }
+            else tacticalOperationalEnemyBattalion = null;
 
             tacticalAudio.Play(TacticalSound.MapTransition);
             EnterTacticalMap(parentCell, false, state);
@@ -1523,23 +1568,27 @@ namespace AlwaysFaithful.Prototype
                 IntelligenceEstimate = "Three PLA battalion-sized formations are assessed in the area: two amphibious combined-arms battalions and one reconnaissance battalion. Exact locations and strength remain unconfirmed. Passive detection improves inside 8 operational hexes; identification inside 5; observation inside 2."
             };
             scenario.FriendlyBattalions.Add(CreateOperationalBattalion("usmc-bn-1-4", "1st Battalion, 4th Marines", "1/4", OperationalSide.Usmc,
-                FindDistinctDeploymentHex(new HexCoord(21, 25), used), objective,
+                FindDistinctDeploymentHex(new HexCoord(21, 25), used), objective, OperationalBattalionConfiguration.UsmcReinforcedAssault,
                 "Alpha Company", "Bravo Company", "Charlie Company", "Weapons Company"));
             scenario.FriendlyBattalions.Add(CreateOperationalBattalion("usmc-bn-2-4", "2d Battalion, 4th Marines", "2/4", OperationalSide.Usmc,
-                FindDistinctDeploymentHex(new HexCoord(18, 34), used), objective,
+                FindDistinctDeploymentHex(new HexCoord(18, 34), used), objective, OperationalBattalionConfiguration.UsmcLittoralScreen,
                 "Echo Company", "Fox Company", "Golf Company", "Weapons Company"));
             // Preserve the lightweight campaign progress that predates the full
             // operational layer by carrying it into the lead battalion once.
             if (operationalPersistenceEnabled && battalionStatus != null)
+            {
                 scenario.FriendlyBattalions[0].Strength = battalionStatus.Strength;
+                foreach (OperationalPlatoonState platoon in scenario.FriendlyBattalions[0].Platoons)
+                    platoon.Strength = Math.Min(platoon.MaximumStrength, battalionStatus.Strength);
+            }
             scenario.EnemyBattalions.Add(CreateOperationalBattalion("pla-amphib-bn-1", "PLA 1st Amphibious Combined-Arms Battalion", "1 ACB", OperationalSide.Pla,
-                FindDistinctDeploymentHex(new HexCoord(38, 52), used), objective,
+                FindDistinctDeploymentHex(new HexCoord(38, 52), used), objective, OperationalBattalionConfiguration.PlaAmphibiousCombinedArms,
                 "Three maneuver companies", "Firepower company", "Service support company"));
             scenario.EnemyBattalions.Add(CreateOperationalBattalion("pla-amphib-bn-2", "PLA 2d Amphibious Combined-Arms Battalion", "2 ACB", OperationalSide.Pla,
-                FindDistinctDeploymentHex(new HexCoord(43, 42), used), objective,
+                FindDistinctDeploymentHex(new HexCoord(43, 42), used), objective, OperationalBattalionConfiguration.PlaAmphibiousCombinedArms,
                 "Three maneuver companies", "Firepower company", "Service support company"));
             scenario.EnemyBattalions.Add(CreateOperationalBattalion("pla-recon-bn", "PLA Reconnaissance Battalion", "RECON", OperationalSide.Pla,
-                FindDistinctDeploymentHex(new HexCoord(35, 65), used), objective,
+                FindDistinctDeploymentHex(new HexCoord(35, 65), used), objective, OperationalBattalionConfiguration.PlaReconnaissance,
                 "Reconnaissance companies", "UAS detachment", "Support company"));
             foreach (OperationalBattalionState enemy in scenario.EnemyBattalions)
                 scenario.EnemyContacts.Add(new OperationalContactState { TargetId = enemy.Id, State = TacticalVisibilityState.Hidden });
@@ -1547,9 +1596,10 @@ namespace AlwaysFaithful.Prototype
         }
 
         private static OperationalBattalionState CreateOperationalBattalion(string id, string displayName, string shortName,
-            OperationalSide side, HexCoord position, HexCoord objective, params string[] subordinateUnits)
+            OperationalSide side, HexCoord position, HexCoord objective, OperationalBattalionConfiguration configuration,
+            params string[] subordinateUnits)
         {
-            return new OperationalBattalionState
+            var battalion = new OperationalBattalionState
             {
                 Id = id,
                 DisplayName = displayName,
@@ -1557,8 +1607,11 @@ namespace AlwaysFaithful.Prototype
                 Side = side,
                 Position = position,
                 ObjectiveHex = objective,
+                Configuration = configuration,
                 SubordinateUnits = new List<string>(subordinateUnits)
             };
+            battalion.Platoons = OperationalScenarioRules.BuildPlatoons(id, shortName, configuration);
+            return battalion;
         }
 
         private HexCoord FindDistinctDeploymentHex(HexCoord preferred, HashSet<HexCoord> used)
@@ -1584,15 +1637,30 @@ namespace AlwaysFaithful.Prototype
             try
             {
                 OperationalScenarioState parsed = JsonUtility.FromJson<OperationalScenarioState>(File.ReadAllText(path));
+                if (parsed == null || parsed.FriendlyBattalions == null || parsed.EnemyBattalions == null) return false;
+                foreach (OperationalBattalionState battalion in parsed.FriendlyBattalions)
+                {
+                    if (battalion.Platoons == null || battalion.Platoons.Count == 0)
+                        battalion.Configuration = battalion.Id == "usmc-bn-2-4"
+                            ? OperationalBattalionConfiguration.UsmcLittoralScreen
+                            : OperationalBattalionConfiguration.UsmcReinforcedAssault;
+                    OperationalScenarioRules.EnsurePlatoonOrderOfBattle(battalion);
+                    if (!cells.ContainsKey(battalion.Position)) return false;
+                }
+                foreach (OperationalBattalionState battalion in parsed.EnemyBattalions)
+                {
+                    if (battalion.Platoons == null || battalion.Platoons.Count == 0)
+                        battalion.Configuration = battalion.Id == "pla-recon-bn"
+                            ? OperationalBattalionConfiguration.PlaReconnaissance
+                            : OperationalBattalionConfiguration.PlaAmphibiousCombinedArms;
+                    OperationalScenarioRules.EnsurePlatoonOrderOfBattle(battalion);
+                    if (!cells.ContainsKey(battalion.Position)) return false;
+                }
                 if (!OperationalScenarioRules.Validate(parsed, out string error))
                 {
                     Debug.LogWarning($"ALWAYS_FAITHFUL_OPERATIONAL_LOAD_FAILED path={path} error={error}");
                     return false;
                 }
-                foreach (OperationalBattalionState battalion in parsed.FriendlyBattalions)
-                    if (!cells.ContainsKey(battalion.Position)) return false;
-                foreach (OperationalBattalionState battalion in parsed.EnemyBattalions)
-                    if (!cells.ContainsKey(battalion.Position)) return false;
                 scenario = parsed;
                 return true;
             }
@@ -1607,8 +1675,13 @@ namespace AlwaysFaithful.Prototype
         {
             if (!operationalPersistenceEnabled || operationalScenario == null) return;
             operationalScenario.TurnNumber = turnState?.TurnNumber ?? operationalScenario.TurnNumber;
-            operationalScenario.EnemyContacts = new List<OperationalContactState>(operationalContacts.Values);
-            operationalScenario.ReconMarkers = new List<OperationalReconMarker>(operationalReconMarkers);
+            // During first-time creation this save occurs before BuildUnit has
+            // copied the scenario intelligence into the runtime dictionaries.
+            // Preserve the freshly-created contact memory in that case.
+            if (operationalContacts.Count > 0)
+                operationalScenario.EnemyContacts = new List<OperationalContactState>(operationalContacts.Values);
+            if (operationalReconMarkers.Count > 0 || operationalScenario.ReconMarkers == null)
+                operationalScenario.ReconMarkers = new List<OperationalReconMarker>(operationalReconMarkers);
             string tempPath = operationalScenarioPath + ".tmp";
             try
             {
@@ -1745,8 +1818,15 @@ namespace AlwaysFaithful.Prototype
             bool sameHexInMemory = restore == null && tacticalBattlefield != null && tacticalBattlefield.ParentHex.Equals(parentCell.Coord);
             bool resumingInProgress = sameHexInMemory && activeBattleRequest == null &&
                 tacticalObjective != null && tacticalObjective.Outcome == TacticalBattleOutcome.InProgress;
-            bool freshStandaloneScenario = restore == null && activeBattleRequest == null && !resumingInProgress;
-            if (freshStandaloneScenario)
+            bool freshOperationalScenario = restore == null && activeBattleRequest == null && tacticalOperationalEngagement && !resumingInProgress;
+            bool freshStandaloneScenario = restore == null && activeBattleRequest == null && !tacticalOperationalEngagement && !resumingInProgress;
+            if (freshOperationalScenario)
+            {
+                string engagementKey = operationalScenario.ScenarioId + ":" + activeOperationalBattalion.Id + ":" +
+                    (tacticalOperationalEnemyBattalion?.Id ?? "clear") + ":" + parentCell.Coord;
+                standaloneScenarioSeed = TacticalDirectFire.CreateSeed(engagementKey, operationalScenario.TurnNumber, 1);
+            }
+            else if (freshStandaloneScenario)
                 standaloneScenarioSeed = scenarioSeedOverride ?? (requestedQuickBattle != null && requestedQuickBattle.Seed > 0
                     ? requestedQuickBattle.Seed : UnityEngine.Random.Range(1, int.MaxValue));
 
@@ -1772,6 +1852,11 @@ namespace AlwaysFaithful.Prototype
             if (freshStandaloneScenario && !IsAutomatedRun())
             {
                 tacticalForcePanelOpen = true;
+            }
+            else if (freshOperationalScenario && !IsAutomatedRun())
+            {
+                campaignBriefingActive = true;
+                StartCoroutine(ShowCampaignBriefingThenDismiss());
             }
             Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_ENTER battlefield={tacticalBattlefield.BattlefieldId} parent={tacticalBattlefield.ParentHex} center={tacticalBattlefield.CenterLatitude:0.00000},{tacticalBattlefield.CenterLongitude:0.00000}");
         }
@@ -1828,7 +1913,9 @@ namespace AlwaysFaithful.Prototype
                 (longitude, latitude) => coastline.ContainsLand(longitude, latitude),
                 activeBattleRequest?.Seed ?? standaloneScenarioSeed);
             if (tacticalBattlefield.QuickBattle == null) tacticalBattlefield.QuickBattle = new TacticalQuickBattleConfiguration();
-            if (restore == null && activeBattleRequest == null && requestedQuickBattle != null) tacticalBattlefield.QuickBattle = requestedQuickBattle;
+            if (restore == null && activeBattleRequest == null && !tacticalOperationalEngagement && requestedQuickBattle != null) tacticalBattlefield.QuickBattle = requestedQuickBattle;
+            if (restore == null && activeBattleRequest == null && !tacticalOperationalEngagement)
+                tacticalCompanyPreset = tacticalBattlefield.QuickBattle.CompanyPreset;
             if (tacticalBattlefield.SecondaryObjectives == null) tacticalBattlefield.SecondaryObjectives = new List<TacticalSecondaryObjectiveState>();
             if (tacticalBattlefield.Tutorial == null) tacticalBattlefield.Tutorial = new TacticalTutorialState();
             // Resync so EnterTacticalMap's next same-hex comparison never
@@ -2275,6 +2362,10 @@ namespace AlwaysFaithful.Prototype
             {
                 posture = activeBattleRequest.Posture;
             }
+            else if (tacticalOperationalEngagement)
+            {
+                posture = TacticalPosture.Attack;
+            }
             else
             {
                 string postureArgument = Array.Find(args, value => value.StartsWith("--posture=", StringComparison.Ordinal));
@@ -2290,6 +2381,10 @@ namespace AlwaysFaithful.Prototype
             if (activeBattleRequest != null && activeBattleRequest.TurnLimitOverride > 0)
             {
                 turnLimit = activeBattleRequest.TurnLimitOverride;
+            }
+            else if (tacticalOperationalEngagement)
+            {
+                turnLimit = 16;
             }
             else
             {
@@ -2309,6 +2404,10 @@ namespace AlwaysFaithful.Prototype
             if (activeBattleRequest != null)
             {
                 missionType = posture == TacticalPosture.Attack ? TacticalMissionType.Attack : TacticalMissionType.Defend;
+            }
+            else if (tacticalOperationalEngagement)
+            {
+                missionType = TacticalMissionType.Attack;
             }
             else
             {
@@ -2454,6 +2553,28 @@ namespace AlwaysFaithful.Prototype
                 weapons[restore.UsmcUnit.Id] = restore.UsmcWeapon;
                 roles.Add(TacticalPlatoonRole.Rifle);
             }
+            else if (tacticalOperationalEngagement && activeOperationalBattalion != null)
+            {
+                OperationalScenarioRules.EnsurePlatoonOrderOfBattle(activeOperationalBattalion);
+                var occupied = new HashSet<HexCoord>();
+                HexCoord center = new HexCoord(tacticalBattlefield.Width / 2, tacticalBattlefield.Height / 2);
+                foreach (OperationalPlatoonState platoon in activeOperationalBattalion.Platoons)
+                {
+                    HexCoord start = FindOpenLocalDeploymentHex(center, occupied);
+                    occupied.Add(start);
+                    int actionPoints = TacticalPlatoonActionPoints +
+                        (platoon.Role == TacticalPlatoonRole.Reconnaissance ? 2 : platoon.Role == TacticalPlatoonRole.Engineers ? 1 : 0);
+                    if (platoon.Strength < 60) actionPoints = Math.Max(1, actionPoints - TacticalBattalion.ActionPointPenalty);
+                    var state = new TacticalUnitState(platoon.Id, platoon.DisplayName, start, actionPoints)
+                    {
+                        MaximumStrength = Math.Max(1, platoon.MaximumStrength),
+                        Strength = Math.Max(0, Math.Min(platoon.MaximumStrength, platoon.Strength))
+                    };
+                    states.Add(state);
+                    roles.Add(platoon.Role);
+                    weapons[state.Id] = CreateFriendlyWeapon(state.Id, platoon.Role);
+                }
+            }
             else
             {
                 string companyPrefix = activeOperationalBattalion != null ? activeOperationalBattalion.Id : "usmc-company";
@@ -2470,7 +2591,8 @@ namespace AlwaysFaithful.Prototype
                 for (int index = 0; index < roster.Count; index++)
                 {
                     TacticalPlatoonDefinition definition = roster[index];
-                    HexCoord preferred = new HexCoord(center.Q + offsets[index].Q, center.R + offsets[index].R);
+                    HexCoord offset = offsets[Math.Min(index, offsets.Length - 1)];
+                    HexCoord preferred = new HexCoord(center.Q + offset.Q, center.R + offset.R);
                     HexCoord start = FindOpenLocalDeploymentHex(preferred, occupied);
                     occupied.Add(start);
                     string id = companyPrefix + "-" + definition.IdSuffix;
@@ -2553,7 +2675,7 @@ namespace AlwaysFaithful.Prototype
             GameObject miniatureDetail = new GameObject("Miniature Detail");
             miniatureDetail.transform.SetParent(root.transform, false);
             MiniatureCounterView miniature = miniatureDetail.AddComponent<MiniatureCounterView>();
-            miniature.Initialize(true, supportRole, "USMC\n" + roleLabel);
+            miniature.Initialize(true, supportRole, "USMC\n" + roleLabel, role);
             miniature.BindReactive(state);
             var view = new TacticalFriendlyView
             {
@@ -2819,6 +2941,30 @@ namespace AlwaysFaithful.Prototype
                 enemyMarkerLabels.Add("RIFLE");
                 enemyMarkerLabels.Add("SUPPORT");
             }
+            else if (tacticalOperationalEngagement && tacticalOperationalEnemyBattalion != null)
+            {
+                OperationalScenarioRules.EnsurePlatoonOrderOfBattle(tacticalOperationalEnemyBattalion);
+                var occupied = FriendlyPositions();
+                int slot = 0;
+                foreach (OperationalPlatoonState platoon in tacticalOperationalEnemyBattalion.Platoons)
+                {
+                    TacticalVisibilityState desired = slot++ == 0 ? TacticalVisibilityState.Observed : TacticalVisibilityState.Contact;
+                    HexCoord position = FindObservationDeployment(desired, occupied);
+                    occupied.Add(position);
+                    int actionPoints = 4 + (platoon.Role == TacticalPlatoonRole.Reconnaissance ? 2 : 0);
+                    var enemy = new TacticalUnitState(platoon.Id, platoon.DisplayName, position, actionPoints)
+                    {
+                        MaximumStrength = Math.Max(1, platoon.MaximumStrength),
+                        Strength = Math.Max(0, Math.Min(platoon.MaximumStrength, platoon.Strength))
+                    };
+                    tacticalEnemyStates.Add(enemy);
+                    bool support = platoon.Role == TacticalPlatoonRole.Weapons;
+                    tacticalEnemyWeapons.Add(enemy.Id, new TacticalWeaponState(enemy.Id + "-weapon",
+                        support ? "Platoon Support Weapons" : platoon.Role == TacticalPlatoonRole.Reconnaissance ? "Recon Platoon Weapons" : "Platoon Small Arms",
+                        support ? 8 : 6));
+                    enemyMarkerLabels.Add(TacticalCompany.ShortRole(platoon.Role));
+                }
+            }
             else
             {
                 // Standalone: a hash-driven roster of 1-3 units, first slot always
@@ -3077,8 +3223,8 @@ namespace AlwaysFaithful.Prototype
                 return;
             }
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
-            if (returnToIslandRect.Contains(guiPointer) || tacticalMenuOpen && tacticalMenuRect.Contains(guiPointer) ||
-                new Rect(20f, 18f, 405f, 318f).Contains(guiPointer)) return;
+            if (tacticalMenuOpen && tacticalMenuRect.Contains(guiPointer) ||
+                !hudCollapsed && (returnToIslandRect.Contains(guiPointer) || new Rect(20f, 18f, 405f, 318f).Contains(guiPointer))) return;
             if (Input.GetKeyDown(settings.RemapCancelKey))
             {
                 CancelTacticalInteraction(true);
@@ -4832,7 +4978,8 @@ namespace AlwaysFaithful.Prototype
             if (mapCamera == null || unitMoving || campaignBriefingActive || operationalBriefingActive ||
                 operationalOrderOfBattleOpen || settingsPanelOpen || supportCardModalActive) return;
             Vector2 guiPointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
-            if (endTurnRect.Contains(guiPointer) || enterTacticalRect.Contains(guiPointer) || counterMenuOpen && counterMenuRect.Contains(guiPointer)) return;
+            if (counterMenuOpen && counterMenuRect.Contains(guiPointer) ||
+                !hudCollapsed && (endTurnRect.Contains(guiPointer) || enterTacticalRect.Contains(guiPointer))) return;
             bool leftClick = Input.GetMouseButtonDown(0);
             bool rightClick = Input.GetMouseButtonDown(1);
             Ray ray = mapCamera.ScreenPointToRay(Input.mousePosition);
@@ -5443,6 +5590,12 @@ namespace AlwaysFaithful.Prototype
             {
                 WriteBattleResult();
             }
+            else if (tacticalOperationalEngagement && activeOperationalBattalion != null)
+            {
+                ApplyOperationalBattleLosses();
+                SaveOperationalScenario();
+                Debug.Log($"ALWAYS_FAITHFUL_OPERATIONAL_LOSSES_APPLIED friendly={activeOperationalBattalion.Id}/{activeOperationalBattalion.Strength}% enemy={tacticalOperationalEnemyBattalion?.Id}/{tacticalOperationalEnemyBattalion?.Strength}%");
+            }
             else if (battalionStatus != null)
             {
                 int strengthBefore = battalionStatus.Strength;
@@ -5487,6 +5640,25 @@ namespace AlwaysFaithful.Prototype
                 Debug.Log($"ALWAYS_FAITHFUL_BATTALION_STATUS_UPDATED strength={battalionStatus.Strength} engagements={battalionStatus.EngagementsCompleted}");
             }
             StartCoroutine(FadeResultScreen(0f, 1f, .45f));
+        }
+
+        private void ApplyOperationalBattleLosses()
+        {
+            ApplyPlatoonLosses(activeOperationalBattalion, tacticalFriendlyStates);
+            ApplyPlatoonLosses(tacticalOperationalEnemyBattalion, tacticalEnemyStates);
+        }
+
+        private static void ApplyPlatoonLosses(OperationalBattalionState battalion, List<TacticalUnitState> tacticalUnits)
+        {
+            if (battalion?.Platoons == null || tacticalUnits == null) return;
+            foreach (OperationalPlatoonState platoon in battalion.Platoons)
+            {
+                TacticalUnitState resolved = tacticalUnits.Find(unit => unit.Id == platoon.Id);
+                if (resolved == null) continue;
+                platoon.MaximumStrength = Math.Max(1, resolved.MaximumStrength);
+                platoon.Strength = Math.Max(0, Math.Min(platoon.MaximumStrength, resolved.Strength));
+            }
+            OperationalScenarioRules.SynchronizeBattalionStrength(battalion);
         }
 
         private void CompleteStandaloneProgression(TacticalBattleOutcome outcome)
@@ -6485,6 +6657,31 @@ namespace AlwaysFaithful.Prototype
             yield return null;
             EnterTacticalMap(FindHighReliefOperationalCell(), false);
 
+            // This regression exercises the in-battle HUD after the normal
+            // force/deployment workflow has been completed by the player.
+            tacticalForcePanelOpen = false;
+            tacticalDeploymentActive = false;
+            campaignBriefingActive = false;
+            operationalBriefingActive = false;
+            supportCardModalActive = false;
+            resultScreenActive = false;
+            settingsPanelOpen = false;
+            OpenTacticalMenu(new Vector2(640f, 360f));
+            ToggleHudVisibility();
+            bool collapsedCleanly = hudCollapsed && tacticalMenuOpen && !tacticalMovePlanning &&
+                !tacticalLosPlanning && !tacticalFirePlanning && !tacticalReconPlanning;
+            CancelTacticalInteraction(false);
+            OpenTacticalMenu(new Vector2(640f, 360f));
+            bool contextMenuIndependent = hudCollapsed && tacticalMenuOpen;
+            ToggleHudVisibility();
+            CancelTacticalInteraction(false);
+            if (!collapsedCleanly || !contextMenuIndependent || hudCollapsed)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_HUD_REGRESSION_FAILED collapse={collapsedCleanly} contextIndependent={contextMenuIndependent} restored={!hudCollapsed}");
+                Application.Quit(1);
+                yield break;
+            }
+
             if (tacticalLosOverlayActive || tacticalLosOverlayCells.Count != 0)
             {
                 Debug.LogError("ALWAYS_FAITHFUL_HUD_REGRESSION_FAILED overlay was already active on battle entry");
@@ -6544,7 +6741,7 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
 
-            Debug.Log($"ALWAYS_FAITHFUL_HUD_REGRESSION_OK overlayCells={overlayCellsAfterToggleOn} logEntries={logAfter.Count} reactionReady={reactionReady}");
+            Debug.Log($"ALWAYS_FAITHFUL_HUD_REGRESSION_OK overlayCells={overlayCellsAfterToggleOn} logEntries={logAfter.Count} reactionReady={reactionReady} collapse={collapsedCleanly}");
             Application.Quit(0);
         }
 
@@ -8666,7 +8863,10 @@ namespace AlwaysFaithful.Prototype
             List<TacticalPlatoonDefinition> assault = TacticalCompany.BuildRoster(TacticalCompanyPreset.Assault);
             if (balanced.Count != TacticalCompany.DefaultPlatoonCount || recon.Count != TacticalCompany.DefaultPlatoonCount ||
                 assault.Count != TacticalCompany.DefaultPlatoonCount || balanced[3].Role != TacticalPlatoonRole.Weapons ||
-                recon[3].Role != TacticalPlatoonRole.Reconnaissance || assault[3].Role != TacticalPlatoonRole.Engineers)
+                recon[3].Role != TacticalPlatoonRole.Reconnaissance || assault[3].Role != TacticalPlatoonRole.Engineers ||
+                !MiniatureCounterView.HasModelsFor(TacticalPlatoonRole.Weapons) ||
+                !MiniatureCounterView.HasModelsFor(TacticalPlatoonRole.Engineers) ||
+                !MiniatureCounterView.HasModelsFor(TacticalPlatoonRole.Reconnaissance))
             {
                 Debug.LogError("ALWAYS_FAITHFUL_COMPANY_REGRESSION_FAILED roster presets");
                 Application.Quit(1);
@@ -8969,6 +9169,13 @@ namespace AlwaysFaithful.Prototype
             if (AlwaysFaithfulSettingsRules.Validate(collision, out _))
             {
                 failure = "Cancel and Reset Camera bound to the same key was accepted";
+                return false;
+            }
+            var reservedHudKey = AlwaysFaithfulSettingsRules.CreateDefault();
+            reservedHudKey.RemapResetCameraKey = KeyCode.H;
+            if (AlwaysFaithfulSettingsRules.Validate(reservedHudKey, out _))
+            {
+                failure = "the reserved HUD key was accepted as a remappable action";
                 return false;
             }
             if (!AlwaysFaithfulSettingsRules.Validate(fresh, out string validError))
@@ -9424,7 +9631,10 @@ namespace AlwaysFaithful.Prototype
                 string.IsNullOrWhiteSpace(operationalScenario.Situation) || string.IsNullOrWhiteSpace(operationalScenario.Mission) ||
                 string.IsNullOrWhiteSpace(operationalScenario.Execution) || string.IsNullOrWhiteSpace(operationalScenario.IntelligenceEstimate) ||
                 operationalFriendlyBattalions.Exists(battalion => battalion.SubordinateUnits.Count == 0) ||
-                operationalEnemyBattalions.Exists(battalion => battalion.SubordinateUnits.Count == 0))
+                operationalEnemyBattalions.Exists(battalion => battalion.SubordinateUnits.Count == 0) ||
+                operationalFriendlyBattalions.Exists(battalion => battalion.Platoons.Count != 12) ||
+                operationalEnemyBattalions.Exists(battalion => battalion.Configuration == OperationalBattalionConfiguration.PlaAmphibiousCombinedArms && battalion.Platoons.Count != 12) ||
+                operationalEnemyBattalions.Exists(battalion => battalion.Configuration == OperationalBattalionConfiguration.PlaReconnaissance && battalion.Platoons.Count != 11))
             {
                 Debug.LogError($"ALWAYS_FAITHFUL_OPERATIONAL_SCENARIO_REGRESSION_FAILED setup error={validationError} friendly={operationalFriendlyBattalions.Count} enemy={operationalEnemyBattalions.Count} contacts={operationalContacts.Count}");
                 Application.Quit(1);
@@ -9511,7 +9721,28 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
 
-            Debug.Log($"ALWAYS_FAITHFUL_OPERATIONAL_SCENARIO_REGRESSION_OK friendly={operationalFriendlyBattalions.Count} enemy={operationalEnemyBattalions.Count} objective={operationalScenario.PrimaryObjective}");
+            tacticalOperationalEngagement = true;
+            tacticalOperationalEnemyBattalion = liveEnemy;
+            EnterTacticalMap(cells[activeOperationalBattalion.Position], false, null, true);
+            if (tacticalFriendlyStates.Count != activeOperationalBattalion.Platoons.Count ||
+                tacticalEnemyStates.Count != liveEnemy.Platoons.Count || tacticalForcePanelOpen ||
+                tacticalFriendlyStates.Exists(state => activeOperationalBattalion.Platoons.Find(platoon => platoon.Id == state.Id) == null) ||
+                tacticalEnemyStates.Exists(state => liveEnemy.Platoons.Find(platoon => platoon.Id == state.Id) == null))
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_OPERATIONAL_SCENARIO_REGRESSION_FAILED tactical handoff friendly={tacticalFriendlyStates.Count}/{activeOperationalBattalion.Platoons.Count} enemy={tacticalEnemyStates.Count}/{liveEnemy.Platoons.Count} picker={tacticalForcePanelOpen}");
+                Application.Quit(1);
+                yield break;
+            }
+            tacticalFriendlyStates[0].Strength = 73;
+            ApplyOperationalBattleLosses();
+            if (activeOperationalBattalion.Platoons[0].Strength != 73 || activeOperationalBattalion.Strength >= 100)
+            {
+                Debug.LogError($"ALWAYS_FAITHFUL_OPERATIONAL_SCENARIO_REGRESSION_FAILED one-for-one losses platoon={activeOperationalBattalion.Platoons[0].Strength} battalion={activeOperationalBattalion.Strength}");
+                Application.Quit(1);
+                yield break;
+            }
+
+            Debug.Log($"ALWAYS_FAITHFUL_OPERATIONAL_SCENARIO_REGRESSION_OK friendly={operationalFriendlyBattalions.Count} enemy={operationalEnemyBattalions.Count} tactical={tacticalFriendlyStates.Count}v{tacticalEnemyStates.Count} objective={operationalScenario.PrimaryObjective}");
             Application.Quit(0);
         }
 
@@ -10163,15 +10394,22 @@ namespace AlwaysFaithful.Prototype
             GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
             float uiWidth = Screen.width / scale;
             float uiHeight = Screen.height / scale;
+            hoveredOrderTooltip = null;
 
             if (tacticalMode)
             {
-                DrawTacticalInterface(uiWidth, uiHeight);
+                if (!hudCollapsed) DrawTacticalInterface(uiWidth, uiHeight);
+                else
+                {
+                    DrawCollapsedHudTabs(uiWidth, uiHeight);
+                    DrawTacticalInterface(uiWidth, uiHeight, true);
+                }
+                DrawTacticalCenterNotices(uiWidth, uiHeight);
                 DrawTransitionOverlay(uiWidth, uiHeight);
                 DrawResultScreen(uiWidth, uiHeight);
                 DrawCampaignBriefing(uiWidth, uiHeight);
                 DrawSupportCardModal(uiWidth, uiHeight);
-                if (!tacticalForcePanelOpen && !tacticalDeploymentActive)
+                if (!hudCollapsed && !tacticalForcePanelOpen && !tacticalDeploymentActive)
                 {
                     DrawSettingsButtonAndPanel(uiWidth, uiHeight);
                     DrawSupportButtonAndPanel(uiWidth, uiHeight);
@@ -10179,6 +10417,21 @@ namespace AlwaysFaithful.Prototype
                 }
                 DrawTacticalDeploymentControls(uiWidth, uiHeight);
                 DrawTacticalForcePanel(uiWidth, uiHeight);
+                DrawOrderTooltip(uiWidth, uiHeight);
+                GUI.matrix = Matrix4x4.identity;
+                return;
+            }
+
+            if (hudCollapsed)
+            {
+                DrawCollapsedHudTabs(uiWidth, uiHeight);
+                DrawOperationalUnitMenu();
+                DrawTransitionOverlay(uiWidth, uiHeight);
+                DrawCampaignBriefing(uiWidth, uiHeight);
+                DrawSupportCardModal(uiWidth, uiHeight);
+                DrawOperationalBriefing(uiWidth, uiHeight);
+                DrawOperationalOutcome(uiWidth, uiHeight);
+                DrawOrderTooltip(uiWidth, uiHeight);
                 GUI.matrix = Matrix4x4.identity;
                 return;
             }
@@ -10260,7 +10513,7 @@ namespace AlwaysFaithful.Prototype
                         enterTacticalRect = new Rect(198f, 340f, 172f, 30f);
                         string tacticalLabel = inspectedContact != null ? "RESOLVE CONTACT" : "OPEN LOCAL MAP";
                         if (GUI.Button(enterTacticalRect, tacticalLabel, buttonStyle))
-                            OpenOperationalTacticalMap(inspected, resolvingBattalion, inspectedContact != null);
+                            OpenOperationalTacticalMap(inspected, resolvingBattalion, inspectedContact);
                     }
                     else if (inspectedContact != null)
                     {
@@ -10270,7 +10523,7 @@ namespace AlwaysFaithful.Prototype
             }
 
             GUI.Box(new Rect(uiWidth - 310f, uiHeight - 100f, 288f, 78f), GUIContent.none);
-            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Unit Orders  •  LMB Confirm\nMMB Orbit  •  Shift+MMB/WASD Pan  •  Wheel Zoom\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Unit Orders  •  LMB Confirm\nMMB Orbit  •  Shift+MMB/WASD Pan  •  Wheel Zoom\nQ/E Rotate  •  PgUp/Dn Tilt  •  H Hide HUD", bodyStyle);
 
             if (counterMenuOpen)
             {
@@ -10278,11 +10531,13 @@ namespace AlwaysFaithful.Prototype
                 GUI.Label(new Rect(counterMenuRect.x + 12f, counterMenuRect.y + 7f, 154f, 22f), activeOperationalBattalion.ShortName + " • INF BN", badgeStyle);
                 GUI.enabled = unitState.CanMove;
                 string moveLabel = unitState.CanMove ? $"MOVE  •  {unitState.RemainingActionPoints} AP" : "MOVE  •  SPENT";
-                if (GUI.Button(new Rect(counterMenuRect.x + 10f, counterMenuRect.y + 34f, 158f, 28f), moveLabel, buttonStyle))
+                if (DrawOrderButton(new Rect(counterMenuRect.x + 10f, counterMenuRect.y + 34f, 158f, 28f), moveLabel,
+                        "MOVE | Plot a terrain-costed route for this battalion. The order spends operational AP when you confirm the destination."))
                     BeginMovePlanning();
                 GUI.enabled = unitState.CanMove && unitState.RemainingActionPoints >= OperationalScenarioRules.ReconActionPointCost;
-                if (GUI.Button(new Rect(counterMenuRect.x + 10f, counterMenuRect.y + 66f, 158f, 28f),
-                        $"RECON  •  {OperationalScenarioRules.ReconActionPointCost} AP", buttonStyle))
+                if (DrawOrderButton(new Rect(counterMenuRect.x + 10f, counterMenuRect.y + 66f, 158f, 28f),
+                        $"RECON  •  {OperationalScenarioRules.ReconActionPointCost} AP",
+                        "RECON | Search a selected area for two operational turns. It can reveal, identify, or refine otherwise hidden PLA battalion contacts."))
                     BeginOperationalReconPlanning();
                 GUI.enabled = true;
             }
@@ -10294,7 +10549,63 @@ namespace AlwaysFaithful.Prototype
             DrawOperationalOrderOfBattle(uiWidth, uiHeight);
             DrawOperationalBriefing(uiWidth, uiHeight);
             DrawOperationalOutcome(uiWidth, uiHeight);
+            DrawOrderTooltip(uiWidth, uiHeight);
             GUI.matrix = Matrix4x4.identity;
+        }
+
+        private void DrawOperationalUnitMenu()
+        {
+            if (!counterMenuOpen || activeOperationalBattalion == null || unitState == null) return;
+            GUI.Box(counterMenuRect, GUIContent.none);
+            GUI.Label(new Rect(counterMenuRect.x + 12f, counterMenuRect.y + 7f, 154f, 22f),
+                activeOperationalBattalion.ShortName + " | INF BN", badgeStyle);
+            GUI.enabled = unitState.CanMove;
+            string moveLabel = unitState.CanMove ? $"MOVE | {unitState.RemainingActionPoints} AP" : "MOVE | SPENT";
+            if (DrawOrderButton(new Rect(counterMenuRect.x + 10f, counterMenuRect.y + 34f, 158f, 28f), moveLabel,
+                    "MOVE | Plot a terrain-costed route for this battalion. The order spends operational AP when you confirm the destination."))
+                BeginMovePlanning();
+            GUI.enabled = unitState.CanMove && unitState.RemainingActionPoints >= OperationalScenarioRules.ReconActionPointCost;
+            if (DrawOrderButton(new Rect(counterMenuRect.x + 10f, counterMenuRect.y + 66f, 158f, 28f),
+                    $"RECON | {OperationalScenarioRules.ReconActionPointCost} AP",
+                    "RECON | Search a selected area for two operational turns. It can reveal, identify, or refine otherwise hidden PLA battalion contacts."))
+                BeginOperationalReconPlanning();
+            GUI.enabled = true;
+        }
+
+        private bool DrawOrderButton(Rect rect, string label, string explanation)
+        {
+            Vector2 pointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
+            if (rect.Contains(pointer)) hoveredOrderTooltip = explanation;
+            return GUI.Button(rect, new GUIContent(label, explanation), buttonStyle);
+        }
+
+        private void DrawOrderTooltip(float uiWidth, float uiHeight)
+        {
+            if (string.IsNullOrWhiteSpace(hoveredOrderTooltip)) return;
+            const float width = 350f;
+            float textHeight = bodyStyle.CalcHeight(new GUIContent(hoveredOrderTooltip), width - 24f);
+            float height = Mathf.Max(58f, textHeight + 24f);
+            Vector2 pointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
+            float x = pointer.x + 18f;
+            if (x + width > uiWidth - 8f) x = pointer.x - width - 18f;
+            float y = Mathf.Clamp(pointer.y + 18f, 8f, uiHeight - height - 8f);
+            Rect box = new Rect(Mathf.Clamp(x, 8f, uiWidth - width - 8f), y, width, height);
+            GUI.Box(box, GUIContent.none);
+            GUI.Label(new Rect(box.x + 12f, box.y + 10f, box.width - 24f, box.height - 20f), hoveredOrderTooltip, bodyStyle);
+        }
+
+        private void DrawCollapsedHudTabs(float uiWidth, float uiHeight)
+        {
+            GUIStyle edgeStyle = new GUIStyle(buttonStyle)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontSize = 12,
+                wordWrap = true
+            };
+            float y = uiHeight * .5f - 54f;
+            if (GUI.Button(new Rect(-2f, y, 34f, 108f), "HUD\nH\n›", edgeStyle) ||
+                GUI.Button(new Rect(uiWidth - 32f, y, 34f, 108f), "‹\nH\nHUD", edgeStyle))
+                ToggleHudVisibility();
         }
 
         private void DrawTacticalForcePanel(float uiWidth, float uiHeight)
@@ -10400,10 +10711,16 @@ namespace AlwaysFaithful.Prototype
             return bestDistance <= 1 ? best : null;
         }
 
-        private void OpenOperationalTacticalMap(HexCellView inspected, OperationalBattalionState parentBattalion, bool hasKnownEnemyContact)
+        private void OpenOperationalTacticalMap(HexCellView inspected, OperationalBattalionState parentBattalion, OperationalContactState contact)
         {
             if (parentBattalion != null) SelectOperationalBattalion(operationalFriendlyViews[parentBattalion.Id]);
-            RequestTacticalMap(inspected, hasKnownEnemyContact);
+            tacticalOperationalEngagement = true;
+            tacticalForcePanelOpen = false;
+            tacticalDeploymentActive = false;
+            tacticalOperationalEnemyBattalion = contact == null
+                ? null
+                : operationalEnemyBattalions.Find(candidate => candidate.Id == contact.TargetId);
+            RequestTacticalMap(inspected, tacticalOperationalEnemyBattalion != null);
         }
 
         private void DrawOperationalBriefing(float uiWidth, float uiHeight)
@@ -10473,7 +10790,7 @@ namespace AlwaysFaithful.Prototype
         private string BattalionOrderOfBattleText(OperationalBattalionState battalion, bool includeLocation)
         {
             string subordinates = string.Join(" • ", battalion.SubordinateUnits);
-            return $"{battalion.DisplayName}\n{(includeLocation ? battalion.Position + "  •  " : string.Empty)}Strength {battalion.Strength}%\n{subordinates}";
+            return $"{battalion.DisplayName}\n{(includeLocation ? battalion.Position + "  •  " : string.Empty)}Strength {battalion.Strength}%  •  {battalion.Platoons.Count} platoons\n{subordinates}";
         }
 
         private void DrawOperationalOrderOfBattle(float uiWidth, float uiHeight)
@@ -10540,9 +10857,14 @@ namespace AlwaysFaithful.Prototype
             {
                 KeyCode pressed = Event.current.keyCode;
                 Event.current.Use();
+                bool reserved = pressed == KeyCode.H;
                 bool collision = (awaitingRemapFor == RemapTarget.Cancel && pressed == settings.RemapResetCameraKey) ||
                                   (awaitingRemapFor == RemapTarget.ResetCamera && pressed == settings.RemapCancelKey);
-                if (collision)
+                if (reserved)
+                {
+                    remapRejectionText = "H is reserved for the HUD visibility toggle";
+                }
+                else if (collision)
                 {
                     remapRejectionText = $"{pressed} is already bound to the other action";
                 }
@@ -10757,8 +11079,10 @@ namespace AlwaysFaithful.Prototype
                 DismissSupportCardModal(null);
         }
 
-        private void DrawTacticalInterface(float uiWidth, float uiHeight)
+        private void DrawTacticalInterface(float uiWidth, float uiHeight, bool contextOnly = false)
         {
+            if (!contextOnly)
+            {
             GUI.Box(new Rect(20f, 18f, 405f, 318f), GUIContent.none);
             GUI.Label(new Rect(38f, 30f, 250f, 30f), "ALWAYS FAITHFUL", titleStyle);
             int battleTurn = tacticalObjective != null ? turnState.TurnNumber - tacticalObjective.BattleStartTurn + 1 : turnState.TurnNumber;
@@ -10828,7 +11152,10 @@ namespace AlwaysFaithful.Prototype
             GUI.enabled = true;
 
             bool showSpottedBadge = tacticalUnitSpottedTier != TacticalVisibilityState.Hidden;
-            Rect intelligenceRect = new Rect(uiWidth - 355f, 18f, 335f, 151f + tacticalContacts.Count * 25f + (showSpottedBadge ? 30f : 0f) + 68f);
+            int visibleContactLines = Math.Min(6, tacticalContacts.Count);
+            int overflowContactLines = Math.Max(0, tacticalContacts.Count - visibleContactLines);
+            Rect intelligenceRect = new Rect(uiWidth - 355f, 18f, 335f,
+                151f + visibleContactLines * 25f + (overflowContactLines > 0 ? 22f : 0f) + (showSpottedBadge ? 30f : 0f) + 68f);
             GUI.Box(intelligenceRect, GUIContent.none);
             GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 11f, 290f, 22f), "TACTICAL INTELLIGENCE", badgeStyle);
             GUI.Label(new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 36f, 300f, 38f),
@@ -10836,6 +11163,7 @@ namespace AlwaysFaithful.Prototype
             int contactLine = 0;
             foreach (TacticalUnitState enemy in tacticalEnemyStates)
             {
+                if (contactLine >= visibleContactLines) break;
                 if (!tacticalContacts.TryGetValue(enemy.Id, out TacticalContactState contact)) continue;
                 string stale = contact.IsStale ? " • LAST KNOWN" : string.Empty;
                 string range = contact.State == TacticalVisibilityState.Hidden ? "NO TRACK" : $"{contact.RangeHexes * 250} M";
@@ -10846,7 +11174,14 @@ namespace AlwaysFaithful.Prototype
                     $"{contact.State.ToString().ToUpperInvariant()}{stale}  •  {range}{status}", bodyStyle);
                 contactLine++;
             }
-            Rect speedRect = new Rect(intelligenceRect.x + 16f, intelligenceRect.y + 82f + tacticalContacts.Count * 25f, 300f, 28f);
+            float contactFooterY = intelligenceRect.y + 82f + visibleContactLines * 25f;
+            if (overflowContactLines > 0)
+            {
+                GUI.Label(new Rect(intelligenceRect.x + 16f, contactFooterY, 300f, 20f),
+                    $"+ {overflowContactLines} ADDITIONAL CONTACTS | USE MAP MARKERS", badgeStyle);
+                contactFooterY += 22f;
+            }
+            Rect speedRect = new Rect(intelligenceRect.x + 16f, contactFooterY, 300f, 28f);
             if (GUI.Button(speedRect, fastEnemyAnimation ? "ENEMY SPEED • FAST" : "ENEMY SPEED • CINEMATIC", buttonStyle))
                 fastEnemyAnimation = !fastEnemyAnimation;
             float nextRowY = speedRect.y + 34f;
@@ -10875,26 +11210,6 @@ namespace AlwaysFaithful.Prototype
                 ApplyCamera();
             }
             DrawTacticalCompanyList(uiWidth, uiHeight, intelligenceRect.yMax + 10f, tacticalControlsEnabled);
-            if (tacticalBattlefield.Tutorial != null && tacticalBattlefield.Tutorial.Enabled && !tacticalBattlefield.Tutorial.Completed)
-            {
-                Rect tutorialRect = new Rect(uiWidth / 2f - 240f, uiHeight - 154f, 480f, 48f);
-                GUI.Box(tutorialRect, GUIContent.none);
-                GUI.Label(new Rect(tutorialRect.x + 14f, tutorialRect.y + 8f, tutorialRect.width - 28f, 32f),
-                    $"TRAINING {tacticalBattlefield.Tutorial.Step + 1}/6 • {TacticalStandaloneRules.TutorialPrompt(tacticalBattlefield.Tutorial.Step)}", bodyStyle);
-            }
-
-            if (tacticalReactionActive && !string.IsNullOrEmpty(tacticalReactionBannerText))
-            {
-                Rect bannerRect = new Rect(uiWidth / 2f - 210f, 26f, 420f, 40f);
-                GUI.Box(bannerRect, GUIContent.none);
-                GUI.Label(bannerRect, tacticalReactionBannerText, reactionBannerStyle);
-            }
-            else if (tacticalEnemyTurnActive && !string.IsNullOrEmpty(tacticalEnemyActivityText))
-            {
-                Rect bannerRect = new Rect(uiWidth / 2f - 240f, 26f, 480f, 44f);
-                GUI.Box(bannerRect, GUIContent.none);
-                GUI.Label(bannerRect, tacticalEnemyActivityText, reactionBannerStyle);
-            }
 
             if (hoveredLocalCell != null)
             {
@@ -10917,124 +11232,183 @@ namespace AlwaysFaithful.Prototype
                 Vector2 pointer = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y) / GetUiScale();
                 GUI.Box(new Rect(pointer.x + 16f, pointer.y + 14f, 176f, 28f), tacticalPreviewCost > 0 ? $"ROUTE • {tacticalPreviewCost} AP" : tacticalOrderFeedback);
             }
+            }
             if (tacticalMenuOpen)
             {
                 GUI.Box(tacticalMenuRect, GUIContent.none);
                 GUI.Label(new Rect(tacticalMenuRect.x + 12f, tacticalMenuRect.y + 7f, 154f, 22f), TacticalCompany.ShortRole(InferFriendlyRole(tacticalUnitState.Id)), badgeStyle);
                 GUI.enabled = tacticalUnitState.CanMove;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 34f, 158f, 28f),
-                        tacticalUnitState.CanMove ? $"MOVE • {tacticalUnitState.RemainingActionPoints} AP" : "MOVE • SPENT", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 34f, 158f, 28f),
+                        tacticalUnitState.CanMove ? $"MOVE • {tacticalUnitState.RemainingActionPoints} AP" : "MOVE • SPENT",
+                        "MOVE | Choose a destination and preview its route and AP cost. Movement speed and exposure depend on the selected posture."))
                     BeginTacticalMovePlanning();
                 GUI.enabled = true;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 67f, 158f, 28f), "INSPECT LOS", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 67f, 158f, 28f), "INSPECT LOS",
+                        "INSPECT LOS | Check whether one hex is visible from this platoon. The preview explains terrain, cover, smoke, and elevation effects."))
                     BeginTacticalLosPlanning();
                 TacticalAttackProfile activeAttack = TacticalCombatPower.AttackProfile(tacticalAttackType);
                 GUI.enabled = tacticalUnitState.CanFire && tacticalUnitState.RemainingActionPoints >= activeAttack.ActionPointCost && tacticalWeapon.RemainingAmmunition >= activeAttack.AmmunitionCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 100f, 158f, 28f),
-                        tacticalWeapon.RemainingAmmunition > 0 ? $"DIRECT FIRE • {tacticalWeapon.RemainingAmmunition}" : "DIRECT FIRE • EMPTY", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 100f, 158f, 28f),
+                        tacticalWeapon.RemainingAmmunition > 0 ? $"DIRECT FIRE • {tacticalWeapon.RemainingAmmunition}" : "DIRECT FIRE • EMPTY",
+                        "DIRECT FIRE | Attack an observed enemy platoon. Accuracy, suppression, casualties, AP, and ammunition depend on range, terrain, and attack type."))
                     BeginTacticalFirePlanning();
                 GUI.enabled = tacticalUnitState.CanRally;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 133f, 158f, 28f),
-                        tacticalUnitState.CombatStatus == TacticalCombatStatus.Ready ? "RALLY • READY" : $"RALLY • {tacticalUnitState.CombatStatus.ToString().ToUpperInvariant()}", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 133f, 158f, 28f),
+                        tacticalUnitState.CombatStatus == TacticalCombatStatus.Ready ? "RALLY • READY" : $"RALLY • {tacticalUnitState.CombatStatus.ToString().ToUpperInvariant()}",
+                        "RALLY | Spend AP to remove suppression and improve cohesion. It is useful before moving, firing, or assaulting with a shaken platoon."))
                     IssueTacticalRally();
                 int reconCost = ActiveReconActionPointCost();
                 GUI.enabled = tacticalUnitState.RemainingActionPoints >= reconCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 166f, 158f, 28f),
-                        $"RECON • {reconCost} AP", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 166f, 158f, 28f),
+                        $"RECON • {reconCost} AP",
+                        "RECON | Task sensors against a selected area without requiring LOS. Contacts within the search radius receive improved identification for two turns."))
                     BeginTacticalReconPlanning();
                 GUI.enabled = true;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 199f, 158f, 28f),
-                        tacticalLosOverlayActive ? "LOS OVERLAY • ON" : "LOS OVERLAY • OFF", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 199f, 158f, 28f),
+                        tacticalLosOverlayActive ? "LOS OVERLAY • ON" : "LOS OVERLAY • OFF",
+                        "LOS OVERLAY | Tint all nearby hexes as clear, obscured, or blocked from this platoon's current position. This costs no AP."))
                     ToggleTacticalLosOverlay();
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 232f, 158f, 28f),
-                        $"POSTURE • {tacticalUnitState.MovementPosture.ToString().ToUpperInvariant()}", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 232f, 158f, 28f),
+                        $"POSTURE • {tacticalUnitState.MovementPosture.ToString().ToUpperInvariant()}",
+                        "POSTURE | Cycle Quick, Tactical, or Bounding movement. Quick travels farther but is exposed; Bounding is slower and preserves reaction capability."))
                     CycleMovementPosture();
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 265f, 158f, 28f),
-                        $"REACTION • {tacticalUnitState.ReactionPolicy.ToString().ToUpperInvariant()}", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 265f, 158f, 28f),
+                        $"REACTION • {tacticalUnitState.ReactionPolicy.ToString().ToUpperInvariant()}",
+                        "REACTION | Cycle Weapons Hold, Return Fire, or Weapons Free. The policy controls when reserved reaction points may interrupt enemy movement."))
                     CycleReactionPolicy();
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 298f, 158f, 28f), "FACE SECTOR", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 298f, 158f, 28f), "FACE SECTOR",
+                        "FACE SECTOR | Turn the platoon's covered arc toward a selected hex. Reaction fire is strongest to the front and weaker from flank or rear aspects."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.Face);
                 GUI.enabled = tacticalUnitState.CanFire && tacticalUnitState.RemainingActionPoints >= TacticalFireAndManeuver.SuppressionActionPointCost && tacticalWeapon.RemainingAmmunition >= TacticalFireAndManeuver.SuppressionAmmunitionCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 331f, 158f, 28f), "AREA SUPPRESS", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 331f, 158f, 28f), "AREA SUPPRESS",
+                        "AREA SUPPRESS | Fire into a terrain hex rather than a specific observed target. It spends extra ammunition to pin suspected or concealed defenders."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.AreaSuppress);
                 GUI.enabled = tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalFireAndManeuver.SmokeActionPointCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 364f, 158f, 28f), "DEPLOY SMOKE", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 364f, 158f, 28f), "DEPLOY SMOKE",
+                        "DEPLOY SMOKE | Place a temporary smoke screen within range. Smoke blocks or degrades observation and helps cover movement or disengagement."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.Smoke);
                 GUI.enabled = tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalFireAndManeuver.AssaultActionPointCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 397f, 158f, 28f), "CLOSE ASSAULT", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 397f, 158f, 28f), "CLOSE ASSAULT",
+                        "CLOSE ASSAULT | Attack an adjacent enemy position. Suppress the defender first; cover, cohesion, strength, and the Aggressive trait strongly affect the result."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.Assault);
                 GUI.enabled = true;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 430f, 158f, 28f),
-                        $"ATTACK • {tacticalAttackType.ToString().ToUpperInvariant()}", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 430f, 158f, 28f),
+                        $"ATTACK • {tacticalAttackType.ToString().ToUpperInvariant()}",
+                        "ATTACK TYPE | Cycle Rapid, Hasty, Standard, or Deliberate fire. Faster attacks cost less time; deliberate fire costs more AP for better effect."))
                     CycleAttackType();
                 GUI.enabled = tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalCombatPower.EntrenchActionPointCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 463f, 158f, 28f),
-                        $"ENTRENCH • L{tacticalUnitState.EntrenchmentLevel}", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 463f, 158f, 28f),
+                        $"ENTRENCH • L{tacticalUnitState.EntrenchmentLevel}",
+                        "ENTRENCH | Spend AP and supply to improve this platoon's fighting position. Higher levels reduce incoming fire and improve staying power."))
                     IssueEntrench();
                 GUI.enabled = TacticalPlannedFires.CanOrder(tacticalUnitState, tacticalBattlefield.FireSupport,
                     tacticalUnitState.Position, turnState.TurnNumber, false, out _);
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 496f, 158f, 28f),
-                        $"CALL {FireMissionShortLabel(tacticalFireMissionType)} • {tacticalBattlefield.FireSupport.Ammunition}", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 496f, 158f, 28f),
+                        $"CALL {FireMissionShortLabel(tacticalFireMissionType)} • {tacticalBattlefield.FireSupport.Ammunition}",
+                        "CALL FOR FIRE | Request the selected HE, smoke, or illumination mission. It arrives next turn, may scatter, and consumes limited support ammunition."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.CallForFire);
                 GUI.enabled = tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalCombatPower.ResupplyActionPointCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 529f, 158f, 28f), "RESUPPLY", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 529f, 158f, 28f), "RESUPPLY",
+                        "RESUPPLY | Replenish ammunition and supply while beside a friendly Weapons Platoon. The receiving platoon must have enough AP to complete the transfer."))
                     IssueResupply();
                 GUI.enabled = tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalCombatPower.ReorganizeActionPointCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 562f, 158f, 28f), "REORGANIZE", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 10f, tacticalMenuRect.y + 562f, 158f, 28f), "REORGANIZE",
+                        "REORGANIZE | Spend AP and supply to restore some lasting combat strength after casualties. This is slower than Rally and repairs strength, not suppression."))
                     IssueReorganize();
                 localMovementBoard.TryGetValue(tacticalUnitState.Position, out TacticalMovementCell concealmentCell);
                 GUI.enabled = TacticalConcealmentMorale.CanHide(tacticalUnitState, concealmentCell);
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 34f, 158f, 28f),
-                        tacticalUnitState.IsConcealed ? "HIDE - CONCEALED" : "HIDE - 2 AP", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 34f, 158f, 28f),
+                        tacticalUnitState.IsConcealed ? "HIDE - CONCEALED" : "HIDE - 2 AP",
+                        "HIDE | Use suitable terrain and AP to conceal the platoon. Moving or firing may reveal it; concealed units can gain an ambush advantage."))
                     IssueHide();
                 GUI.enabled = tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalConcealmentMorale.SearchActionPointCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 67f, 158f, 28f), "SEARCH / CLEAR", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 67f, 158f, 28f), "SEARCH / CLEAR",
+                        "SEARCH / CLEAR | Search an adjacent hex for concealed enemies or hidden obstacles. Use this before committing the main body through suspicious terrain."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.Search);
                 GUI.enabled = tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalConcealmentMorale.WithdrawActionPointCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 100f, 158f, 28f), "WITHDRAW", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 100f, 158f, 28f), "WITHDRAW",
+                        "WITHDRAW | Fall back from enemy pressure toward a selected safer hex. This costs AP but can prevent a suppressed platoon from breaking or surrendering."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.Withdraw);
                 bool isEngineer = InferFriendlyRole(tacticalUnitState.Id) == TacticalPlatoonRole.Engineers;
                 GUI.enabled = isEngineer && tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalObstacles.DetectActionPointCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 133f, 158f, 28f), "DETECT / MARK", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 133f, 158f, 28f), "DETECT / MARK",
+                        "DETECT / MARK | Engineers inspect and mark a nearby minefield, wire belt, or roadblock, making the obstacle visible and safer to address."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.DetectObstacle);
                 GUI.enabled = isEngineer && tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalObstacles.HastyBreachActionPointCost &&
                     tacticalUnitState.EngineerSupply >= TacticalObstacles.HastyBreachSupplyCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 166f, 158f, 28f), $"HASTY BREACH • {tacticalUnitState.EngineerSupply}", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 166f, 158f, 28f), $"HASTY BREACH • {tacticalUnitState.EngineerSupply}",
+                        "HASTY BREACH | Engineers rapidly attempt to open an adjacent obstacle. It uses fewer AP but has more risk and creates a less dependable lane."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.HastyBreach);
                 GUI.enabled = isEngineer && tacticalUnitState.CanMove && tacticalUnitState.RemainingActionPoints >= TacticalObstacles.DeliberateBreachActionPointCost &&
                     tacticalUnitState.EngineerSupply >= TacticalObstacles.DeliberateBreachSupplyCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 199f, 158f, 28f), $"DELIB BREACH • {tacticalUnitState.EngineerSupply}", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 199f, 158f, 28f), $"DELIB BREACH • {tacticalUnitState.EngineerSupply}",
+                        "DELIBERATE BREACH | Engineers spend more AP and stores to methodically open an adjacent obstacle, with a better chance of creating a safe lane."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.DeliberateBreach);
                 GUI.enabled = true;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 232f, 158f, 28f),
-                        $"FIRE TYPE • {FireMissionShortLabel(tacticalFireMissionType)}", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 232f, 158f, 28f),
+                        $"FIRE TYPE • {FireMissionShortLabel(tacticalFireMissionType)}",
+                        "FIRE TYPE | Select the payload for the next support or mortar request: HE attacks troops, smoke blocks observation, and illumination reveals night terrain."))
                     CycleFireMissionType();
                 GUI.enabled = tacticalUnitState.RemainingActionPoints >= TacticalPlannedFires.AdjustActionPointCost &&
                     tacticalBattlefield.PlannedFireMissions.Count > 0;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 265f, 158f, 28f), "ADJUST FIRE • 1 AP", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 265f, 158f, 28f), "ADJUST FIRE • 1 AP",
+                        "ADJUST FIRE | Use the previous aim point to improve the accuracy of a later mission. Adjustment costs 1 AP and reduces likely scatter."))
                     IssueAdjustFire();
                 bool isWeapons = InferFriendlyRole(tacticalUnitState.Id) == TacticalPlatoonRole.Weapons;
                 GUI.enabled = isWeapons && !tacticalUnitState.MortarIsDeployed && tacticalUnitState.RemainingActionPoints >= TacticalPlannedFires.MortarSetupActionPointCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 298f, 158f, 28f), "SET UP MORTARS", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 298f, 158f, 28f), "SET UP MORTARS",
+                        "SET UP MORTARS | Emplace a Weapons Platoon's organic mortars. The platoon must not have moved or fired; displacement is required before moving again."))
                     IssueMortarSetup();
                 GUI.enabled = isWeapons && tacticalUnitState.MortarIsDeployed && tacticalUnitState.MortarRounds > 0 &&
                     tacticalUnitState.RemainingActionPoints >= TacticalPlannedFires.MortarFireActionPointCost;
-                if (GUI.Button(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 331f, 158f, 28f),
-                        $"MORTAR {FireMissionShortLabel(SelectedMortarMissionType())} • {tacticalUnitState.MortarRounds}", buttonStyle))
+                if (DrawOrderButton(new Rect(tacticalMenuRect.x + 178f, tacticalMenuRect.y + 331f, 158f, 28f),
+                        $"MORTAR {FireMissionShortLabel(SelectedMortarMissionType())} • {tacticalUnitState.MortarRounds}",
+                        "MORTAR FIRE | Order this emplaced Weapons Platoon's organic mortar mission. It uses its own limited rounds rather than the supporting-fire pool."))
                     BeginTacticalSpecialOrder(TacticalSpecialOrder.MortarFire);
                 GUI.enabled = true;
             }
+            if (!contextOnly)
+            {
             GUI.Box(new Rect(uiWidth - 310f, uiHeight - 100f, 288f, 78f), GUIContent.none);
-            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Orders  •  LMB Confirm\nMMB Orbit  •  Shift+MMB/WASD Pan  •  Wheel Zoom\nQ/E Rotate  •  Page Up/Down Tilt", bodyStyle);
+            GUI.Label(new Rect(uiWidth - 294f, uiHeight - 87f, 272f, 62f), "RMB Orders  •  LMB Confirm\nMMB Orbit  •  Shift+MMB/WASD Pan  •  Wheel Zoom\nQ/E Rotate  •  PgUp/Dn Tilt  •  H Hide HUD", bodyStyle);
+            }
+        }
+
+        private void DrawTacticalCenterNotices(float uiWidth, float uiHeight)
+        {
+            if (tacticalBattlefield?.Tutorial != null && tacticalBattlefield.Tutorial.Enabled && !tacticalBattlefield.Tutorial.Completed)
+            {
+                Rect tutorialRect = new Rect(uiWidth / 2f - 240f, uiHeight - 154f, 480f, 48f);
+                GUI.Box(tutorialRect, GUIContent.none);
+                GUI.Label(new Rect(tutorialRect.x + 14f, tutorialRect.y + 8f, tutorialRect.width - 28f, 32f),
+                    $"TRAINING {tacticalBattlefield.Tutorial.Step + 1}/6 • {TacticalStandaloneRules.TutorialPrompt(tacticalBattlefield.Tutorial.Step)}", bodyStyle);
+            }
+            if (tacticalReactionActive && !string.IsNullOrEmpty(tacticalReactionBannerText))
+            {
+                Rect bannerRect = new Rect(uiWidth / 2f - 210f, 26f, 420f, 40f);
+                GUI.Box(bannerRect, GUIContent.none);
+                GUI.Label(bannerRect, tacticalReactionBannerText, reactionBannerStyle);
+            }
+            else if (tacticalEnemyTurnActive && !string.IsNullOrEmpty(tacticalEnemyActivityText))
+            {
+                Rect bannerRect = new Rect(uiWidth / 2f - 240f, 26f, 480f, 44f);
+                GUI.Box(bannerRect, GUIContent.none);
+                GUI.Label(bannerRect, tacticalEnemyActivityText, reactionBannerStyle);
+            }
         }
 
         private void DrawTacticalCompanyList(float uiWidth, float uiHeight, float requestedY, bool controlsEnabled)
         {
-            float height = 46f + tacticalFriendlyStates.Count * 32f;
-            float y = Mathf.Min(requestedY, uiHeight - height - 112f);
+            float contentHeight = tacticalFriendlyStates.Count * 32f;
+            float y = Mathf.Min(requestedY, uiHeight - 212f);
+            float height = Mathf.Min(300f, Mathf.Max(100f, uiHeight - y - 112f));
             Rect panel = new Rect(uiWidth - 355f, y, 335f, height);
             GUI.Box(panel, GUIContent.none);
-            GUI.Label(new Rect(panel.x + 16f, panel.y + 10f, 300f, 22f), "COMPANY • N NEXT • TAB NEXT ACTIONABLE", badgeStyle);
+            GUI.Label(new Rect(panel.x + 16f, panel.y + 10f, 300f, 22f),
+                tacticalOperationalEngagement ? "BATTALION | N NEXT | TAB NEXT ACTIONABLE" : "COMPANY | N NEXT | TAB NEXT ACTIONABLE", badgeStyle);
+            Rect viewport = new Rect(panel.x + 8f, panel.y + 36f, panel.width - 16f, panel.height - 44f);
+            Rect content = new Rect(0f, 0f, viewport.width - 18f, Math.Max(viewport.height, contentHeight));
+            tacticalCompanyScroll = GUI.BeginScrollView(viewport, tacticalCompanyScroll, content);
             for (int index = 0; index < tacticalFriendlyStates.Count; index++)
             {
                 TacticalUnitState friendly = tacticalFriendlyStates[index];
@@ -11044,7 +11418,7 @@ namespace AlwaysFaithful.Prototype
                     : friendly.CombatStatus == TacticalCombatStatus.Ready ? friendly.Readiness.ToString().ToUpperInvariant() : friendly.CombatStatus.ToString().ToUpperInvariant();
                 string label = $"{(active ? "▶ " : string.Empty)}{friendly.DisplayName} • {friendly.RemainingActionPoints} AP • {status}";
                 GUI.enabled = controlsEnabled;
-                if (GUI.Button(new Rect(panel.x + 12f, panel.y + 38f + index * 32f, panel.width - 24f, 27f), label, buttonStyle))
+                if (GUI.Button(new Rect(2f, index * 32f, content.width - 4f, 27f), label, buttonStyle))
                 {
                     CancelTacticalInteraction(false);
                     SetActiveTacticalFriendly(friendly.Id, true);
@@ -11053,6 +11427,7 @@ namespace AlwaysFaithful.Prototype
                 }
                 GUI.enabled = true;
             }
+            GUI.EndScrollView();
         }
 
         // Default ramp is a single warm hue (red-orange-yellow), which reads

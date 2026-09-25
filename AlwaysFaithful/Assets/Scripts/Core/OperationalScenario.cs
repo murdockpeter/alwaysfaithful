@@ -16,6 +16,25 @@ namespace AlwaysFaithful.Core
         PlaVictory
     }
 
+    public enum OperationalBattalionConfiguration
+    {
+        UsmcReinforcedAssault,
+        UsmcLittoralScreen,
+        PlaAmphibiousCombinedArms,
+        PlaReconnaissance
+    }
+
+    [Serializable]
+    public sealed class OperationalPlatoonState
+    {
+        public string Id;
+        public string DisplayName;
+        public string ParentCompany;
+        public TacticalPlatoonRole Role;
+        public int Strength = TacticalCombatPower.DefaultStrength;
+        public int MaximumStrength = TacticalCombatPower.DefaultStrength;
+    }
+
     [Serializable]
     public sealed class OperationalBattalionState
     {
@@ -30,7 +49,11 @@ namespace AlwaysFaithful.Core
         public int RemainingActionPoints = 4;
         public UnitReadiness Readiness = UnitReadiness.Available;
         public bool IsSelected;
+        public OperationalBattalionConfiguration Configuration;
         public List<string> SubordinateUnits = new List<string>();
+        // The persistent, platoon-scale order of battle used verbatim whenever
+        // this operational counter is opened on the 250 m tactical map.
+        public List<OperationalPlatoonState> Platoons = new List<OperationalPlatoonState>();
 
         public bool CanAct => Strength > 0 && Readiness == UnitReadiness.Available && RemainingActionPoints > 0;
 
@@ -196,7 +219,7 @@ namespace AlwaysFaithful.Core
             {
                 if (battalion == null || battalion.Side != OperationalSide.Usmc || string.IsNullOrWhiteSpace(battalion.Id) ||
                     string.IsNullOrWhiteSpace(battalion.DisplayName) || battalion.Strength < 0 || battalion.Strength > 100 ||
-                    battalion.SubordinateUnits == null || !ids.Add(battalion.Id))
+                    battalion.SubordinateUnits == null || battalion.Platoons == null || battalion.Platoons.Count == 0 || !ids.Add(battalion.Id))
                 {
                     error = "Operational scenario contains a malformed friendly battalion";
                     return false;
@@ -206,7 +229,7 @@ namespace AlwaysFaithful.Core
             {
                 if (battalion == null || battalion.Side != OperationalSide.Pla || string.IsNullOrWhiteSpace(battalion.Id) ||
                     string.IsNullOrWhiteSpace(battalion.DisplayName) || battalion.Strength < 0 || battalion.Strength > 100 ||
-                    battalion.SubordinateUnits == null || !ids.Add(battalion.Id))
+                    battalion.SubordinateUnits == null || battalion.Platoons == null || battalion.Platoons.Count == 0 || !ids.Add(battalion.Id))
                 {
                     error = "Operational scenario contains a malformed enemy battalion";
                     return false;
@@ -252,6 +275,95 @@ namespace AlwaysFaithful.Core
             }
             summary = null;
             return OperationalScenarioOutcome.InProgress;
+        }
+
+        public static List<OperationalPlatoonState> BuildPlatoons(
+            string battalionId, string battalionShortName, OperationalBattalionConfiguration configuration)
+        {
+            var result = new List<OperationalPlatoonState>();
+            switch (configuration)
+            {
+                case OperationalBattalionConfiguration.UsmcReinforcedAssault:
+                    AddThreeRifleCompanies(result, battalionId, battalionShortName, "Alpha", "Bravo", "Charlie");
+                    Add(result, battalionId, battalionShortName, "Weapons Company", "Mortar Platoon", "mortars", TacticalPlatoonRole.Weapons);
+                    Add(result, battalionId, battalionShortName, "Weapons Company", "Combined Antiarmor Platoon", "antiarmor", TacticalPlatoonRole.Weapons);
+                    Add(result, battalionId, battalionShortName, "Attached Engineers", "Combat Engineer Platoon", "engineers", TacticalPlatoonRole.Engineers);
+                    break;
+                case OperationalBattalionConfiguration.UsmcLittoralScreen:
+                    AddThreeRifleCompanies(result, battalionId, battalionShortName, "Echo", "Fox", "Golf");
+                    Add(result, battalionId, battalionShortName, "Weapons Company", "Mortar Platoon", "mortars", TacticalPlatoonRole.Weapons);
+                    Add(result, battalionId, battalionShortName, "Weapons Company", "Combined Antiarmor Platoon", "antiarmor", TacticalPlatoonRole.Weapons);
+                    Add(result, battalionId, battalionShortName, "Attached Reconnaissance", "Scout Platoon", "recon", TacticalPlatoonRole.Reconnaissance);
+                    break;
+                case OperationalBattalionConfiguration.PlaReconnaissance:
+                    AddThreeReconCompanies(result, battalionId, battalionShortName, "1st Recon", "2d Recon", "3d Recon");
+                    Add(result, battalionId, battalionShortName, "Support Company", "Firepower Platoon", "firepower-1", TacticalPlatoonRole.Weapons);
+                    Add(result, battalionId, battalionShortName, "Support Company", "UAS / Support Platoon", "support-2", TacticalPlatoonRole.Weapons);
+                    break;
+                default:
+                    AddThreeRifleCompanies(result, battalionId, battalionShortName, "1st Maneuver", "2d Maneuver", "3d Maneuver");
+                    Add(result, battalionId, battalionShortName, "Firepower Company", "Mortar Platoon", "mortars", TacticalPlatoonRole.Weapons);
+                    Add(result, battalionId, battalionShortName, "Firepower Company", "Antiarmor Platoon", "antiarmor", TacticalPlatoonRole.Weapons);
+                    Add(result, battalionId, battalionShortName, "Firepower Company", "Machine Gun Platoon", "machine-guns", TacticalPlatoonRole.Weapons);
+                    break;
+            }
+            return result;
+        }
+
+        public static void EnsurePlatoonOrderOfBattle(OperationalBattalionState battalion)
+        {
+            if (battalion == null) return;
+            if (battalion.Platoons == null) battalion.Platoons = new List<OperationalPlatoonState>();
+            if (battalion.Platoons.Count == 0)
+            {
+                battalion.Platoons = BuildPlatoons(battalion.Id, battalion.ShortName, battalion.Configuration);
+                foreach (OperationalPlatoonState platoon in battalion.Platoons)
+                    platoon.Strength = Math.Max(0, Math.Min(platoon.MaximumStrength, battalion.Strength));
+            }
+        }
+
+        public static int SynchronizeBattalionStrength(OperationalBattalionState battalion)
+        {
+            if (battalion?.Platoons == null || battalion.Platoons.Count == 0) return battalion?.Strength ?? 0;
+            int remaining = 0;
+            int maximum = 0;
+            foreach (OperationalPlatoonState platoon in battalion.Platoons)
+            {
+                remaining += Math.Max(0, platoon.Strength);
+                maximum += Math.Max(1, platoon.MaximumStrength);
+            }
+            battalion.Strength = maximum == 0 ? 0 : (int)Math.Round(remaining * 100.0 / maximum);
+            return battalion.Strength;
+        }
+
+        private static void AddThreeRifleCompanies(List<OperationalPlatoonState> result, string id, string shortName, params string[] companies)
+        {
+            foreach (string company in companies)
+                for (int platoon = 1; platoon <= 3; platoon++)
+                    Add(result, id, shortName, company + " Company", $"{company} {platoon}{Ordinal(platoon)} Rifle Platoon",
+                        company.ToLowerInvariant() + "-rifle-" + platoon, TacticalPlatoonRole.Rifle);
+        }
+
+        private static void AddThreeReconCompanies(List<OperationalPlatoonState> result, string id, string shortName, params string[] companies)
+        {
+            foreach (string company in companies)
+                for (int platoon = 1; platoon <= 3; platoon++)
+                    Add(result, id, shortName, company + " Company", $"{company} {platoon}{Ordinal(platoon)} Recon Platoon",
+                        company.ToLowerInvariant().Replace(" ", "-") + "-recon-" + platoon, TacticalPlatoonRole.Reconnaissance);
+        }
+
+        private static string Ordinal(int value) => value == 1 ? "st" : value == 2 ? "d" : "d";
+
+        private static void Add(List<OperationalPlatoonState> result, string battalionId, string shortName,
+            string company, string name, string suffix, TacticalPlatoonRole role)
+        {
+            result.Add(new OperationalPlatoonState
+            {
+                Id = battalionId + "-" + suffix,
+                DisplayName = shortName + " " + name,
+                ParentCompany = company,
+                Role = role
+            });
         }
     }
 }

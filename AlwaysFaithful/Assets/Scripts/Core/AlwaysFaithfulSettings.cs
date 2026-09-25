@@ -90,6 +90,11 @@ namespace AlwaysFaithful.Core
                 error = "Settings file binds Cancel and Reset Camera to the same key";
                 return false;
             }
+            if (settings.RemapCancelKey == KeyCode.H || settings.RemapResetCameraKey == KeyCode.H)
+            {
+                error = "H is reserved for collapsing and restoring the HUD";
+                return false;
+            }
             error = null;
             return true;
         }

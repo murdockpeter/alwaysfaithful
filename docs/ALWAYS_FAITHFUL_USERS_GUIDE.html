@@ -193,7 +193,7 @@
       <section id="welcome">
         <h2>1. What kind of game is this?</h2>
         <p><em>Always Faithful</em> is a turn-based command game played at two connected scales. On the <strong>operational map</strong>, each hex is roughly 4 kilometers across and you maneuver battalions around Taiwan. When opposing forces meet, you can open a detailed <strong>tactical battlefield</strong>, where each hex represents 250 meters and each friendly counter is a platoon.</p>
-        <p>You do not need to be a military expert. The heart of the game is simple: find the enemy before they find you, use terrain to approach safely, suppress defenders, and move another platoon into the decisive position. Your company fights as a team; a lone counter is rarely the answer.</p>
+        <p>You do not need to be a military expert. The heart of the game is simple: find the enemy before they find you, use terrain to approach safely, suppress defenders, and move another platoon into the decisive position. Your battalion fights as a team; a lone counter is rarely the answer.</p>
 
         <div class="card-grid">
           <div class="card"><h3>Operational command</h3><p>Move battalions, scout uncertain areas, manage contacts, and choose where to accept battle.</p></div>
@@ -210,7 +210,7 @@
           <li><strong>Choose a friendly force.</strong> On the Taiwan map, select a USMC battalion. Its available actions and information appear in the interface.</li>
           <li><strong>Find or approach a contact.</strong> Operational reconnaissance helps reveal uncertain enemy locations. A contact may be incomplete or stale, so do not treat every marker as perfect information.</li>
           <li><strong>Open the local map.</strong> Select a land hex and choose <strong>Open 250m Map</strong>. If that hex contains an operational contact, use <strong>Resolve Contact</strong> to fight it. A hex without a contact produces an enemy-free local map.</li>
-          <li><strong>Configure the company.</strong> Pick the mission conditions if the setup panel offers them, then select <strong>Balanced</strong>, <strong>Recon</strong>, or <strong>Assault</strong>. You always receive three rifle platoons plus the chosen specialist.</li>
+          <li><strong>Take command of the battalion.</strong> In the island campaign there is no force picker: the selected battalion's complete, prearranged platoon roster enters the local map, along with the exact enemy battalion behind a resolved contact.</li>
           <li><strong>Deploy.</strong> Place your platoons inside the friendly deployment zone, shown by the teal boundary. Spread out enough to avoid crowding while keeping platoons close enough to support one another.</li>
           <li><strong>Scout before shooting.</strong> Select a platoon and use <strong>Recon</strong> or <strong>Inspect LOS</strong>. Direct fire needs a current, observed enemy—not just a rumor of one.</li>
           <li><strong>Use two platoons together.</strong> Have one platoon suppress or smoke the threat; move another by a covered route. Finish with deliberate fire or a close assault only when the defender is weakened.</li>
@@ -225,7 +225,7 @@
           <thead><tr><th>What you want to do</th><th>Control</th></tr></thead>
           <tbody>
             <tr><td>Select a friendly platoon or a map hex</td><td>Left-click. You can also select a platoon from the company list.</td></tr>
-            <tr><td>Open a platoon's orders</td><td>Right-click the friendly platoon. Left-click confirms the destination or target after you choose an order.</td></tr>
+            <tr><td>Open a platoon's orders</td><td>Right-click the friendly platoon. This opens only its order menu and does not change the current <kbd>H</kbd> HUD state. Hover over any order—including an unavailable one—for a plain-language explanation, then left-click an available order.</td></tr>
             <tr><td>Next friendly platoon</td><td><kbd>N</kbd></td></tr>
             <tr><td>Next platoon that can still act</td><td><kbd>Tab</kbd></td></tr>
             <tr><td>Pan the map</td><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>, arrow keys, or <kbd>Shift</kbd> + middle-mouse drag</td></tr>
@@ -234,6 +234,7 @@
             <tr><td>Rotate left/right</td><td><kbd>Q</kbd> / <kbd>E</kbd></td></tr>
             <tr><td>Tilt camera</td><td><kbd>Page Up</kbd> / <kbd>Page Down</kbd></td></tr>
             <tr><td>Reset camera</td><td><kbd>R</kbd> by default</td></tr>
+            <tr><td>Hide or restore the side HUD</td><td><kbd>H</kbd>, or click either slim HUD edge tab while hidden. Unit order menus remain independently available.</td></tr>
             <tr><td>Cancel the current order</td><td><kbd>Esc</kbd> by default</td></tr>
           </tbody>
         </table>
@@ -261,8 +262,9 @@
       </section>
 
       <section id="battle-setup">
-        <h2>5. Building and deploying your company</h2>
-        <p>Your core company contains <strong>three rifle platoons</strong>. Choose one package to add a fourth specialist:</p>
+        <h2>5. Your tactical force</h2>
+        <p>In the island campaign, the operational counter and tactical force are the same formation at two scales. The game does not ask you to invent a force after contact. <strong>1/4</strong> brings nine rifle platoons, two weapons platoons, and its attached combat engineer platoon. <strong>2/4</strong> brings nine rifle platoons, two weapons platoons, and its attached scout platoon. Prior platoon losses remain attached to those named units in later battles.</p>
+        <p>The smaller four-platoon packages below belong only to an explicitly standalone Quick Battle:</p>
         <table>
           <thead><tr><th>Company</th><th>Specialist</th><th>Why choose it?</th></tr></thead>
           <tbody>
@@ -271,10 +273,11 @@
             <tr><td><strong>Assault</strong></td><td>Combat Engineer Platoon</td><td>Detects and breaches obstacles and attacks strongpoints. It begins with 9 AP and 5 engineer stores.</td></tr>
           </tbody>
         </table>
-        <p>The setup screen may also let you choose the mission, weather, light, enemy difficulty, turn limit, and tutorial. These are explained under <a href="#quick-battle">Quick Battle</a>.</p>
+        <p>With the <strong>Miniature</strong> counter style, specialist attachments are also easy to recognize: the Weapons Platoon is represented by M249 and MAAWS gunners, while the Combat Engineer Platoon uses a technical command group with an EW operator, officer, and riflemen. These figure choices are visual identification; the rules and statistics listed above are unchanged.</p>
+        <p>A standalone setup screen may also let you choose the mission, weather, light, enemy difficulty, turn limit, and tutorial. These are explained under <a href="#quick-battle">Quick Battle</a>. Campaign contacts skip this screen because the island situation has already supplied those facts.</p>
         <h3>Deployment</h3>
         <p>Place every friendly platoon within 3 hexes of the friendly entry area. The teal ring marks this deployment zone; the gold ring marks the main objective. A green objective ring means USMC forces currently control it.</p>
-        <p>During the battle, use the company list to jump directly to a platoon. <kbd>N</kbd> cycles through all friendly platoons, while <kbd>Tab</kbd> skips to one that still has an action available.</p>
+        <p>During the battle, use the formation list to jump directly to a platoon. <kbd>N</kbd> cycles through all friendly platoons, while <kbd>Tab</kbd> skips to one that still has an action available.</p>
         <figure class="guide-shot">
           <img src="images/always-faithful/tactical-battlefield-map.png" alt="A tactical battlefield showing several friendly platoon miniatures, highlighted movement range, and an orange planned route across 250-meter hexes." width="1280" height="720" loading="lazy" />
           <figcaption><strong>Reading a planned move.</strong> The selected platoon is surrounded by bright selection rings. Tinted hexes show reachable ground, while the orange hex chain is the proposed route and its endpoint. The other miniature groups are separate platoons—keep them close enough to support the move without stacking the whole company on one route.</figcaption>
