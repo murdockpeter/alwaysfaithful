@@ -16,7 +16,9 @@ namespace AlwaysFaithful.Core
         Recon,
         Hide,
         Search,
-        Withdraw
+        Withdraw,
+        Smoke,
+        AreaSuppress
     }
 
     [Serializable]
@@ -99,6 +101,15 @@ namespace AlwaysFaithful.Core
                 return Hold(order, "No safe fallback route");
             }
 
+            if (unit.CombatStatus == TacticalCombatStatus.Suppressed && unit.RemainingActionPoints >= TacticalFireAndManeuver.SmokeActionPointCost)
+            {
+                order.Kind = TacticalAiOrderKind.Smoke;
+                order.Destination = unit.Position;
+                order.ActionPointCost = TacticalFireAndManeuver.SmokeActionPointCost;
+                order.Intent = "Screen a suppressed position before maneuver";
+                return order;
+            }
+
             TacticalFirePreview fire = TacticalDirectFire.Preview(board, unit.Id, unit.Position,
                 opponentContact, opponent.Position, weapon, unit.RemainingActionPoints);
             if (unit.CanFire && fire.IsValid)
@@ -108,6 +119,19 @@ namespace AlwaysFaithful.Core
                 order.Destination = opponent.Position;
                 order.ActionPointCost = TacticalDirectFire.ActionPointCost;
                 order.Intent = "Engage observed opposing formation";
+                return order;
+            }
+
+            if (unit.CanFire && opponentContact.State != TacticalVisibilityState.Hidden && !opponentContact.IsStale &&
+                unit.RemainingActionPoints >= TacticalFireAndManeuver.SuppressionActionPointCost &&
+                weapon.RemainingAmmunition >= TacticalFireAndManeuver.SuppressionAmmunitionCost &&
+                HexCoord.Distance(unit.Position, opponentContact.LastKnownPosition) <= TacticalFireAndManeuver.SuppressionRangeHexes)
+            {
+                order.Kind = TacticalAiOrderKind.AreaSuppress;
+                order.TargetId = opponent.Id;
+                order.Destination = opponentContact.LastKnownPosition;
+                order.ActionPointCost = TacticalFireAndManeuver.SuppressionActionPointCost;
+                order.Intent = "Suppress a known area before advancing";
                 return order;
             }
 
@@ -248,6 +272,18 @@ namespace AlwaysFaithful.Core
                         !string.IsNullOrEmpty(withdrawCell.OccupantId) && withdrawCell.OccupantId != unit.Id ||
                         HexCoord.Distance(unit.Position, order.Destination) != TacticalConcealmentMorale.WithdrawRangeHexes)
                         return Reject(out rejection, "Withdrawal route is not legal");
+                    return true;
+                case TacticalAiOrderKind.Smoke:
+                    if (order.ActionPointCost != TacticalFireAndManeuver.SmokeActionPointCost ||
+                        !order.Destination.Equals(unit.Position) || unit.RemainingActionPoints < order.ActionPointCost)
+                        return Reject(out rejection, "Smoke order is not legal");
+                    return true;
+                case TacticalAiOrderKind.AreaSuppress:
+                    if (order.ActionPointCost != TacticalFireAndManeuver.SuppressionActionPointCost ||
+                        weapon.RemainingAmmunition < TacticalFireAndManeuver.SuppressionAmmunitionCost ||
+                        unit.RemainingActionPoints < order.ActionPointCost ||
+                        HexCoord.Distance(unit.Position, order.Destination) > TacticalFireAndManeuver.SuppressionRangeHexes)
+                        return Reject(out rejection, "Area suppression is not legal");
                     return true;
                 case TacticalAiOrderKind.Hold:
                     return true;

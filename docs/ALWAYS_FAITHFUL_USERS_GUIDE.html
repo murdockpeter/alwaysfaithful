@@ -417,6 +417,19 @@
         <h3>Deploy Smoke</h3>
         <p>Spend 2 AP to place smoke within 2 hexes (500 m). Smoke lasts two turns and obscures lines of sight. Put it <em>between</em> the enemy and the platoon that must move. Remember that it can also block your own supporting fire.</p>
 
+        <h3>Planned supporting fires</h3>
+        <p><strong>Call Fire</strong> no longer strikes immediately. First use <strong>Fire Type</strong> to choose HE, Smoke, or Illumination, then spend 3 AP and select a land hex within 12 hexes (3 km). An orange aim-point marker shows the ammunition type and countdown. The mission arrives at the start of your next turn, after the enemy has had one phase to react.</p>
+        <ul>
+          <li><strong>HE:</strong> suppresses and damages every friendly or enemy platoon within one hex of the actual impact. Check the <strong>DANGER CLOSE</strong> warning before confirming.</li>
+          <li><strong>Smoke:</strong> screens the impact hex and its neighbors for two turns.</li>
+          <li><strong>Illumination:</strong> lights a three-hex radius for two turns, improving contacts with an unblocked line of sight to Observed. It is especially valuable at night.</li>
+        </ul>
+        <p>Scatter is smallest against an Observed contact and largest against an unseen hex. The Recon Platoon is a better observer. <strong>Adjust Fire</strong> spends 1 AP to register the last requested point; repeat missions there scatter less. Company fire support carries four rounds and cannot accept another mission until its two-turn reload interval has passed.</p>
+        <div class="callout tip"><strong>Plan a turn ahead:</strong> suppress a position with direct fire, request HE or smoke on its likely route, and place another platoon where it can exploit the impact. The enemy may leave a visible aim point rather than wait under it.</div>
+
+        <h3>Weapons Platoon mortars</h3>
+        <p>The Weapons Platoon carries four separate mortar rounds. Spend 2 AP on <strong>Set Up Mortars</strong> before firing. A mortar mission costs another 2 AP, reaches 2–6 hexes (500–1,500 m), and arrives next turn. The selected Fire Type chooses mortar HE or smoke; illumination is not available to the organic mortars. Moving automatically displaces the tubes, so they must be set up again at the new position.</p>
+
         <h3>Close Assault</h3>
         <p>An adjacent platoon may spend 4 AP to assault. Success depends heavily on the suppression of both sides and the defender's cover. A successful assault removes 35 defender strength, displaces the defender, and leaves it Reduced. A failed assault gives the attacker 2 suppression and costs it 10 strength.</p>
         <div class="callout warning"><strong>Do not assault a fresh strongpoint.</strong> Suppress it first, screen supporting enemies with smoke, and send in a platoon that is still cohesive.</div>
@@ -437,7 +450,7 @@
         <p>A platoon beside a Weapons Platoon can spend 2 AP to receive supplies. The Weapons Platoon spends 2 of its own supply; the recipient gains 3 supply and 3 ammunition, up to its normal limits. Protect that Weapons Platoon—it is both a combat formation and your local logistics hub.</p>
 
         <h3>Call for Fire</h3>
-        <p>Spend 3 AP to call supporting fires onto a hex within 12 hexes (3 km). The company has two fire missions per battle. The strike affects a one-hex radius; affected enemies take 45 suppression and 15 strength damage. It is ideal for opening a defended objective or rescuing a stalled attack.</p>
+        <p>The detailed planned-fire rules are in the combat section above. In short: spend 3 AP to request one of four company-support rounds within 12 hexes. It arrives next turn, may scatter, and then enters its reload interval. HE affects every formation—friendly or enemy—within one hex of the impact.</p>
 
         <h3>Support cards</h3>
         <p>Support cards are prepared before battle, and the hand holds up to four. If space remains, a new deterministic card is awarded after an engagement.</p>
@@ -587,7 +600,11 @@
             <tr><td><strong>Close Assault</strong></td><td>Attempts to overrun an adjacent enemy.</td><td>4 AP; risky against cohesive, covered defenders.</td></tr>
             <tr><td><strong>Attack</strong></td><td>Cycles Hasty, Standard, Deliberate, and Rapid profiles.</td><td>Use Direct Fire afterward to execute the attack.</td></tr>
             <tr><td><strong>Entrench</strong></td><td>Builds one directional position level, to a maximum of 2.</td><td>4 AP; face first; only before moving/firing; movement removes it.</td></tr>
-            <tr><td><strong>Call Fire</strong></td><td>Hits a target hex and its neighboring hexes with supporting fire.</td><td>3 AP, range 12, two missions per battle.</td></tr>
+            <tr><td><strong>Call HE / Smoke / Illumination</strong></td><td>Requests a supporting-fire mission that arrives next turn.</td><td>3 AP, range 12, four rounds, two-turn reload; may scatter.</td></tr>
+            <tr><td><strong>Fire Type</strong></td><td>Cycles HE, Smoke, and Illumination for the next support or mortar order.</td><td>Mortars translate Illumination selection to HE.</td></tr>
+            <tr><td><strong>Adjust Fire</strong></td><td>Registers the previous aim point to reduce later scatter there.</td><td>1 AP and at least one requested mission.</td></tr>
+            <tr><td><strong>Set Up Mortars</strong></td><td>Emplaces the Weapons Platoon's organic mortars.</td><td>Weapons only; 2 AP; no prior move/fire. Moving cancels setup.</td></tr>
+            <tr><td><strong>Mortar HE / Smoke</strong></td><td>Requests delayed organic fire from the emplaced Weapons Platoon.</td><td>2 AP, range 2–6, four mortar rounds.</td></tr>
             <tr><td><strong>Resupply</strong></td><td>Transfers 3 supply and 3 ammo from an adjacent Weapons Platoon.</td><td>2 AP; Weapons Platoon spends 2 supply.</td></tr>
             <tr><td><strong>Reorganize</strong></td><td>Restores 15 strength and removes 40 suppression.</td><td>4 AP and 2 supply; unavailable after moving/firing.</td></tr>
             <tr><td><strong>Hide</strong></td><td>Conceals the platoon and prepares an ambush.</td><td>2 AP; requires Medium/Heavy cover and no move or fire this turn.</td></tr>

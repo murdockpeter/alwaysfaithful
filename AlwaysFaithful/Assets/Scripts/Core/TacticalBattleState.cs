@@ -46,6 +46,10 @@ namespace AlwaysFaithful.Core
         public int EntrenchmentFacingSector;
         public int EngineerSupply;
         public int MaximumEngineerSupply;
+        public bool MortarIsDeployed;
+        public HexCoord MortarSetupPosition;
+        public int MortarRounds;
+        public int MaximumMortarRounds;
         public bool IsReserve;
         public bool HasArrived = true;
         public int ReinforcementTurn;

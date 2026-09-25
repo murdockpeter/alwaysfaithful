@@ -122,6 +122,17 @@ Campaign progression inside Always Faithful, previously listed here, is now impl
 - [x] Turn breached obstacles into persistent safe lanes; friendly route planning and PLA AI both value obstacle ownership, hostile belts, and opened lanes.
 - [x] Add a three-obstacle pre-battle placement budget to Defend missions and a breach-lane secondary objective to engineer-led Attack missions.
 - [x] Add directional fighting positions: full protection forward, half on the flank, none from the rear; engineers gain a close-assault bonus against covered or entrenched defenders.
+
+## Standalone Package 7 — Planned Fires
+
+- [x] Replace immediate supporting fire with next-turn delivery and a visible friendly aim-point countdown.
+- [x] Derive scatter from contact quality, Recon observer skill, and persistent Adjust Fire corrections.
+- [x] Add HE, Smoke, and Illumination support missions with danger-close effects on both sides.
+- [x] Add a four-round fire-support pool and two-turn reload interval.
+- [x] Give the Weapons Platoon organic HE/smoke mortars with setup, displacement, ammunition, and 2–6 hex range.
+- [x] Let PLA formations evade suspected incoming fire and use smoke or area suppression before maneuver.
+- [x] Surface missions in hex inspection, map markers, event history, and the AAR.
+- [x] Persist Package 7 state in battlefield schema 19 and add `--planned-fires-regression`.
 - [ ] A graphical scenario editor remains a later authoring-tool project; the runtime schema and loader are now in place.
 
 These are not rejected features. They are deferred so Phase I can prove the core decision loop, presentation language, deterministic architecture, and Sea of Uncertainty handoff first.

@@ -19,7 +19,7 @@ namespace AlwaysFaithful.Core
     [Serializable]
     public sealed class TacticalBattlefieldState
     {
-        public const int CurrentSchemaVersion = 18;
+        public const int CurrentSchemaVersion = 19;
 
         public int SchemaVersion = CurrentSchemaVersion;
         public string BattlefieldId;
@@ -86,6 +86,13 @@ namespace AlwaysFaithful.Core
         // history that prevents hidden obstacles leaking into route planning.
         public List<TacticalObstacleState> Obstacles = new List<TacticalObstacleState>();
         public List<TacticalObstacleEvent> ObstacleEvents = new List<TacticalObstacleEvent>();
+
+        // Schema 19: delayed company and organic fires, persistent adjustment,
+        // aim points, illumination, ammunition and reload state.
+        public TacticalFireSupportState FireSupport = new TacticalFireSupportState();
+        public List<TacticalPlannedFireMission> PlannedFireMissions = new List<TacticalPlannedFireMission>();
+        public List<TacticalPlannedFireEvent> PlannedFireEvents = new List<TacticalPlannedFireEvent>();
+        public List<TacticalIlluminationMarker> ActiveIlluminationMarkers = new List<TacticalIlluminationMarker>();
 
         public bool Contains(double longitude, double latitude)
             => longitude >= West && longitude <= East && latitude >= South && latitude <= North;
