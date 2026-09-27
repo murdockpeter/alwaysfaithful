@@ -12,6 +12,8 @@ namespace AlwaysFaithful.Prototype
 
     public sealed class AlwaysFaithfulPrototype : MonoBehaviour
     {
+        private enum TacticalDeploymentEdge { West, East, South, North }
+
         private const int Width = 64;
         private const int Height = 104;
         private const float HexRadius = 1f;
@@ -70,6 +72,9 @@ namespace AlwaysFaithful.Prototype
         private OperationalBattalionState activeOperationalBattalion;
         private OperationalBattalionState tacticalOperationalEnemyBattalion;
         private bool tacticalOperationalEngagement;
+        private bool tacticalOperationalEdgesReady;
+        private TacticalDeploymentEdge tacticalFriendlyDeploymentEdge;
+        private TacticalDeploymentEdge tacticalEnemyDeploymentEdge;
         private bool operationalReconPlanning;
         private bool operationalBriefingActive;
         private bool operationalBriefingIntelPage;
@@ -312,6 +317,7 @@ namespace AlwaysFaithful.Prototype
         }
 
         private const int PlatoonMovementPoints = 4;
+        private const int MinimumOperationalStartingSeparationHexes = 8;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsurePrototype()
@@ -1853,10 +1859,14 @@ namespace AlwaysFaithful.Prototype
             {
                 tacticalForcePanelOpen = true;
             }
-            else if (freshOperationalScenario && !IsAutomatedRun())
+            else if (freshOperationalScenario)
             {
-                campaignBriefingActive = true;
-                StartCoroutine(ShowCampaignBriefingThenDismiss());
+                BeginOperationalTacticalDeployment();
+                if (!IsAutomatedRun())
+                {
+                    campaignBriefingActive = true;
+                    StartCoroutine(ShowCampaignBriefingThenDismiss());
+                }
             }
             Debug.Log($"ALWAYS_FAITHFUL_TACTICAL_ENTER battlefield={tacticalBattlefield.BattlefieldId} parent={tacticalBattlefield.ParentHex} center={tacticalBattlefield.CenterLatitude:0.00000},{tacticalBattlefield.CenterLongitude:0.00000}");
         }
@@ -1901,6 +1911,7 @@ namespace AlwaysFaithful.Prototype
             tacticalFireAimViews.Clear();
             tacticalIlluminationViews.Clear();
             localMovementBoard.Clear();
+            tacticalOperationalEdgesReady = false;
             tacticalReconMarkers.Clear();
             tacticalReconRings.Clear();
             activeBattleRequest = restore != null ? (restore.HasActiveBattleRequest ? restore.ActiveBattleRequest : null) : activeBattleRequest;
@@ -2349,7 +2360,14 @@ namespace AlwaysFaithful.Prototype
                 tacticalObjective = tacticalBattlefield.Objective;
                 BuildTacticalObjectiveMarker(tacticalObjective.ObjectiveHex);
                 HexCoord restoreCenter = new HexCoord(tacticalBattlefield.Width / 2, tacticalBattlefield.Height / 2);
-                if (!tacticalObjective.ObjectiveHex.Equals(restoreCenter)) BuildTacticalDeploymentZone(restoreCenter);
+                if (tacticalOperationalEngagement)
+                {
+                    ConfigureOperationalDeploymentEdges();
+                    BuildTacticalEdgeDeploymentBand(tacticalFriendlyDeploymentEdge, new Color(.30f, .86f, .96f, .82f), "USMC ENTRY");
+                    if (tacticalOperationalEnemyBattalion != null)
+                        BuildTacticalEdgeDeploymentBand(tacticalEnemyDeploymentEdge, new Color(.96f, .32f, .28f, .68f), "PLA ENTRY");
+                }
+                else if (!tacticalObjective.ObjectiveHex.Equals(restoreCenter)) BuildTacticalDeploymentZone(restoreCenter);
                 Debug.Log($"ALWAYS_FAITHFUL_OBJECTIVE_RESTORED battlefield={tacticalBattlefield.BattlefieldId} mission={tacticalObjective.MissionType} hex={tacticalObjective.ObjectiveHex} turnLimit={tacticalObjective.TurnLimit} outcome={tacticalObjective.Outcome}");
                 return;
             }
@@ -2442,7 +2460,14 @@ namespace AlwaysFaithful.Prototype
             // Only draw a separate deployment-zone ring when it wouldn't just sit
             // on top of the objective marker (Defend's objective is the deployment
             // hex itself, so the objective ring already communicates that setup).
-            if (!objectiveHex.Equals(center)) BuildTacticalDeploymentZone(center);
+            if (tacticalOperationalEngagement)
+            {
+                ConfigureOperationalDeploymentEdges();
+                BuildTacticalEdgeDeploymentBand(tacticalFriendlyDeploymentEdge, new Color(.30f, .86f, .96f, .82f), "USMC ENTRY");
+                if (tacticalOperationalEnemyBattalion != null)
+                    BuildTacticalEdgeDeploymentBand(tacticalEnemyDeploymentEdge, new Color(.96f, .32f, .28f, .68f), "PLA ENTRY");
+            }
+            else if (!objectiveHex.Equals(center)) BuildTacticalDeploymentZone(center);
             Debug.Log($"ALWAYS_FAITHFUL_OBJECTIVE_SET battlefield={tacticalBattlefield.BattlefieldId} mission={missionType} hex={objectiveHex} turnLimit={turnLimit} startTurn={tacticalObjective.BattleStartTurn}");
         }
 
@@ -2479,6 +2504,46 @@ namespace AlwaysFaithful.Prototype
                 float angle = index / (float)ring.positionCount * Mathf.PI * 2f;
                 ring.SetPosition(index, zoneCell.transform.position + new Vector3(Mathf.Cos(angle) * .70f, CellSurfaceOffset + .07f, Mathf.Sin(angle) * .70f));
             }
+        }
+
+        private void BuildTacticalEdgeDeploymentBand(TacticalDeploymentEdge edge, Color color, string labelText)
+        {
+            bool vertical = edge == TacticalDeploymentEdge.West || edge == TacticalDeploymentEdge.East;
+            int fixedCoordinate = edge == TacticalDeploymentEdge.West || edge == TacticalDeploymentEdge.South
+                ? 3
+                : (vertical ? tacticalBattlefield.Width - 4 : tacticalBattlefield.Height - 4);
+            int count = vertical ? tacticalBattlefield.Height : tacticalBattlefield.Width;
+            GameObject bandObject = new GameObject(labelText + " Deployment Band");
+            bandObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+            bandObject.transform.SetParent(tacticalRoot.transform, false);
+            LineRenderer line = bandObject.AddComponent<LineRenderer>();
+            line.useWorldSpace = true;
+            line.positionCount = count;
+            line.widthMultiplier = .12f;
+            line.material = NewOverlayMaterial(color);
+            line.startColor = color;
+            line.endColor = color;
+            for (int index = 0; index < count; index++)
+            {
+                HexCoord coord = vertical ? new HexCoord(fixedCoordinate, index) : new HexCoord(index, fixedCoordinate);
+                line.SetPosition(index, localCells[coord].transform.position + Vector3.up * (CellSurfaceOffset + .08f));
+            }
+
+            HexCoord labelCoord = vertical
+                ? new HexCoord(fixedCoordinate, tacticalBattlefield.Height / 2)
+                : new HexCoord(tacticalBattlefield.Width / 2, fixedCoordinate);
+            GameObject labelObject = new GameObject(labelText + " Label");
+            labelObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+            labelObject.transform.SetParent(bandObject.transform, false);
+            labelObject.transform.position = localCells[labelCoord].transform.position + Vector3.up * (CellSurfaceOffset + .13f);
+            labelObject.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            TextMesh label = labelObject.AddComponent<TextMesh>();
+            label.text = labelText;
+            label.anchor = TextAnchor.MiddleCenter;
+            label.alignment = TextAlignment.Center;
+            label.fontSize = 40;
+            label.characterSize = .05f;
+            label.color = color;
         }
 
         private void BuildTacticalObjectiveMarker(HexCoord hex)
@@ -2557,10 +2622,10 @@ namespace AlwaysFaithful.Prototype
             {
                 OperationalScenarioRules.EnsurePlatoonOrderOfBattle(activeOperationalBattalion);
                 var occupied = new HashSet<HexCoord>();
-                HexCoord center = new HexCoord(tacticalBattlefield.Width / 2, tacticalBattlefield.Height / 2);
+                ConfigureOperationalDeploymentEdges();
                 foreach (OperationalPlatoonState platoon in activeOperationalBattalion.Platoons)
                 {
-                    HexCoord start = FindOpenLocalDeploymentHex(center, occupied);
+                    HexCoord start = FindEdgeDeploymentHex(tacticalFriendlyDeploymentEdge, occupied);
                     occupied.Add(start);
                     int actionPoints = TacticalPlatoonActionPoints +
                         (platoon.Role == TacticalPlatoonRole.Reconnaissance ? 2 : platoon.Role == TacticalPlatoonRole.Engineers ? 1 : 0);
@@ -2570,6 +2635,8 @@ namespace AlwaysFaithful.Prototype
                         MaximumStrength = Math.Max(1, platoon.MaximumStrength),
                         Strength = Math.Max(0, Math.Min(platoon.MaximumStrength, platoon.Strength))
                     };
+                    state.FacingSector = TacticalFireAndManeuver.DirectionSector(
+                        state.Position, DeploymentEdgeCenter(tacticalEnemyDeploymentEdge));
                     states.Add(state);
                     roles.Add(platoon.Role);
                     weapons[state.Id] = CreateFriendlyWeapon(state.Id, platoon.Role);
@@ -2655,6 +2722,7 @@ namespace AlwaysFaithful.Prototype
             GameObject root = new GameObject("Tactical USMC " + TacticalCompany.ShortRole(role));
             root.transform.SetParent(tacticalRoot.transform, false);
             root.transform.position = LocalCounterPosition(state.Position);
+            ApplyTacticalFacing(root.transform, state);
             SphereCollider collider = root.AddComponent<SphereCollider>();
             collider.radius = .65f;
             collider.center = Vector3.up * .12f;
@@ -2944,12 +3012,12 @@ namespace AlwaysFaithful.Prototype
             else if (tacticalOperationalEngagement && tacticalOperationalEnemyBattalion != null)
             {
                 OperationalScenarioRules.EnsurePlatoonOrderOfBattle(tacticalOperationalEnemyBattalion);
-                var occupied = FriendlyPositions();
-                int slot = 0;
+                HashSet<HexCoord> friendlyPositions = FriendlyPositions();
+                var occupied = new HashSet<HexCoord>(friendlyPositions);
+                ConfigureOperationalDeploymentEdges();
                 foreach (OperationalPlatoonState platoon in tacticalOperationalEnemyBattalion.Platoons)
                 {
-                    TacticalVisibilityState desired = slot++ == 0 ? TacticalVisibilityState.Observed : TacticalVisibilityState.Contact;
-                    HexCoord position = FindObservationDeployment(desired, occupied);
+                    HexCoord position = FindEdgeDeploymentHex(tacticalEnemyDeploymentEdge, occupied, friendlyPositions);
                     occupied.Add(position);
                     int actionPoints = 4 + (platoon.Role == TacticalPlatoonRole.Reconnaissance ? 2 : 0);
                     var enemy = new TacticalUnitState(platoon.Id, platoon.DisplayName, position, actionPoints)
@@ -2957,6 +3025,8 @@ namespace AlwaysFaithful.Prototype
                         MaximumStrength = Math.Max(1, platoon.MaximumStrength),
                         Strength = Math.Max(0, Math.Min(platoon.MaximumStrength, platoon.Strength))
                     };
+                    enemy.FacingSector = TacticalFireAndManeuver.DirectionSector(
+                        enemy.Position, DeploymentEdgeCenter(tacticalFriendlyDeploymentEdge));
                     tacticalEnemyStates.Add(enemy);
                     bool support = platoon.Role == TacticalPlatoonRole.Weapons;
                     tacticalEnemyWeapons.Add(enemy.Id, new TacticalWeaponState(enemy.Id + "-weapon",
@@ -3003,6 +3073,7 @@ namespace AlwaysFaithful.Prototype
                 GameObject markerObject = new GameObject("Contact " + enemy.Id);
                 markerObject.transform.SetParent(tacticalRoot.transform, false);
                 markerObject.transform.position = LocalCounterPosition(enemy.Position) + Vector3.up * .03f;
+                ApplyTacticalFacing(markerObject.transform, enemy);
                 ContactMarkerView marker = markerObject.AddComponent<ContactMarkerView>();
                 marker.Initialize(index < enemyMarkerLabels.Count ? enemyMarkerLabels[index] : "RIFLE");
                 tacticalContactViews.Add(enemy.Id, marker);
@@ -3021,6 +3092,150 @@ namespace AlwaysFaithful.Prototype
             foreach (TacticalUnitState enemy in tacticalEnemyStates)
                 if (tacticalEnemyWeapons.TryGetValue(enemy.Id, out TacticalWeaponState weapon))
                     yield return new TacticalReactionCandidate(enemy, weapon);
+        }
+
+        private void ConfigureOperationalDeploymentEdges()
+        {
+            if (tacticalOperationalEdgesReady) return;
+            Vector3 friendlyWorld = activeOperationalBattalion != null ? HexToWorld(activeOperationalBattalion.Position) : Vector3.zero;
+            Vector3 enemyWorld = tacticalOperationalEnemyBattalion != null
+                ? HexToWorld(tacticalOperationalEnemyBattalion.Position)
+                : tacticalBattlefield != null ? HexToWorld(tacticalBattlefield.ParentHex) : Vector3.right;
+            Vector3 approach = friendlyWorld - enemyWorld;
+            if (approach.sqrMagnitude < .01f)
+            {
+                int seed = TacticalDirectFire.CreateSeed(tacticalBattlefield?.BattlefieldId, 0, 31);
+                approach = (seed & 1) == 0 ? Vector3.left : Vector3.back;
+            }
+
+            TacticalDeploymentEdge preferred = Mathf.Abs(approach.x) >= Mathf.Abs(approach.z)
+                ? (approach.x < 0f ? TacticalDeploymentEdge.West : TacticalDeploymentEdge.East)
+                : (approach.z < 0f ? TacticalDeploymentEdge.South : TacticalDeploymentEdge.North);
+            int required = Math.Max(activeOperationalBattalion?.Platoons?.Count ?? 1,
+                tacticalOperationalEnemyBattalion?.Platoons?.Count ?? 1);
+            int horizontalCapacity = Math.Min(CountEdgeDeploymentHexes(TacticalDeploymentEdge.West, 3),
+                CountEdgeDeploymentHexes(TacticalDeploymentEdge.East, 3));
+            int verticalCapacity = Math.Min(CountEdgeDeploymentHexes(TacticalDeploymentEdge.South, 3),
+                CountEdgeDeploymentHexes(TacticalDeploymentEdge.North, 3));
+            bool preferredHorizontal = preferred == TacticalDeploymentEdge.West || preferred == TacticalDeploymentEdge.East;
+            if (preferredHorizontal && horizontalCapacity < required && verticalCapacity > horizontalCapacity)
+                preferred = approach.z < 0f ? TacticalDeploymentEdge.South : TacticalDeploymentEdge.North;
+            else if (!preferredHorizontal && verticalCapacity < required && horizontalCapacity > verticalCapacity)
+                preferred = approach.x < 0f ? TacticalDeploymentEdge.West : TacticalDeploymentEdge.East;
+
+            tacticalFriendlyDeploymentEdge = preferred;
+            tacticalEnemyDeploymentEdge = OppositeDeploymentEdge(preferred);
+            tacticalOperationalEdgesReady = true;
+            Debug.Log($"ALWAYS_FAITHFUL_DEPLOYMENT_EDGES friendly={tacticalFriendlyDeploymentEdge} enemy={tacticalEnemyDeploymentEdge} horizontalCapacity={horizontalCapacity} verticalCapacity={verticalCapacity}");
+        }
+
+        private int CountEdgeDeploymentHexes(TacticalDeploymentEdge edge, int maximumDepth)
+        {
+            int count = 0;
+            foreach (KeyValuePair<HexCoord, TacticalMovementCell> pair in localMovementBoard)
+                if (pair.Value.IsPassable && DeploymentEdgeDepth(pair.Key, edge) <= maximumDepth) count++;
+            return count;
+        }
+
+        private HexCoord FindEdgeDeploymentHex(TacticalDeploymentEdge edge, HashSet<HexCoord> occupied,
+            HashSet<HexCoord> opposingForce = null)
+        {
+            int[] depthLimits = { 3, 5, 8, int.MaxValue };
+            foreach (int maximumDepth in depthLimits)
+            {
+                HexCoord best = default;
+                int bestScore = int.MaxValue;
+                bool found = false;
+                foreach (KeyValuePair<HexCoord, TacticalMovementCell> pair in localMovementBoard)
+                {
+                    if (!pair.Value.IsPassable || occupied.Contains(pair.Key)) continue;
+                    if (opposingForce != null)
+                    {
+                        bool tooClose = false;
+                        foreach (HexCoord opponent in opposingForce)
+                            if (HexCoord.Distance(pair.Key, opponent) < MinimumOperationalStartingSeparationHexes)
+                            {
+                                tooClose = true;
+                                break;
+                            }
+                        if (tooClose) continue;
+                    }
+                    int depth = DeploymentEdgeDepth(pair.Key, edge);
+                    if (depth > maximumDepth) continue;
+                    int cross = edge == TacticalDeploymentEdge.West || edge == TacticalDeploymentEdge.East
+                        ? pair.Key.R : pair.Key.Q;
+                    int crossCenter = edge == TacticalDeploymentEdge.West || edge == TacticalDeploymentEdge.East
+                        ? tacticalBattlefield.Height / 2 : tacticalBattlefield.Width / 2;
+                    int score = Math.Abs(depth - 2) * 100 + Math.Abs(cross - crossCenter) * 3;
+                    foreach (HexCoord used in occupied)
+                    {
+                        int separation = HexCoord.Distance(pair.Key, used);
+                        if (separation < 3) score += (3 - separation) * 45;
+                    }
+                    if (found && (score > bestScore || score == bestScore &&
+                        (pair.Key.Q > best.Q || pair.Key.Q == best.Q && pair.Key.R >= best.R))) continue;
+                    best = pair.Key;
+                    bestScore = score;
+                    found = true;
+                }
+                if (found) return best;
+            }
+            throw new InvalidOperationException("The tactical map contains no passable edge deployment hex.");
+        }
+
+        private int DeploymentEdgeDepth(HexCoord hex, TacticalDeploymentEdge edge)
+        {
+            switch (edge)
+            {
+                case TacticalDeploymentEdge.East: return tacticalBattlefield.Width - 1 - hex.Q;
+                case TacticalDeploymentEdge.South: return hex.R;
+                case TacticalDeploymentEdge.North: return tacticalBattlefield.Height - 1 - hex.R;
+                default: return hex.Q;
+            }
+        }
+
+        private HexCoord DeploymentEdgeCenter(TacticalDeploymentEdge edge)
+        {
+            switch (edge)
+            {
+                case TacticalDeploymentEdge.West: return new HexCoord(2, tacticalBattlefield.Height / 2);
+                case TacticalDeploymentEdge.East: return new HexCoord(tacticalBattlefield.Width - 3, tacticalBattlefield.Height / 2);
+                case TacticalDeploymentEdge.South: return new HexCoord(tacticalBattlefield.Width / 2, 2);
+                default: return new HexCoord(tacticalBattlefield.Width / 2, tacticalBattlefield.Height - 3);
+            }
+        }
+
+        private static Quaternion TacticalFacingRotation(TacticalUnitState state)
+        {
+            int diagonal = (state.Position.Q & 1) == 0 ? -1 : 0;
+            HexCoord[] neighbors =
+            {
+                new HexCoord(state.Position.Q, state.Position.R - 1),
+                new HexCoord(state.Position.Q + 1, state.Position.R + diagonal),
+                new HexCoord(state.Position.Q + 1, state.Position.R + diagonal + 1),
+                new HexCoord(state.Position.Q, state.Position.R + 1),
+                new HexCoord(state.Position.Q - 1, state.Position.R + diagonal + 1),
+                new HexCoord(state.Position.Q - 1, state.Position.R + diagonal)
+            };
+            HexCoord neighbor = neighbors[(state.FacingSector % 6 + 6) % 6];
+            Vector3 direction = LocalHexToWorld(neighbor) - LocalHexToWorld(state.Position);
+            return Quaternion.Euler(0f, Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg, 0f);
+        }
+
+        private static void ApplyTacticalFacing(Transform counter, TacticalUnitState state)
+        {
+            if (counter != null && state != null) counter.rotation = TacticalFacingRotation(state);
+        }
+
+        private static TacticalDeploymentEdge OppositeDeploymentEdge(TacticalDeploymentEdge edge)
+        {
+            switch (edge)
+            {
+                case TacticalDeploymentEdge.West: return TacticalDeploymentEdge.East;
+                case TacticalDeploymentEdge.East: return TacticalDeploymentEdge.West;
+                case TacticalDeploymentEdge.South: return TacticalDeploymentEdge.North;
+                default: return TacticalDeploymentEdge.South;
+            }
         }
 
         private HexCoord FindObservationDeployment(TacticalVisibilityState desired, HashSet<HexCoord> excluded)
@@ -3208,6 +3423,7 @@ namespace AlwaysFaithful.Prototype
         {
             if (tacticalDeploymentActive)
             {
+                if (campaignBriefingActive || supportCardModalActive || resultScreenActive || settingsPanelOpen) return;
                 UpdateTacticalDeploymentPointer();
                 return;
             }
@@ -3367,32 +3583,73 @@ namespace AlwaysFaithful.Prototype
                 if (counter == null || !tacticalFriendlyByCounter.TryGetValue(counter, out TacticalFriendlyView friendly)) continue;
                 tacticalDeploymentUnit = friendly.State;
                 SetActiveTacticalFriendly(friendly.State.Id, false);
-                tacticalOrderFeedback = "DEPLOY " + friendly.State.DisplayName.ToUpperInvariant() + " • CHOOSE A TEAL HEX";
+                tacticalOrderFeedback = "DEPLOY " + friendly.State.DisplayName.ToUpperInvariant() +
+                    (tacticalOperationalEngagement ? " • CHOOSE A TEAL HEX INSIDE THE CYAN ENTRY BAND" : " • CHOOSE A TEAL HEX");
                 tacticalAudio.Play(TacticalSound.Select);
                 return;
             }
             HexCellView destination = PickLocalHexAtScreenPoint(Input.mousePosition);
             if (destination == null || tacticalDeploymentUnit == null) return;
-            HexCoord center = new HexCoord(tacticalBattlefield.Width / 2, tacticalBattlefield.Height / 2);
-            bool legal = destination.IsLand && HexCoord.Distance(center, destination.Coord) <= 3 &&
-                localMovementBoard.TryGetValue(destination.Coord, out TacticalMovementCell movementCell) &&
-                (string.IsNullOrEmpty(movementCell.OccupantId) || movementCell.OccupantId == tacticalDeploymentUnit.Id);
-            if (!legal)
+            if (!TryDeployTacticalUnit(destination.Coord))
             {
                 destination.SetInvalid(true);
-                tacticalOrderFeedback = "DEPLOYMENT REJECTED • USE AN OPEN TEAL HEX";
+                tacticalOrderFeedback = tacticalOperationalEngagement
+                    ? "DEPLOYMENT REJECTED • USE AN OPEN TEAL HEX INSIDE THE CYAN ENTRY BAND"
+                    : "DEPLOYMENT REJECTED • USE AN OPEN TEAL HEX";
                 tacticalAudio.Play(TacticalSound.OrderCancel);
                 return;
             }
-            TacticalFriendlyView view = tacticalFriendlyViews[tacticalDeploymentUnit.Id];
-            localMovementBoard[tacticalDeploymentUnit.Position].OccupantId = null;
-            tacticalDeploymentUnit.Position = destination.Coord;
-            localMovementBoard[destination.Coord].OccupantId = tacticalDeploymentUnit.Id;
-            view.Counter.transform.position = LocalCounterPosition(destination.Coord);
-            PresentFriendly(view);
             tacticalOrderFeedback = tacticalDeploymentUnit.DisplayName.ToUpperInvariant() + " DEPLOYED";
             tacticalAudio.Play(TacticalSound.OrderConfirm);
             RefreshTacticalObservation();
+        }
+
+        private bool TryDeployTacticalUnit(HexCoord destination)
+        {
+            if (tacticalDeploymentUnit == null || !localCells.TryGetValue(destination, out HexCellView destinationView) ||
+                !localMovementBoard.TryGetValue(destination, out TacticalMovementCell movementCell)) return false;
+            bool insideDeploymentZone;
+            if (tacticalOperationalEngagement)
+                insideDeploymentZone = DeploymentEdgeDepth(destination, tacticalFriendlyDeploymentEdge) <= 3;
+            else
+            {
+                HexCoord center = new HexCoord(tacticalBattlefield.Width / 2, tacticalBattlefield.Height / 2);
+                insideDeploymentZone = HexCoord.Distance(center, destination) <= 3;
+            }
+            bool open = string.IsNullOrEmpty(movementCell.OccupantId) || movementCell.OccupantId == tacticalDeploymentUnit.Id;
+            if (!destinationView.IsLand || !movementCell.IsPassable || !insideDeploymentZone || !open) return false;
+
+            TacticalFriendlyView view = tacticalFriendlyViews[tacticalDeploymentUnit.Id];
+            if (localMovementBoard.TryGetValue(tacticalDeploymentUnit.Position, out TacticalMovementCell previousCell) &&
+                previousCell.OccupantId == tacticalDeploymentUnit.Id)
+                previousCell.OccupantId = null;
+            tacticalDeploymentUnit.Position = destination;
+            if (tacticalOperationalEngagement)
+                tacticalDeploymentUnit.FacingSector = TacticalFireAndManeuver.DirectionSector(
+                    destination, DeploymentEdgeCenter(tacticalEnemyDeploymentEdge));
+            movementCell.OccupantId = tacticalDeploymentUnit.Id;
+            view.Counter.transform.position = LocalCounterPosition(destination);
+            ApplyTacticalFacing(view.Counter.transform, tacticalDeploymentUnit);
+            PresentFriendly(view);
+            return true;
+        }
+
+        private void BeginOperationalTacticalDeployment()
+        {
+            tacticalForcePanelOpen = false;
+            tacticalDeploymentActive = true;
+            tacticalObstaclePlacementActive = false;
+            tacticalDefensiveObstacleBudget = 0;
+            tacticalDeploymentUnit = tacticalUnitState;
+            ClearTacticalReachable();
+            foreach (KeyValuePair<HexCoord, HexCellView> pair in localCells)
+            {
+                if (!pair.Value.IsLand || !localMovementBoard.TryGetValue(pair.Key, out TacticalMovementCell movementCell) ||
+                    !movementCell.IsPassable || DeploymentEdgeDepth(pair.Key, tacticalFriendlyDeploymentEdge) > 3) continue;
+                tacticalReachable[pair.Key] = 0;
+                pair.Value.SetReachable(true);
+            }
+            tacticalOrderFeedback = "BATTALION DEPLOYMENT • SELECT A PLATOON, THEN AN OPEN TEAL HEX INSIDE THE CYAN ENTRY BAND";
         }
 
         private void BeginTacticalDeployment(TacticalCompanyPreset preset)
@@ -4182,6 +4439,7 @@ namespace AlwaysFaithful.Prototype
             if (order == TacticalSpecialOrder.Face && range > 0)
             {
                 TacticalFireAndManeuver.Face(tacticalUnitState, target);
+                ApplyTacticalFacing(tacticalUnit.transform, tacticalUnitState);
                 FinishTacticalSpecialOrder($"FACING SECTOR {tacticalUnitState.FacingSector + 1}");
                 return true;
             }
@@ -4710,7 +4968,7 @@ namespace AlwaysFaithful.Prototype
             tacticalUnitState.CompleteMove(finalPosition);
             TacticalFireAndManeuver.RecordMove(tacticalUnitState, tacticalUnitState.MovementPosture, route.Path.GetRange(0, reachedIndex + 1));
             AdvanceTutorial(2);
-            tacticalUnit.transform.rotation = Quaternion.identity;
+            ApplyTacticalFacing(tacticalUnit.transform, tacticalUnitState);
             tacticalUnit.Present(tacticalUnitState);
             ResolvePendingFallback(tacticalUnitState, tacticalEnemyStates);
             RecordTacticalMovement(origin, finalPosition, TacticalFireAndManeuver.MovementCost(route.ActionPointCost, tacticalUnitState.MovementPosture), actionPointsBefore,
@@ -6044,6 +6302,9 @@ namespace AlwaysFaithful.Prototype
                 {
                     Vector3 start = marker.transform.position;
                     Vector3 end = LocalCounterPosition(step) + Vector3.up * .03f;
+                    Vector3 direction = end - start;
+                    if (direction.sqrMagnitude > .01f)
+                        marker.transform.rotation = Quaternion.Euler(0f, Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg, 0f);
                     float duration = fastEnemyAnimation ? .035f : .18f * AnimationTimeScale();
                     for (float elapsed = 0f; elapsed < duration; elapsed += Time.unscaledDeltaTime)
                     {
@@ -6069,6 +6330,7 @@ namespace AlwaysFaithful.Prototype
             localMovementBoard[finalPosition].OccupantId = enemy.Id;
             enemy.CompleteMove(finalPosition);
             TacticalFireAndManeuver.RecordMove(enemy, TacticalMovementPosture.Tactical, order.Path.GetRange(0, reachedIndex + 1));
+            ApplyTacticalFacing(marker.transform, enemy);
             RecordTacticalMovement(enemy.Id, origin, finalPosition, order.ActionPointCost, before,
                 enemy.RemainingActionPoints, reachedIndex == order.Path.Count - 1 && !obstacleHalted ? "Completed" : "Interrupted",
                 obstacleHalted ? obstacleSummary : reachedIndex == order.Path.Count - 1 ? "AI objective movement" : "Halted by USMC reaction fire", order.Path.GetRange(0, reachedIndex + 1));
@@ -9724,12 +9986,61 @@ namespace AlwaysFaithful.Prototype
             tacticalOperationalEngagement = true;
             tacticalOperationalEnemyBattalion = liveEnemy;
             EnterTacticalMap(cells[activeOperationalBattalion.Position], false, null, true);
+            bool deploymentBandHighlighted = tacticalDeploymentActive && tacticalReachable.Count > 0;
+            foreach (HexCoord deploymentHex in tacticalReachable.Keys)
+                deploymentBandHighlighted &= DeploymentEdgeDepth(deploymentHex, tacticalFriendlyDeploymentEdge) <= 3 &&
+                    localMovementBoard[deploymentHex].IsPassable;
+            TacticalUnitState redeployedUnit = tacticalFriendlyStates[0];
+            HexCoord deploymentStart = redeployedUnit.Position;
+            HexCoord deploymentDestination = default;
+            bool foundDeploymentDestination = false;
+            foreach (HexCoord candidate in tacticalReachable.Keys)
+            {
+                if (candidate.Equals(deploymentStart) || !string.IsNullOrEmpty(localMovementBoard[candidate].OccupantId)) continue;
+                if (foundDeploymentDestination && (candidate.Q > deploymentDestination.Q ||
+                    candidate.Q == deploymentDestination.Q && candidate.R >= deploymentDestination.R)) continue;
+                deploymentDestination = candidate;
+                foundDeploymentDestination = true;
+            }
+            tacticalDeploymentUnit = redeployedUnit;
+            bool redeployedInsideBand = foundDeploymentDestination && TryDeployTacticalUnit(deploymentDestination) &&
+                redeployedUnit.Position.Equals(deploymentDestination) &&
+                localMovementBoard[deploymentDestination].OccupantId == redeployedUnit.Id &&
+                string.IsNullOrEmpty(localMovementBoard[deploymentStart].OccupantId) &&
+                DeploymentEdgeDepth(redeployedUnit.Position, tacticalFriendlyDeploymentEdge) <= 3;
+            int minimumStartingSeparation = int.MaxValue;
+            foreach (TacticalUnitState friendly in tacticalFriendlyStates)
+                foreach (TacticalUnitState enemyUnit in tacticalEnemyStates)
+                    minimumStartingSeparation = Math.Min(minimumStartingSeparation, HexCoord.Distance(friendly.Position, enemyUnit.Position));
+            bool friendlyInEntryBand = tacticalFriendlyStates.TrueForAll(unit => DeploymentEdgeDepth(unit.Position, tacticalFriendlyDeploymentEdge) <= 3);
+            bool enemyInEntryBand = tacticalEnemyStates.TrueForAll(unit => DeploymentEdgeDepth(unit.Position, tacticalEnemyDeploymentEdge) <= 3);
+            bool friendlyFacingEnemy = tacticalFriendlyStates.TrueForAll(unit =>
+                TacticalFireAndManeuver.FacingAspect(unit, DeploymentEdgeCenter(tacticalEnemyDeploymentEdge)) == TacticalFacingAspect.Forward);
+            bool enemyFacingFriendly = tacticalEnemyStates.TrueForAll(unit =>
+                TacticalFireAndManeuver.FacingAspect(unit, DeploymentEdgeCenter(tacticalFriendlyDeploymentEdge)) == TacticalFacingAspect.Forward);
+            bool visualFacingMatches = true;
+            bool miniatureFiguresFaceEnemy = true;
+            foreach (TacticalUnitState friendly in tacticalFriendlyStates)
+            {
+                visualFacingMatches &= Quaternion.Angle(tacticalFriendlyViews[friendly.Id].Counter.transform.rotation, TacticalFacingRotation(friendly)) < .1f;
+                miniatureFiguresFaceEnemy &= tacticalFriendlyViews[friendly.Id].Miniature.PrimaryFiguresFaceDirection(
+                    tacticalFriendlyViews[friendly.Id].Counter.transform.forward, 15f);
+            }
+            foreach (TacticalUnitState enemyUnit in tacticalEnemyStates)
+            {
+                visualFacingMatches &= Quaternion.Angle(tacticalContactViews[enemyUnit.Id].transform.rotation, TacticalFacingRotation(enemyUnit)) < .1f;
+                miniatureFiguresFaceEnemy &= tacticalContactViews[enemyUnit.Id].PrimaryFiguresFaceDirection(
+                    tacticalContactViews[enemyUnit.Id].transform.forward, 15f);
+            }
             if (tacticalFriendlyStates.Count != activeOperationalBattalion.Platoons.Count ||
                 tacticalEnemyStates.Count != liveEnemy.Platoons.Count || tacticalForcePanelOpen ||
+                !deploymentBandHighlighted || !redeployedInsideBand ||
+                minimumStartingSeparation < MinimumOperationalStartingSeparationHexes || !friendlyInEntryBand || !enemyInEntryBand ||
+                !friendlyFacingEnemy || !enemyFacingFriendly || !visualFacingMatches || !miniatureFiguresFaceEnemy ||
                 tacticalFriendlyStates.Exists(state => activeOperationalBattalion.Platoons.Find(platoon => platoon.Id == state.Id) == null) ||
                 tacticalEnemyStates.Exists(state => liveEnemy.Platoons.Find(platoon => platoon.Id == state.Id) == null))
             {
-                Debug.LogError($"ALWAYS_FAITHFUL_OPERATIONAL_SCENARIO_REGRESSION_FAILED tactical handoff friendly={tacticalFriendlyStates.Count}/{activeOperationalBattalion.Platoons.Count} enemy={tacticalEnemyStates.Count}/{liveEnemy.Platoons.Count} picker={tacticalForcePanelOpen}");
+                Debug.LogError($"ALWAYS_FAITHFUL_OPERATIONAL_SCENARIO_REGRESSION_FAILED tactical handoff friendly={tacticalFriendlyStates.Count}/{activeOperationalBattalion.Platoons.Count} enemy={tacticalEnemyStates.Count}/{liveEnemy.Platoons.Count} picker={tacticalForcePanelOpen} deploy={tacticalDeploymentActive}/{deploymentBandHighlighted}/{redeployedInsideBand} separation={minimumStartingSeparation} bands={friendlyInEntryBand}/{enemyInEntryBand} facing={friendlyFacingEnemy}/{enemyFacingFriendly}/{visualFacingMatches}/{miniatureFiguresFaceEnemy}");
                 Application.Quit(1);
                 yield break;
             }
@@ -9742,7 +10053,7 @@ namespace AlwaysFaithful.Prototype
                 yield break;
             }
 
-            Debug.Log($"ALWAYS_FAITHFUL_OPERATIONAL_SCENARIO_REGRESSION_OK friendly={operationalFriendlyBattalions.Count} enemy={operationalEnemyBattalions.Count} tactical={tacticalFriendlyStates.Count}v{tacticalEnemyStates.Count} objective={operationalScenario.PrimaryObjective}");
+            Debug.Log($"ALWAYS_FAITHFUL_OPERATIONAL_SCENARIO_REGRESSION_OK friendly={operationalFriendlyBattalions.Count} enemy={operationalEnemyBattalions.Count} tactical={tacticalFriendlyStates.Count}v{tacticalEnemyStates.Count} deployment={redeployedInsideBand} separation={minimumStartingSeparation} edges={tacticalFriendlyDeploymentEdge}/{tacticalEnemyDeploymentEdge} facing={friendlyFacingEnemy}/{enemyFacingFriendly}/{miniatureFiguresFaceEnemy} objective={operationalScenario.PrimaryObjective}");
             Application.Quit(0);
         }
 
@@ -10654,12 +10965,17 @@ namespace AlwaysFaithful.Prototype
 
         private void DrawTacticalDeploymentControls(float uiWidth, float uiHeight)
         {
-            if (!tacticalDeploymentActive) return;
+            if (!tacticalDeploymentActive || campaignBriefingActive || supportCardModalActive) return;
             Rect panel = new Rect(uiWidth / 2f - 260f, 18f, 520f, 132f);
             GUI.Box(panel, GUIContent.none);
-            GUI.Label(new Rect(panel.x + 18f, panel.y + 10f, panel.width - 190f, 24f), "COMPANY DEPLOYMENT", unitNameStyle);
+            GUI.Label(new Rect(panel.x + 18f, panel.y + 10f, panel.width - 190f, 24f),
+                tacticalOperationalEngagement ? "BATTALION DEPLOYMENT" : "COMPANY DEPLOYMENT", unitNameStyle);
             GUI.Label(new Rect(panel.x + 18f, panel.y + 38f, panel.width - 190f, 38f),
-                tacticalObstaclePlacementActive ? "LMB open ground within 4 hexes of objective." : "LMB platoon, then LMB an open teal hex.", bodyStyle);
+                tacticalObstaclePlacementActive
+                    ? "LMB open ground within 4 hexes of objective."
+                    : tacticalOperationalEngagement
+                        ? "LMB platoon, then LMB an open teal hex inside the cyan entry band."
+                        : "LMB platoon, then LMB an open teal hex.", bodyStyle);
             if (tacticalDefensiveObstacleBudget > 0)
             {
                 if (GUI.Button(new Rect(panel.x + 18f, panel.y + 86f, 170f, 30f),
@@ -11656,7 +11972,10 @@ namespace AlwaysFaithful.Prototype
                 ? $"\nParent: {activeOperationalBattalion.DisplayName}  •  Strength {activeOperationalBattalion.Strength}%" +
                   (TacticalBattalion.IsUnderStrength(battalionStatus) ? "  •  UNDER STRENGTH — REDUCED AP" : string.Empty)
                 : string.Empty;
-            string standaloneBriefing = $"Objective {tacticalObjective.ObjectiveHex}  •  Turn limit {tacticalObjective.TurnLimit}{battalionLine}";
+            string deploymentLine = tacticalOperationalEngagement
+                ? $"\nEntry: USMC {tacticalFriendlyDeploymentEdge.ToString().ToUpperInvariant()} EDGE  •  PLA {tacticalEnemyDeploymentEdge.ToString().ToUpperInvariant()} EDGE  •  SEPARATED START"
+                : string.Empty;
+            string standaloneBriefing = $"Objective {tacticalObjective.ObjectiveHex}  •  Turn limit {tacticalObjective.TurnLimit}{battalionLine}{deploymentLine}";
             GUI.Label(new Rect(box.x + 30f, box.y + 64f, box.width - 60f, 130f), standaloneBriefing, bodyStyle);
         }
 

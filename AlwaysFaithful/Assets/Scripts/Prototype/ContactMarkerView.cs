@@ -234,6 +234,9 @@ namespace AlwaysFaithful.Prototype
             displayScale = Mathf.Max(.1f, scale);
         }
 
+        public bool PrimaryFiguresFaceDirection(Vector3 worldDirection, float maximumDegrees)
+            => miniatureView != null && miniatureView.PrimaryFiguresFaceDirection(worldDirection, maximumDegrees);
+
         private void Update()
         {
             transform.localScale = Vector3.Lerp(transform.localScale, settledScale * displayScale, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 9f));

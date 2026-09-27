@@ -38,7 +38,10 @@ namespace AlwaysFaithful.Prototype
             new Vector3(-.20f, 0f, .46f),
             new Vector3(.50f, 0f, .18f)
         };
-        private static readonly float[] ClusterYaw = { 168f, 194f, 152f, 208f };
+        // The imported One Star meshes point along their local +Z axis. Keep
+        // a little natural variation without reversing the figures relative
+        // to the platoon root's gameplay facing.
+        private static readonly float[] ClusterYaw = { -8f, 8f, -12f, 12f };
 
         // These role-specific teams use the same figures and pairings already
         // established by Down Range's One Star digital scenario. Weapons gets
@@ -75,13 +78,13 @@ namespace AlwaysFaithful.Prototype
         private const string ReconVehiclePath = "Models/OneStar/USMC ACV-30";
         private const float ReconVehicleScale = .19f;
         private static readonly Vector3 ReconVehicleOffset = new Vector3(-.28f, 0f, .32f);
-        private const float ReconVehicleYaw = 200f;
+        private const float ReconVehicleYaw = 0f;
         private const string ReconLeaderPath = "Models/OneStar/USMC Officer";
         private static readonly Vector3 ReconLeaderOffset = new Vector3(.46f, 0f, -.20f);
-        private const float ReconLeaderYaw = 255f;
+        private const float ReconLeaderYaw = -8f;
         private const string ReconObserverPath = "Models/OneStar/USMC EW Operator";
         private static readonly Vector3 ReconObserverOffset = new Vector3(.10f, 0f, -.54f);
-        private const float ReconObserverYaw = 300f;
+        private const float ReconObserverYaw = 8f;
         private const string UsmcFieldCamoPath = "Models/OneStar/USMC Field Camo Texture";
 
         // USMC has no ground vehicle in the source pack, only a drone. Every
@@ -187,7 +190,7 @@ namespace AlwaysFaithful.Prototype
             }
             else if (isSupportRole)
             {
-                SpawnFigure(prefab, clusterRoot.transform, Vector3.zero, 180f, SoloModelScale, texture, litShader);
+                SpawnFigure(prefab, clusterRoot.transform, Vector3.zero, 0f, SoloModelScale, texture, litShader);
                 badgeHeight = SoloModelScale * 1.05f;
             }
             else
@@ -210,7 +213,7 @@ namespace AlwaysFaithful.Prototype
                     bool isDrone = friendly;
                     SpawnFigure(vignettePrefab, clusterRoot.transform,
                         isDrone ? DroneVignetteOffset : VehicleVignetteOffset,
-                        isDrone ? 40f : 205f,
+                        isDrone ? 40f : 5f,
                         isDrone ? DroneVignetteScale : VehicleVignetteScale,
                         vignetteTexture, litShader);
                 }
@@ -234,6 +237,29 @@ namespace AlwaysFaithful.Prototype
             statusBadgeRenderer.sharedMaterial = new Material(overlay);
             Destroy(statusBadge.GetComponent<Collider>());
             statusBadge.SetActive(false);
+        }
+
+        public bool PrimaryFiguresFaceDirection(Vector3 worldDirection, float maximumDegrees)
+        {
+            worldDirection.y = 0f;
+            if (!loaded || worldDirection.sqrMagnitude < .0001f) return false;
+            worldDirection.Normalize();
+            Transform cluster = transform.Find("Miniature Cluster");
+            if (cluster == null) return false;
+            bool found = false;
+            foreach (Transform figure in cluster)
+            {
+                // The hovering drone is decorative and does not represent a
+                // maneuver element's facing. Every soldier, crew, and vehicle
+                // must remain aligned with the platoon's tactical front.
+                if (figure.name.Contains("Black Hornet")) continue;
+                Vector3 forward = figure.forward;
+                forward.y = 0f;
+                if (forward.sqrMagnitude < .0001f) continue;
+                found = true;
+                if (Vector3.Angle(forward, worldDirection) > maximumDegrees) return false;
+            }
+            return found;
         }
 
         private static float BuildReconVignette(Transform clusterRoot, Shader litShader, Shader triplanarShader)
